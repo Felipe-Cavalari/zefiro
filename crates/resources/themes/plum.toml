@@ -1,0 +1,29 @@
+# Plum — malva suave. Valores da ilha (Dynamic Island for Windows, MIT).
+name = "Plum"
+
+[colors]
+background     = "#16111C"
+text           = "#F1EAF6"
+text_secondary = "#AC9BB9"
+border         = "#281F33"   # "none" = sem contorno
+accent         = "auto"      # auto (capa da ilha) | system | "#RRGGBB"
+
+[material]
+opacity        = 0.96
+depth          = true
+shadow         = true
+backdrop       = "none"      # none | acrylic
+backdrop_fill  = 0.45
+
+[shape]
+style          = "pill"      # pill | w11
+radius_max     = 44
+panel_radius   = 24
+
+[font]
+family         = "Segoe UI Variable"
+scale          = 1.0
+
+[animation]
+spring         = "default"   # smooth | default | bouncy | snappy
+speed          = 1.0

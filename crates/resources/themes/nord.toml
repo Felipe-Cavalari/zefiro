@@ -1,0 +1,29 @@
+# Nord — paleta Nord. Valores da ilha (Dynamic Island for Windows, MIT).
+name = "Nord"
+
+[colors]
+background     = "#2E3440"
+text           = "#ECEFF4"
+text_secondary = "#A7B0C0"
+border         = "#3B4252"   # "none" = sem contorno
+accent         = "auto"      # auto (capa da ilha) | system | "#RRGGBB"
+
+[material]
+opacity        = 0.96
+depth          = true
+shadow         = true
+backdrop       = "none"      # none | acrylic
+backdrop_fill  = 0.45
+
+[shape]
+style          = "pill"      # pill | w11
+radius_max     = 44
+panel_radius   = 24
+
+[font]
+family         = "Segoe UI Variable"
+scale          = 1.0
+
+[animation]
+spring         = "default"   # smooth | default | bouncy | snappy
+speed          = 1.0
