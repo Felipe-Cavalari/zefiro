@@ -10,4 +10,6 @@
 
 ## Código portado
 
-_(Nenhum ainda. O Dynamic Island for Windows (MIT) entra aqui no S6.)_
+| Projeto | Licença | Copyright | Onde está | O que foi portado |
+|---|---|---|---|---|
+| [Dynamic Island for Windows](https://github.com/devcode90/Dynamic-Island-for-Windows) | MIT | `Copyright (c) 2026 devcode90` | [`island/`](island/) (licença original em [`island/LICENSE`](island/LICENSE)) | O mod inteiro (`dynamic-island-for-windows.wh.cpp`, v1.3.1, commit upstream `e6cfedb`), compilado como `zefiro-island.exe`. Alterações do Zefiro marcadas com `// ZEFIRO:`. |
