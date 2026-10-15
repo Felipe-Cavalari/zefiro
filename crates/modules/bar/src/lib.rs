@@ -2,4 +2,5 @@
 
 pub mod calendar;
 pub mod chips;
+pub mod controller;
 pub mod menu;

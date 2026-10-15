@@ -1,0 +1,119 @@
+//! Quem abre e quem fecha: um painel por vez.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanelKind { Menu, Calendar }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenPanel { pub monitor: usize, pub chip: String, pub kind: PanelKind }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PanelInput { ChipClick { monitor: usize, chip: String }, ClickOutside, Escape, FocusLost, ConfigChanged }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PanelEffect { Open(OpenPanel), Close { monitor: usize } }
+
+pub fn panel_kind_for(chip: &str) -> Option<PanelKind> {
+    match chip {
+        "zefiro" => Some(PanelKind::Menu),
+        "clock" => Some(PanelKind::Calendar),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct PanelController { open: Option<OpenPanel> }
+
+impl PanelController {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn open(&self) -> Option<&OpenPanel> {
+        self.open.as_ref()
+    }
+
+    pub fn handle(&mut self, input: PanelInput) -> Vec<PanelEffect> {
+        let mut fx = Vec::new();
+        match input {
+            PanelInput::ChipClick { monitor, chip } => {
+                let Some(kind) = panel_kind_for(&chip) else { return fx };
+                if let Some(current) = self.open.take() {
+                    fx.push(PanelEffect::Close { monitor: current.monitor });
+                    if current.monitor == monitor && current.chip == chip {
+                        return fx;
+                    }
+                }
+                let p = OpenPanel { monitor, chip, kind };
+                fx.push(PanelEffect::Open(p.clone()));
+                self.open = Some(p);
+            }
+            PanelInput::ClickOutside | PanelInput::Escape | PanelInput::FocusLost | PanelInput::ConfigChanged => {
+                if let Some(current) = self.open.take() {
+                    fx.push(PanelEffect::Close { monitor: current.monitor });
+                }
+            }
+        }
+        fx
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn click(monitor: usize, chip: &str) -> PanelInput {
+        PanelInput::ChipClick { monitor, chip: chip.into() }
+    }
+
+    #[test]
+    fn click_opens_and_second_click_closes() {
+        let mut c = PanelController::new();
+        assert_eq!(c.handle(click(0, "clock")), vec![PanelEffect::Open(OpenPanel { monitor: 0, chip: "clock".into(), kind: PanelKind::Calendar })]);
+        assert_eq!(c.handle(click(0, "clock")), vec![PanelEffect::Close { monitor: 0 }]);
+        assert!(c.open().is_none());
+    }
+
+    #[test]
+    fn opening_another_chip_closes_current_first() {
+        let mut c = PanelController::new();
+        c.handle(click(0, "clock"));
+        assert_eq!(
+            c.handle(click(1, "zefiro")),
+            vec![PanelEffect::Close { monitor: 0 }, PanelEffect::Open(OpenPanel { monitor: 1, chip: "zefiro".into(), kind: PanelKind::Menu })]
+        );
+        assert_eq!(c.open().unwrap().chip, "zefiro");
+    }
+
+    #[test]
+    fn same_chip_on_another_monitor_moves_the_panel() {
+        let mut c = PanelController::new();
+        c.handle(click(0, "clock"));
+        assert_eq!(c.handle(click(1, "clock")).len(), 2);
+        assert_eq!(c.open().unwrap().monitor, 1);
+    }
+
+    #[test]
+    fn outside_escape_focus_lost_close() {
+        for input in [PanelInput::ClickOutside, PanelInput::Escape, PanelInput::FocusLost] {
+            let mut c = PanelController::new();
+            c.handle(click(0, "zefiro"));
+            assert_eq!(c.handle(input), vec![PanelEffect::Close { monitor: 0 }]);
+        }
+    }
+
+    #[test]
+    fn config_change_closes_open_panel() {
+        let mut c = PanelController::new();
+        c.handle(click(0, "zefiro"));
+        assert_eq!(c.handle(PanelInput::ConfigChanged), vec![PanelEffect::Close { monitor: 0 }]);
+        assert!(c.handle(PanelInput::ConfigChanged).is_empty());
+    }
+
+    #[test]
+    fn unknown_chip_does_nothing() {
+        let mut c = PanelController::new();
+        assert!(c.handle(click(0, "desconhecido")).is_empty());
+        assert_eq!(panel_kind_for("zefiro"), Some(PanelKind::Menu));
+        assert_eq!(panel_kind_for("clock"), Some(PanelKind::Calendar));
+    }
+}
