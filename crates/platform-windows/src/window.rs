@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicIsize, Ordering};
 use windows::Win32::Foundation::*;
-use windows::Win32::Graphics::Gdi::ScreenToClient;
+use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, DeleteObject, RGN_OR, ScreenToClient, SetWindowRgn};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -42,6 +42,7 @@ pub enum WinEvent {
 const BAR: PCWSTR = w!("ZefiroBar");
 const PANEL: PCWSTR = w!("ZefiroPanel");
 const MESSAGE: PCWSTR = w!("ZefiroMessage");
+const INPUT: PCWSTR = w!("ZefiroInput");
 static TASKBAR_CREATED: OnceLock<u32> = OnceLock::new();
 static MESSAGE_HWND: AtomicIsize = AtomicIsize::new(0);
 
@@ -49,6 +50,19 @@ thread_local! {
     static EVENTS: RefCell<Vec<WinEvent>> = const { RefCell::new(Vec::new()) };
     static INTERACTIVE: RefCell<HashMap<isize, Vec<Rect>>> = RefCell::new(HashMap::new());
     static TRACKING: RefCell<HashMap<isize, bool>> = RefCell::new(HashMap::new());
+    /// Janela de desenho → janela de entrada que a acompanha.
+    static INPUTS: RefCell<HashMap<isize, isize>> = RefCell::new(HashMap::new());
+    /// Janela de entrada → janela de desenho dona dela.
+    static OWNERS: RefCell<HashMap<isize, isize>> = RefCell::new(HashMap::new());
+}
+
+/// A janela de entrada de `hwnd` (barra e painel têm uma; a de mensagens não).
+pub fn input_window(hwnd: HWND) -> Option<HWND> {
+    INPUTS.with(|m| m.borrow().get(&(hwnd.0 as isize)).map(|&h| HWND(h as *mut _)))
+}
+
+fn owner_of(hwnd: HWND) -> Option<isize> {
+    OWNERS.with(|m| m.borrow().get(&(hwnd.0 as isize)).copied())
 }
 
 fn push(e: WinEvent) {
@@ -59,7 +73,22 @@ pub fn take_events() -> Vec<WinEvent> {
     EVENTS.with(|q| std::mem::take(&mut *q.borrow_mut()))
 }
 
+/// Áreas clicáveis de `hwnd`, em coordenadas da janela. A janela de entrada passa a ter
+/// exatamente essa forma (região); fora dela o clique vai para o que estiver embaixo,
+/// inclusive janelas de outros processos.
 pub fn set_interactive(hwnd: HWND, rects: Vec<Rect>) {
+    if let Some(input) = input_window(hwnd) {
+        // SAFETY: regiões GDI locais; depois de SetWindowRgn a região pertence ao sistema.
+        unsafe {
+            let region = CreateRectRgn(0, 0, 0, 0);
+            for r in &rects {
+                let part = CreateRectRgn(r.x.round() as i32, r.y.round() as i32, (r.x + r.w).round() as i32, (r.y + r.h).round() as i32);
+                CombineRgn(Some(region), Some(region), Some(part), RGN_OR);
+                let _ = DeleteObject(part.into());
+            }
+            SetWindowRgn(input, Some(region), true);
+        }
+    }
     INTERACTIVE.with(|m| m.borrow_mut().insert(hwnd.0 as isize, rects));
 }
 
@@ -72,8 +101,12 @@ fn xy(lp: LPARAM) -> (f32, f32) {
 }
 
 extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    let h = hwnd.0 as isize;
+    // Eventos da janela de entrada são entregues em nome da janela de desenho.
+    let input = owner_of(hwnd);
+    let h = input.unwrap_or(hwnd.0 as isize);
     match msg {
+        // A região da janela de entrada já recorta o clique.
+        WM_NCHITTEST if input.is_some() => return LRESULT(HTCLIENT as isize),
         WM_NCHITTEST => {
             let (sx, sy) = xy(lp);
             let mut pt = POINT { x: sx as i32, y: sy as i32 };
@@ -132,36 +165,42 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
 }
 
 pub fn register_classes() -> Result<()> {
-    static DONE: OnceLock<()> = OnceLock::new();
-    if DONE.get().is_some() {
-        return Ok(());
-    }
-    // SAFETY: estruturas completas; nomes estáticos.
-    unsafe {
-        let instance = GetModuleHandleW(None)?;
-        for name in [BAR, PANEL, MESSAGE] {
-            let wc = WNDCLASSEXW {
-                cbSize: size_of::<WNDCLASSEXW>() as u32,
-                lpfnWndProc: Some(wndproc),
-                hInstance: instance.into(),
-                lpszClassName: name,
-                hCursor: LoadCursorW(None, IDC_ARROW)?,
-                ..Default::default()
-            };
-            if RegisterClassExW(&wc) == 0 {
-                return Err(windows::core::Error::from_win32());
+    // get_or_init bloqueia as outras threads enquanto a primeira registra (testes rodam em paralelo).
+    static DONE: OnceLock<std::result::Result<(), windows::core::HRESULT>> = OnceLock::new();
+    let done = DONE.get_or_init(|| {
+        // SAFETY: estruturas completas; nomes estáticos.
+        unsafe {
+            let instance = GetModuleHandleW(None).map_err(|e| e.code())?;
+            for name in [BAR, PANEL, MESSAGE, INPUT] {
+                let wc = WNDCLASSEXW {
+                    cbSize: size_of::<WNDCLASSEXW>() as u32,
+                    lpfnWndProc: Some(wndproc),
+                    hInstance: instance.into(),
+                    lpszClassName: name,
+                    hCursor: LoadCursorW(None, IDC_ARROW).map_err(|e| e.code())?,
+                    ..Default::default()
+                };
+                if RegisterClassExW(&wc) == 0 {
+                    return Err(windows::core::Error::from_win32().code());
+                }
             }
+            let _ = TASKBAR_CREATED.set(RegisterWindowMessageW(w!("TaskbarCreated")));
         }
-        let _ = TASKBAR_CREATED.set(RegisterWindowMessageW(w!("TaskbarCreated")));
-    }
-    let _ = DONE.set(());
-    Ok(())
+        Ok(())
+    });
+    done.map_err(windows::core::Error::from)
 }
 
+/// Barra e painel são duas janelas: a de desenho (composição, sombra) deixa todo clique
+/// passar (`WS_EX_LAYERED | WS_EX_TRANSPARENT`), e uma janela de entrada invisível, dona-
+/// dependente dela e com a forma dos retângulos clicáveis, recebe mouse e teclado. Um
+/// hit-test `HTTRANSPARENT` só repassa o clique para janelas da mesma thread: a margem da
+/// sombra engolia cliques nas janelas dos outros programas.
 pub fn create(kind: WindowKind, r: Rect) -> Result<HWND> {
+    let layered = WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE;
     let (class, ex, parent) = match kind {
-        WindowKind::Bar => (BAR, WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST | WS_EX_NOACTIVATE, None),
-        WindowKind::Panel => (PANEL, WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST, None),
+        WindowKind::Bar => (BAR, WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST | layered, None),
+        WindowKind::Panel => (PANEL, WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST | layered, None),
         WindowKind::Message => (MESSAGE, WINDOW_EX_STYLE(0), Some(HWND_MESSAGE)),
     };
     // SAFETY: classe registrada; parâmetros simples.
@@ -171,7 +210,19 @@ pub fn create(kind: WindowKind, r: Rect) -> Result<HWND> {
     };
     if kind == WindowKind::Message {
         MESSAGE_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
+        return Ok(hwnd);
     }
+    let input_ex = WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST | if kind == WindowKind::Bar { WS_EX_NOACTIVATE } else { WINDOW_EX_STYLE(0) };
+    // SAFETY: janela de desenho recém-criada; a de entrada pertence a ela (fica sempre acima).
+    let input = unsafe {
+        SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA)?;
+        let instance = GetModuleHandleW(None)?;
+        let input = CreateWindowExW(input_ex, INPUT, w!("Zefiro"), WS_POPUP, r.x as i32, r.y as i32, r.w as i32, r.h as i32, Some(hwnd), None, Some(instance.into()), None)?;
+        SetWindowRgn(input, Some(CreateRectRgn(0, 0, 0, 0)), false);
+        input
+    };
+    INPUTS.with(|m| m.borrow_mut().insert(hwnd.0 as isize, input.0 as isize));
+    OWNERS.with(|m| m.borrow_mut().insert(input.0 as isize, hwnd.0 as isize));
     Ok(hwnd)
 }
 
@@ -186,17 +237,23 @@ pub fn post_user(code: u32) {
 
 pub fn set_bounds(hwnd: HWND, r: Rect, show: bool) {
     let flags = SWP_NOACTIVATE | if show { SWP_SHOWWINDOW } else { SET_WINDOW_POS_FLAGS(0) };
-    // SAFETY: hwnd válido.
-    let _ = unsafe { SetWindowPos(hwnd, Some(HWND_TOPMOST), r.x as i32, r.y as i32, r.w as i32, r.h as i32, flags) };
+    // Desenho primeiro, entrada depois: a de entrada fica por cima, com os mesmos limites.
+    for h in std::iter::once(hwnd).chain(input_window(hwnd)) {
+        // SAFETY: hwnd válido.
+        let _ = unsafe { SetWindowPos(h, Some(HWND_TOPMOST), r.x as i32, r.y as i32, r.w as i32, r.h as i32, flags) };
+    }
 }
 
 pub fn hide(hwnd: HWND) {
-    // SAFETY: hwnd válido.
-    let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
+    for h in input_window(hwnd).into_iter().chain(std::iter::once(hwnd)) {
+        // SAFETY: hwnd válido.
+        let _ = unsafe { ShowWindow(h, SW_HIDE) };
+    }
 }
 
 /// Dá o foco do teclado (o clique que abriu o painel dá ao processo o direito de fazer isso).
 pub fn focus(hwnd: HWND) {
+    let hwnd = input_window(hwnd).unwrap_or(hwnd);
     // SAFETY: hwnd válido.
     unsafe {
         let _ = SetForegroundWindow(hwnd);
@@ -212,6 +269,7 @@ pub fn foreground() -> isize {
 
 /// Devolve o foco a `previous` se `ours` ainda estiver em primeiro plano (spec §6.1, item 5).
 pub fn restore_foreground(previous: isize, ours: HWND) {
+    let ours = input_window(ours).unwrap_or(ours);
     // SAFETY: handles podem ter morrido; IsWindow confere antes de usar.
     unsafe {
         let prev = HWND(previous as *mut _);
@@ -262,9 +320,14 @@ pub fn pump_pending() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use windows::Win32::Graphics::Gdi::GetWindowRgnBox;
+
+    /// A janela de mensagens é global: os testes que criam janelas rodam um de cada vez.
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn hit_test_is_transparent_outside_interactive_rects() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         register_classes().unwrap();
         create(WindowKind::Message, Rect::default()).unwrap();
         let hwnd = create(WindowKind::Bar, Rect::new(-4000.0, -4000.0, 200.0, 50.0)).unwrap();
@@ -281,5 +344,27 @@ mod tests {
             }
         }
         assert!(seen);
+    }
+
+    #[test]
+    fn input_goes_through_a_companion_shaped_to_the_interactive_rects() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        register_classes().unwrap();
+        create(WindowKind::Message, Rect::default()).unwrap();
+        let hwnd = create(WindowKind::Bar, Rect::new(-4000.0, -4000.0, 200.0, 50.0)).unwrap();
+        // SAFETY: lê o estilo da janela recém-criada.
+        let ex = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
+        assert_ne!(ex & WS_EX_TRANSPARENT.0, 0, "a janela de desenho deixa o clique passar");
+        assert_ne!(ex & WS_EX_LAYERED.0, 0);
+        let input = input_window(hwnd).expect("janela de entrada criada junto");
+        set_interactive(hwnd, vec![Rect::new(10.0, 10.0, 50.0, 20.0)]);
+        let mut r = RECT::default();
+        // SAFETY: lê a região da janela de entrada.
+        unsafe { GetWindowRgnBox(input, &mut r) };
+        assert_eq!((r.left, r.top, r.right, r.bottom), (10, 10, 60, 30));
+        // SAFETY: mensagem síncrona para a nossa janela.
+        unsafe { SendMessageW(input, WM_LBUTTONUP, Some(WPARAM(0)), Some(LPARAM((15 << 16) | 20))) };
+        let events = take_events();
+        assert!(events.contains(&WinEvent::LeftUp { hwnd: hwnd.0 as isize, x: 20.0, y: 15.0 }), "{events:?}");
     }
 }
