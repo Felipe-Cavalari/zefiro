@@ -12,4 +12,4 @@
 
 | Projeto | Licença | Copyright | Onde está | O que foi portado |
 |---|---|---|---|---|
-| [Dynamic Island for Windows](https://github.com/devcode90/Dynamic-Island-for-Windows) | MIT | `Copyright (c) 2026 devcode90` | [`island/`](island/) (licença original em [`island/LICENSE`](island/LICENSE)) | O mod inteiro (`dynamic-island-for-windows.wh.cpp`, v1.3.1, commit upstream `e6cfedb`), compilado como `zefiro-island.exe`. Alterações do Zefiro marcadas com `// ZEFIRO:`. Regras de tokens de material e de contraste do destaque, portadas para Rust em `crates/resources/src/tokens.rs`. |
+| [Dynamic Island for Windows](https://github.com/devcode90/Dynamic-Island-for-Windows) | MIT | `Copyright (c) 2026 devcode90` | [`island/`](island/) (licença original em [`island/LICENSE`](island/LICENSE)) | O mod inteiro (`dynamic-island-for-windows.wh.cpp`, v1.3.1, commit upstream `e6cfedb`), compilado como `zefiro-island.exe`. Alterações do Zefiro marcadas com `// ZEFIRO:`. Regras de tokens de material e de contraste do destaque, portadas para Rust em `crates/resources/src/tokens.rs`. Constantes e integrador das molas em `crates/ui/src/spring.rs`. |

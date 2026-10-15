@@ -771,3 +771,8 @@ dependencies = [
 [[package]]
 name = "zefiro-ui"
 version = "0.1.0"
+dependencies = [
+ "zefiro-core",
+ "zefiro-platform",
+ "zefiro-resources",
+]
