@@ -1,0 +1,7 @@
+/target/
+**/target/
+*.pdb
+*.dmp
+/scripts/out/
+/docs/adr/media/*.mp4
+/.superpowers/
