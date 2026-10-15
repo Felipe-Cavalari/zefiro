@@ -1,3 +1,5 @@
 //! Interface portável: molas, listas de desenho e layout.
 
+pub mod bar_layout;
+pub mod paint;
 pub mod spring;
