@@ -44,6 +44,23 @@ constexpr SettingDefault kZefiroDefaults[] = {
      L"Ajuste vertical fino da pílula dentro da barra, em DIP (positivo = para baixo)", L""},
 };
 
+// Opções do mod cujo padrão no Zefiro é diferente do upstream.
+struct ModDefaultOverride {
+    const wchar_t* name;  // "Grupo.Chave"
+    const wchar_t* value;
+};
+constexpr ModDefaultOverride kZefiroModOverrides[] = {
+    {L"Behavior.ExpandOnHover", L"false"},  // abre só com clique; tirar o mouse fecha
+};
+
+const wchar_t* ModDefaultValue(const SettingDefault& d) {
+    const std::wstring name = std::wstring(d.group) + L"." + d.key;
+    for (const auto& o : kZefiroModOverrides) {
+        if (_wcsicmp(o.name, name.c_str()) == 0) return o.value;
+    }
+    return d.value;
+}
+
 std::wstring Lower(std::wstring_view s) {
     std::wstring out(s);
     for (wchar_t& c : out) c = static_cast<wchar_t>(towlower(c));
@@ -155,6 +172,7 @@ std::map<std::wstring, std::wstring> g_settings;  // "grupo.chave" (minúsculas)
 
 std::mutex g_valuesMutex;
 bool g_valuesLoaded = false;
+FILETIME g_valuesWriteTime{};  // para reler se outro processo gravar (ex.: ProgressPercent)
 std::map<std::wstring, std::wstring> g_values;  // nome original -> valor
 
 std::mutex g_logMutex;
@@ -207,9 +225,23 @@ void EnsureLogFile(const SYSTEMTIME& st) {
     g_logDay = st.wDay;
 }
 
+// O mod lê alguns valores em laço (ProgressPercent a cada 0,25 s), escritos por
+// outro programa; no Windhawk cada leitura vai ao armazenamento. Aqui relemos o
+// arquivo só quando a data de gravação muda.
 void LoadValuesLocked() {
-    if (g_valuesLoaded) return;
+    // O laço de desenho lê valores a cada passada (60x/s parado); checar o
+    // arquivo a cada 250 ms basta para o ProgressPercent (lido a cada 250 ms).
+    static ULONGLONG s_nextCheck = 0;
+    const ULONGLONG nowTick = GetTickCount64();
+    if (g_valuesLoaded && nowTick < s_nextCheck) return;
+    s_nextCheck = nowTick + 250;
+    WIN32_FILE_ATTRIBUTE_DATA attr{};
+    const bool exists = GetFileAttributesExW(StatePath().c_str(), GetFileExInfoStandard, &attr) != FALSE;
+    if (g_valuesLoaded && (!exists || CompareFileTime(&attr.ftLastWriteTime, &g_valuesWriteTime) == 0)) return;
     g_valuesLoaded = true;
+    if (!exists) return;
+    g_valuesWriteTime = attr.ftLastWriteTime;
+    g_values.clear();
     std::wstring text;
     if (!ReadTextFile(StatePath(), &text)) return;
     // Os nomes dos valores diferenciam maiúsculas; ParseIni não, então
@@ -262,7 +294,7 @@ std::wstring DefaultIniText() {
         t += L"\r\n";
         t += d.key;
         t += L"=";
-        t += d.value;
+        t += ModDefaultValue(d);
         t += L"\r\n";
     };
     for (const auto& d : kZefiroDefaults) emit(d);
@@ -321,6 +353,10 @@ BOOL Wh_SetIntValue(PCWSTR valueName, int value) {
         Wh_Log(L"Falha ao gravar %s (erro %lu)", StatePath().c_str(), GetLastError());
         return FALSE;
     }
+    WIN32_FILE_ATTRIBUTE_DATA attr{};
+    if (GetFileAttributesExW(StatePath().c_str(), GetFileExInfoStandard, &attr)) {
+        g_valuesWriteTime = attr.ftLastWriteTime;
+    }
     return TRUE;
 }
 
@@ -378,7 +414,7 @@ bool LoadSettingsFile() {
     for (const auto& d : kZefiroDefaults) next[Lower(std::wstring(d.group) + L"." + d.key)] = d.value;
     for (const auto& d : kModDefaults) {
         std::wstring name = *d.group ? std::wstring(d.group) + L"." + d.key : std::wstring(d.key);
-        next[Lower(name)] = d.value;
+        next[Lower(name)] = ModDefaultValue(d);
     }
 
     std::wstring text;
