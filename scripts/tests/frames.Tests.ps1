@@ -21,3 +21,11 @@ Remove-Item $idleCsv
 if ($i.dropped -ne 1) { throw "com IdleGapMs=50 esperava 1 perdido (12.12), veio $($i.dropped)" }
 if ($i.idle_gaps -ne 1) { throw "esperava 1 pausa ociosa, veio $($i.idle_gaps)" }
 Write-Host 'frames.Tests (idle): OK'
+
+# O PresentMon 2.x escreve "NA" quando não há valor: essas linhas são ignoradas.
+$naCsv = Join-Path $env:TEMP "frames-na-$PID.csv"
+@('Application,ProcessID,MsBetweenDisplayChange','dwm.exe,1,NA','dwm.exe,1,6.06','dwm.exe,1,6.06') | Set-Content $naCsv
+$n = & $frames -Csv $naCsv -RefreshHz 165 | ConvertFrom-Json
+Remove-Item $naCsv
+if ($n.frames -ne 2) { throw "esperava 2 quadros válidos (NA ignorado), veio $($n.frames)" }
+Write-Host 'frames.Tests (NA): OK'

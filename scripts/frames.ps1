@@ -19,7 +19,11 @@ if (-not $rows -or -not ($rows[0].PSObject.Properties.Name -contains $Column)) {
     throw "Coluna '$Column' não encontrada em $Csv."
 }
 $values = $rows | Where-Object { $_.Application -ieq $Process } |
-    ForEach-Object { [double]::Parse($_.$Column, [Globalization.CultureInfo]::InvariantCulture) } |
+    ForEach-Object {
+        # O PresentMon 2.x escreve "NA" quando não há valor; essas linhas são ignoradas.
+        $v = 0.0
+        if ([double]::TryParse($_.$Column, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$v)) { $v }
+    } |
     Where-Object { $_ -gt 0 }
 $period = 1000.0 / $RefreshHz
 $idle = 0
