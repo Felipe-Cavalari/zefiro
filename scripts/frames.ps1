@@ -9,7 +9,9 @@ param(
     [Parameter(Mandatory)] [string] $Csv,
     [Parameter(Mandatory)] [double] $RefreshHz,
     [string] $Column = 'MsBetweenDisplayChange',
-    [string] $Process = 'dwm.exe'
+    [string] $Process = 'dwm.exe',
+    # Intervalos acima disto são pausas ociosas do DWM (nada mudou na tela), não quadros perdidos. 0 = desligado.
+    [double] $IdleGapMs = 0
 )
 $ErrorActionPreference = 'Stop'
 $rows = Import-Csv $Csv
@@ -20,6 +22,11 @@ $values = $rows | Where-Object { $_.Application -ieq $Process } |
     ForEach-Object { [double]::Parse($_.$Column, [Globalization.CultureInfo]::InvariantCulture) } |
     Where-Object { $_ -gt 0 }
 $period = 1000.0 / $RefreshHz
+$idle = 0
+if ($IdleGapMs -gt 0) {
+    $idle = @($values | Where-Object { $_ -gt $IdleGapMs }).Count
+    $values = @($values | Where-Object { $_ -le $IdleGapMs })
+}
 $sorted = $values | Sort-Object
 function Pct([double[]] $s, [double] $p) {
     if ($s.Count -eq 0) { return 0 }
@@ -32,4 +39,5 @@ $p50 = if ($sorted.Count % 2) { $sorted[[int][math]::Floor($sorted.Count / 2)] }
     dropped = @($values | Where-Object { $_ -gt 1.5 * $period }).Count
     p50_ms  = [math]::Round($p50, 3)
     p99_ms  = [math]::Round((Pct $sorted 0.99), 3)
+    idle_gaps = $idle
 } | ConvertTo-Json

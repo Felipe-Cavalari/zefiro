@@ -12,3 +12,12 @@ $failed = $false
 try { & $frames -Csv $csv -RefreshHz 144 -Column 'NaoExiste' | Out-Null } catch { $failed = $true }
 if (-not $failed) { throw 'coluna inexistente deveria falhar' }
 Write-Host 'frames.Tests: OK'
+
+# Pausas longas (DWM ocioso) não contam como quadro perdido quando -IdleGapMs é usado.
+$idleCsv = Join-Path $env:TEMP "frames-idle-$PID.csv"
+@('Application,ProcessID,MsBetweenDisplayChange','dwm.exe,1,6.06','dwm.exe,1,12.12','dwm.exe,1,250.0','dwm.exe,1,6.06') | Set-Content $idleCsv
+$i = & $frames -Csv $idleCsv -RefreshHz 165 -IdleGapMs 50 | ConvertFrom-Json
+Remove-Item $idleCsv
+if ($i.dropped -ne 1) { throw "com IdleGapMs=50 esperava 1 perdido (12.12), veio $($i.dropped)" }
+if ($i.idle_gaps -ne 1) { throw "esperava 1 pausa ociosa, veio $($i.idle_gaps)" }
+Write-Host 'frames.Tests (idle): OK'
