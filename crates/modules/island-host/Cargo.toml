@@ -7,3 +7,12 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+zefiro-core.workspace = true
+zefiro-platform.workspace = true
+zefiro-resources.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

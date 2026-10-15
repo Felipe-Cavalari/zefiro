@@ -870,6 +870,13 @@ dependencies = [
 [[package]]
 name = "zefiro-island-host"
 version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "tracing",
+ "zefiro-core",
+ "zefiro-platform",
+ "zefiro-resources",
+]
 
 [[package]]
 name = "zefiro-platform"
