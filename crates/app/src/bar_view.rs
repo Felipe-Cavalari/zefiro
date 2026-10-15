@@ -268,6 +268,6 @@ impl BarView {
         if self.appbar {
             appbar::unregister(self.hwnd);
         }
-        window::hide(self.hwnd);
+        window::destroy(self.hwnd);
     }
 }

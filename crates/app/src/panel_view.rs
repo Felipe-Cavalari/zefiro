@@ -5,7 +5,7 @@ use windows::UI::Composition::{CompositionDrawingSurface, ContainerVisual, Sprit
 use windows::Win32::Foundation::HWND;
 use windows::core::{Interface, Result};
 use windows_numerics::{Vector2, Vector3};
-use zefiro_platform::geometry::{Rect, Size};
+use zefiro_platform::geometry::Rect;
 use zefiro_platform_windows::monitors::Monitor;
 use zefiro_platform_windows::morph::MorphShape;
 use zefiro_platform_windows::window;
@@ -184,7 +184,7 @@ impl PanelView {
         window::input_window(self.hwnd).is_some_and(|h| h.0 as isize == window::foreground())
     }
 
-    pub fn size(&self) -> Size {
-        Size { w: self.panel.w, h: self.panel.h }
+    pub fn destroy(self) {
+        window::destroy(self.hwnd);
     }
 }

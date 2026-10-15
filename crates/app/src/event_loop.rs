@@ -279,6 +279,44 @@ impl Loop {
                     p.hide_if_closed();
                 }
             }
+            WinEvent::User { code: USER_ISLAND } => crate::island::restart(&self.ctx),
+            WinEvent::User { code } if code == USER_ISLAND + 100 => window::set_timer(TIMER_RAISE, 500),
+            WinEvent::Timer { id: TIMER_RAISE } => {
+                window::kill_timer(TIMER_RAISE);
+                island_zorder::raise_island();
+            }
+            WinEvent::User { code: USER_CONFIG_CHANGED } => {
+                let text = std::fs::read_to_string(&self.ctx.config_path).unwrap_or_default();
+                match zefiro_core::config::parse_config(&text) {
+                    Ok(new) if new != self.ctx.config => {
+                        let fx = self.controller.handle(PanelInput::ConfigChanged);
+                        self.run_effects(fx)?;
+                        let theme_changed = new.theme != self.ctx.config.theme;
+                        self.ctx.config = new;
+                        if theme_changed {
+                            let (id, dir) = (self.ctx.config.theme.clone(), self.ctx.themes_dir.clone());
+                            self.ctx.theme.reload(&id, &dir);
+                            self.ctx.text.set_family(&self.ctx.theme.theme.font.family);
+                        }
+                        self.apply_bars(true)?;
+                        crate::island::sync(&self.ctx);
+                        self.schedule_clock();
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(line = ?e.line, "config.toml inválido: {}; mantendo a configuração anterior", e.message),
+                }
+            }
+            WinEvent::User { code: USER_THEMES_CHANGED } => {
+                let (id, dir) = (self.ctx.config.theme.clone(), self.ctx.themes_dir.clone());
+                for e in self.ctx.theme.reload(&id, &dir) {
+                    tracing::warn!(source = %e.source, line = ?e.line, "tema com erro: {}; mantendo a versão anterior", e.message);
+                }
+                self.ctx.text.set_family(&self.ctx.theme.theme.font.family);
+                self.apply_bars(true)?;
+                crate::island::sync(&self.ctx);
+                self.menu = None;
+                self.redraw_open_panel()?;
+            }
             _ => return crate::robustness::handle(self, e),
         }
         Ok(true)

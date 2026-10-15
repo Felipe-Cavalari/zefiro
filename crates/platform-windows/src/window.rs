@@ -251,6 +251,21 @@ pub fn hide(hwnd: HWND) {
     }
 }
 
+/// Destrói a janela e a de entrada dela (barras e painéis recriados quando os monitores mudam).
+pub fn destroy(hwnd: HWND) {
+    let h = hwnd.0 as isize;
+    if let Some(input) = INPUTS.with(|m| m.borrow_mut().remove(&h)) {
+        OWNERS.with(|m| m.borrow_mut().remove(&input));
+        TRACKING.with(|m| m.borrow_mut().remove(&input));
+        // SAFETY: janela de entrada criada por nós nesta thread.
+        let _ = unsafe { DestroyWindow(HWND(input as *mut _)) };
+    }
+    INTERACTIVE.with(|m| m.borrow_mut().remove(&h));
+    TRACKING.with(|m| m.borrow_mut().remove(&h));
+    // SAFETY: janela criada por nós nesta thread.
+    let _ = unsafe { DestroyWindow(hwnd) };
+}
+
 /// Dá o foco do teclado (o clique que abriu o painel dá ao processo o direito de fazer isso).
 pub fn focus(hwnd: HWND) {
     let hwnd = input_window(hwnd).unwrap_or(hwnd);
@@ -366,5 +381,13 @@ mod tests {
         unsafe { SendMessageW(input, WM_LBUTTONUP, Some(WPARAM(0)), Some(LPARAM((15 << 16) | 20))) };
         let events = take_events();
         assert!(events.contains(&WinEvent::LeftUp { hwnd: hwnd.0 as isize, x: 20.0, y: 15.0 }), "{events:?}");
+
+        destroy(hwnd);
+        assert!(input_window(hwnd).is_none());
+        // SAFETY: só consulta se os handles ainda existem.
+        unsafe {
+            assert!(!IsWindow(Some(hwnd)).as_bool());
+            assert!(!IsWindow(Some(input)).as_bool());
+        }
     }
 }

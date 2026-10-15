@@ -57,5 +57,17 @@ fn run(started: Instant) -> windows::core::Result<()> {
     for b in &mut bars {
         b.register_appbar(&ctx);
     }
+    let cfg_path = ctx.config_path.clone();
+    let _watcher = zefiro_core::watch::watch_paths(&[config_dir.clone(), ctx.themes_dir.clone()], std::time::Duration::from_millis(150), move |paths| {
+        for p in paths {
+            if p == cfg_path {
+                window::post_user(event_loop::USER_CONFIG_CHANGED);
+            } else if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("toml")) && p.parent().is_some_and(|d| d.ends_with("themes")) {
+                window::post_user(event_loop::USER_THEMES_CHANGED);
+            }
+        }
+    })
+    .map_err(|e| tracing::warn!("observador de arquivos indisponível: {e}"))
+    .ok();
     event_loop::run(ctx, bars)
 }
