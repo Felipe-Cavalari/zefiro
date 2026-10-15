@@ -130,25 +130,31 @@ Os caminhos de código foram exercitados assim: `TaskbarCreated` e 3× `WM_DISPL
 - A janela da ilha só fica click-through quando está Idle (`SetClickThrough`, `island/dynamic-island-for-windows.wh.cpp:23121`).
 - Mostrando mídia, a margem dela, por volta de y 44–100 no centro, engole cliques nas janelas de baixo.
 
-### Task 25: não começada
+### Task 25 (medições, ADR-0007, docs): concluída, exceto a validação do usuário
 
-Siga o brief. A Task 25 inclui:
+O commit é `f0b8091`.
 
-- as medições: `perf.ps1`, primeiro quadro, e `frames.ps1` com `ZEFIRO_CYCLES`;
-- o ADR-0007, que deve registrar estes ajustes de API:
-  - `USER_DEFAULT`;
-  - `CreateBitmap`;
-  - a sombra concêntrica no lugar de `DropShadow`;
-  - `Send` em `on_settled`;
-  - `WM_MOUSELEAVE` local;
-  - a feature `Win32_Security`;
-  - as janelas de entrada recortadas por região;
-  - `period = 1/ω`;
-  - o backup dos arquivos do Codex;
-- as atualizações de PLANNING e README;
-- a validação visual com o usuário: as 4 combinações e os três testes reais da Task 24.
+Medido:
 
-### Revisão final
+| Métrica | Valor |
+| --- | --- |
+| Clique → quadro (p50) | 2,1 ms |
+| Primeiro quadro (mediana) | 51 ms |
+| Memória privada em repouso | 15,0 MB (limite 15) |
+| CPU em repouso | 0,0 % |
+| Memória privada com painéis abrindo | 16,1 MB |
+
+O número de quadros perdidos não foi medido, porque o PresentMon precisa de elevação. O comando pronto está no ADR-0007.
+
+O modo de medição está no código: `ZEFIRO_CYCLES=N` abre e fecha o calendário N vezes e sai.
+
+**Pendente com o usuário:**
+
+- A galeria `validacao-fase-1a.png`, na raiz do worktree e não versionada, mostra as 4 combinações × Obsidian e Porcelain, mais o menu e o calendário.
+- O que o usuário aprovar ou pedir vai para a seção "Validação com o usuário" do ADR-0007.
+- Também ficam com ele os testes reais de Explorer reiniciado, Win+P e efeitos de animação desligados.
+
+### Revisão final (em andamento: um revisor independente foi disparado no commit `f0b8091`)
 
 Depois da Task 25, faça uma revisão da branch inteira (`git merge-base main HEAD`..HEAD) contra a spec. Confira com atenção cada item da seção **Review Focus** do plano.
 
@@ -173,4 +179,4 @@ Os scripts usados no fluxo (superpowers) são bash e rodam no Git Bash.
 
 `task-start` imprime o caminho do brief e o BASE da tarefa. `task-done` só grava a linha `complete` no ledger se o comando de teste passar. Se preferir não usar os scripts, acrescente as linhas no ledger à mão, no mesmo formato.
 
-A próxima é a Task 25, com BASE `1b0052d`. Rode `task-start` para obter o brief.
+As 25 tarefas estão no ledger como `complete`. Falta a passada de correção da revisão final: o pacote é `.superpowers/sdd/2026-10-15-fase-1a-barra/review-175a20f..f0b8091.diff`, cobrindo do commit da spec até o HEAD.
