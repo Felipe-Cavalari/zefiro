@@ -54,12 +54,7 @@ pub fn install_panic_hook(dir: PathBuf, version: &'static str) {
         let backtrace = std::backtrace::Backtrace::force_capture();
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
         let name = format!("crash-{}-{:03}-{}.txt", now.as_secs(), now.subsec_millis(), std::process::id());
-        let body = format!("zefiro {version}
-{info}
-
-backtrace:
-{backtrace}
-");
+        let body = format!("zefiro {version}\n{info}\n\nbacktrace:\n{backtrace}\n");
         let _ = std::fs::create_dir_all(&dir);
         let _ = std::fs::write(dir.join(name), body);
         tracing::error!(panic = %info, "panic");
