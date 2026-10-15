@@ -44,10 +44,12 @@ impl SpringParams {
         Self { stiffness: self.stiffness * v * v, damping: self.damping * v }
     }
 
-    /// Modelo do compositor: período (2π/ω) e razão de amortecimento (c / 2ω), com ω = √k.
+    /// Modelo do compositor: período e razão de amortecimento (c / 2ω), com ω = √k. O
+    /// `Period` do Windows.UI.Composition age como 1/ω, não 2π/ω: medido na tela, 2π/ω deixava
+    /// as molas 4–5× mais lentas que as da ilha.
     pub fn compositor(self) -> CompositorSpring {
         let omega = self.stiffness.sqrt();
-        CompositorSpring { period_s: 2.0 * std::f32::consts::PI / omega, damping_ratio: self.damping / (2.0 * omega) }
+        CompositorSpring { period_s: 1.0 / omega, damping_ratio: self.damping / (2.0 * omega) }
     }
 }
 
@@ -122,8 +124,10 @@ mod tests {
 
     #[test]
     fn compositor_conversion() {
+        // O Period do compositor se comporta como 1/ω (medido na tela: com 2π/ω as molas
+        // ficavam 4–5× mais lentas que as da ilha).
         let c = SpringParams::SETTLE.compositor();
-        assert!((c.period_s - 0.37549).abs() < 1e-3, "{c:?}");
+        assert!((c.period_s - 0.059761).abs() < 1e-4, "{c:?}");
         assert!((c.damping_ratio - 0.71714).abs() < 1e-3, "{c:?}");
     }
 
