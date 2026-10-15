@@ -103,9 +103,36 @@ O Codex pode recriar algo equivalente.
 
 **Bug conhecido (minor):** fechar, reabrir e fechar de novo em menos de ~0,3 s faz o primeiro `USER_PANEL_SETTLED` esconder o painel no meio da segunda animação. É raro; um contador de geração resolveria.
 
-### Tasks 24 e 25: não começadas
+### Task 24 (ilha, recarga ao vivo, robustez): concluída
 
-Siga os briefs. A Task 25 inclui:
+O commit é `1b0052d`.
+
+Verificado na tela:
+
+- **Ilha:** fica no centro e segue altura, formato e tema; muda junto com o tema escolhido no menu ou no `config.toml`.
+- **Política de reinício:** ao matar a ilha 4 vezes, ela reinicia 3 vezes e depois desiste.
+- **Reiniciar a ilha:** a opção do menu traz a ilha de volta.
+- **Exe ausente:** sem o `zefiro-island.exe`, a barra abre normalmente e o log avisa.
+- **Tema do usuário:** com erro, a barra mantém a versão anterior e o log mostra a linha; apagar o arquivo volta ao tema embutido.
+- **Trocas rápidas de painel e formato:** nada fica preso aberto nem invisível.
+- **Clippy:** passa no workspace inteiro.
+
+**Não executado de verdade (fica para a validação do usuário na Task 25):**
+
+- reiniciar o Explorer (havia 3 janelas do Explorador abertas);
+- Win+P;
+- desligar "Efeitos de animação".
+
+Os caminhos de código foram exercitados assim: `TaskbarCreated` e 3× `WM_DISPLAYCHANGE` postados na barra produziram uma única recriação, sem vazar janelas.
+
+**Achado para a revisão final (ilha/upstream):**
+
+- A janela da ilha só fica click-through quando está Idle (`SetClickThrough`, `island/dynamic-island-for-windows.wh.cpp:23121`).
+- Mostrando mídia, a margem dela, por volta de y 44–100 no centro, engole cliques nas janelas de baixo.
+
+### Task 25: não começada
+
+Siga o brief. A Task 25 inclui:
 
 - as medições: `perf.ps1`, primeiro quadro, e `frames.ps1` com `ZEFIRO_CYCLES`;
 - o ADR-0007, que deve registrar estes ajustes de API:
@@ -115,9 +142,11 @@ Siga os briefs. A Task 25 inclui:
   - `Send` em `on_settled`;
   - `WM_MOUSELEAVE` local;
   - a feature `Win32_Security`;
+  - as janelas de entrada recortadas por região;
+  - `period = 1/ω`;
   - o backup dos arquivos do Codex;
 - as atualizações de PLANNING e README;
-- a validação visual das 4 combinações com o usuário.
+- a validação visual com o usuário: as 4 combinações e os três testes reais da Task 24.
 
 ### Revisão final
 
@@ -144,4 +173,4 @@ Os scripts usados no fluxo (superpowers) são bash e rodam no Git Bash.
 
 `task-start` imprime o caminho do brief e o BASE da tarefa. `task-done` só grava a linha `complete` no ledger se o comando de teste passar. Se preferir não usar os scripts, acrescente as linhas no ledger à mão, no mesmo formato.
 
-A próxima é a Task 24, com BASE `cbd533c`. Rode `task-start` para obter o brief.
+A próxima é a Task 25, com BASE `1b0052d`. Rode `task-start` para obter o brief.
