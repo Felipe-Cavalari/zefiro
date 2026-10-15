@@ -33,6 +33,8 @@ Requisitos: VS 2022 Build Tools com "Desenvolvimento para desktop com C++" e o W
 
 Padrões do Zefiro diferentes do mod: `Behavior.ExpandOnHover=false` (a ilha abre só com clique; tirar o mouse fecha). A lista fica em `kZefiroModOverrides`, no `wh_shim.cpp`.
 
+**Teclado:** depois de abrir a ilha com um clique, **↑ / ↓** trocam de tela (↑ = anterior, como a roda para cima). O clique passa o foco do teclado para a ilha, como a Pesquisa rápida já fazia. Ao recolher (o mouse saiu), o foco volta para a janela de antes; se você clicar em outra janela antes disso, nada muda. Implementado em `ZefiroBeginTabKeys` / `ZefiroEndTabKeys` / `ZefiroHandleTabKey`, no próprio arquivo do mod (`// ZEFIRO:`), porque reaproveita o `ForceForeground` dele.
+
 Seção `[Zefiro]`:
 
 | Chave | Padrão | O que faz |

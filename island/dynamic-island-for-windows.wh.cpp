@@ -10091,10 +10091,24 @@ void ForceForeground(HWND hwnd) {
     }
 }
 
+#ifdef ZEFIRO_ISLAND
+// ZEFIRO: estado da navegação pelas setas (ZefiroBeginTabKeys, mais abaixo).
+struct ZefiroTabKeys {
+    bool active = false;
+    HWND prevForeground = nullptr;
+};
+ZefiroTabKeys g_zefiroTabKeys;  // só a thread de desenho mexe
+#endif
+
 // The island is WS_EX_NOACTIVATE so it never steals focus. While the search box is
 // open it has to be able to receive keys, so the flag is dropped for the session.
 void BeginLookupSession(HWND hwnd) {
     HWND previous = GetForegroundWindow();
+#ifdef ZEFIRO_ISLAND
+    // ZEFIRO: se a ilha já tinha o foco pelas setas, devolve à janela de antes.
+    if (previous == hwnd && g_zefiroTabKeys.active) previous = g_zefiroTabKeys.prevForeground;
+    g_zefiroTabKeys = ZefiroTabKeys{};
+#endif
     g_lookupUi.prevForeground = (previous && previous != hwnd) ? previous : nullptr;
 
     const LONG_PTR ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
@@ -10119,6 +10133,44 @@ void EndLookupSession(HWND hwnd) {
         SetForegroundWindow(previous);
     }
 }
+
+#ifdef ZEFIRO_ISLAND
+// ZEFIRO: navegação pelo teclado depois do clique. Clicar para expandir dá o foco
+// à ilha (como a Pesquisa rápida faz) e ↑ / ↓ trocam de tela. Ao recolher (o
+// mouse saiu), o foco volta à janela de antes; se o usuário clicar em outra
+// janela antes disso, a sessão só termina.
+void ZefiroBeginTabKeys(HWND hwnd) {
+    if (g_lookupUi.open || g_zefiroTabKeys.active) return;
+    HWND previous = GetForegroundWindow();
+    g_zefiroTabKeys.prevForeground = (previous && previous != hwnd) ? previous : nullptr;
+    g_zefiroTabKeys.active = true;
+    const LONG_PTR ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    if (ex & WS_EX_NOACTIVATE) {
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex & ~static_cast<LONG_PTR>(WS_EX_NOACTIVATE));
+    }
+    ForceForeground(hwnd);
+}
+
+void ZefiroEndTabKeys(HWND hwnd, bool restoreFocus) {
+    if (!g_zefiroTabKeys.active) return;
+    HWND previous = g_zefiroTabKeys.prevForeground;
+    g_zefiroTabKeys = ZefiroTabKeys{};  // inativa antes da troca de foco, que reentra via WM_KILLFOCUS
+    if (g_lookupUi.open) return;        // a Pesquisa rápida assumiu o foco e cuida dele
+    const LONG_PTR ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_NOACTIVATE);
+    if (restoreFocus && GetForegroundWindow() == hwnd && previous && IsWindow(previous) &&
+        IsWindowVisible(previous)) {
+        SetForegroundWindow(previous);
+    }
+}
+
+bool ZefiroHandleTabKey(WPARAM vk) {
+    if (!g_zefiroTabKeys.active || g_lookupUi.open) return false;
+    if (vk != VK_UP && vk != VK_DOWN) return false;
+    StepIdleTab(vk == VK_UP ? -1 : 1);  // ↑ = tela anterior, como a roda para cima
+    return true;
+}
+#endif
 
 void CloseLookupPanel(HWND hwnd) {
     {
@@ -21731,6 +21783,9 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         }
 
         case WM_KEYDOWN:
+#ifdef ZEFIRO_ISLAND
+            if (ZefiroHandleTabKey(wParam)) return 0;  // ZEFIRO: ↑ / ↓ depois do clique
+#endif
             if (HandleLookupKeyDown(hwnd, wParam)) return 0;
             break;
 
@@ -21743,6 +21798,9 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (g_lookupUi.open) {
                 CloseLookupPanel(hwnd);
             }
+#ifdef ZEFIRO_ISLAND
+            ZefiroEndTabKeys(hwnd, false);  // ZEFIRO: o foco foi para outra janela
+#endif
             return 0;
 
         case WM_APP_LAYOUT_CHANGED:
@@ -22088,6 +22146,9 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 if (!gameMetricsPresent && !g_settings.expandOnHover && !expanded) {
                     g_clickExpanded = true;
                     g_layoutDirty = true;
+#ifdef ZEFIRO_ISLAND
+                    ZefiroBeginTabKeys(hwnd);  // ZEFIRO: ↑ / ↓ trocam de tela enquanto expandida
+#endif
                     return 0; // consumed click to expand
                 }
 
@@ -22734,6 +22795,9 @@ DWORD WINAPI RenderThreadProc(void*) {
         if (!hover && g_clickExpanded.load()) {
             g_clickExpanded = false;
             needsRender = true;
+#ifdef ZEFIRO_ISLAND
+            ZefiroEndTabKeys(hwnd, true);  // ZEFIRO: recolheu; devolve o foco
+#endif
         }
         if (!hover && g_hoveredMediaButton.load() != -1) {
             g_hoveredMediaButton = -1;
