@@ -834,6 +834,19 @@ dependencies = [
 [[package]]
 name = "zefiro-app"
 version = "0.1.0"
+dependencies = [
+ "tracing",
+ "windows",
+ "windows-numerics",
+ "zefiro-bar",
+ "zefiro-core",
+ "zefiro-integration-clock",
+ "zefiro-island-host",
+ "zefiro-platform",
+ "zefiro-platform-windows",
+ "zefiro-resources",
+ "zefiro-ui",
+]
 
 [[package]]
 name = "zefiro-bar"
