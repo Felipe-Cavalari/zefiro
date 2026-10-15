@@ -12572,9 +12572,23 @@ class Renderer {
         D2D1_MATRIX_3X2_F oldTransform;
         target_->GetTransform(&oldTransform);
         D2D1_POINT_2F pillCenter = D2D1::Point2F((rect.left + rect.right) * 0.5f, (rect.top + rect.bottom) * 0.5f);
-        target_->SetTransform(D2D1::Matrix3x2F::Scale(settings.sizeScale, settings.sizeScale, pillCenter) * oldTransform);
+        float contentScale = settings.sizeScale;
+#ifdef ZEFIRO_ISLAND
+        // ZEFIRO: o conteúdo vai da escala recolhida à expandida junto com a altura da pílula.
+        if (activity.kind == IslandKind::Media || activity.kind == IslandKind::Idle) {
+            const float design = activity.kind == IslandKind::Media ? 44.0f : IdleStripLayout::kHeight;
+            const float collapsedScale = zefiro::CollapsedScale(design, settings.sizeScale);
+            const float collapsedH = design * collapsedScale;
+            const float expandedH = MediaLayout::kExpandedHeight * settings.sizeScale;
+            const float t = expandedH > collapsedH
+                                ? Clamp(((rect.bottom - rect.top) - collapsedH) / (expandedH - collapsedH), 0.0f, 1.0f)
+                                : 1.0f;
+            contentScale = collapsedScale + (settings.sizeScale - collapsedScale) * t;
+        }
+#endif
+        target_->SetTransform(D2D1::Matrix3x2F::Scale(contentScale, contentScale, pillCenter) * oldTransform);
 
-        float invScale = 1.0f / settings.sizeScale;
+        float invScale = 1.0f / contentScale;
         float unW = (rect.right - rect.left) * invScale;
         float unH = (rect.bottom - rect.top) * invScale;
         D2D1_RECT_F unscaledRect = D2D1::RectF(pillCenter.x - unW * 0.5f, pillCenter.y - unH * 0.5f, pillCenter.x + unW * 0.5f, pillCenter.y + unH * 0.5f);
@@ -20578,6 +20592,13 @@ class Renderer {
     uint64_t shapeClock_ = 0;
 };
 
+#ifdef ZEFIRO_ISLAND
+// ZEFIRO: escala da pílula recolhida ([Zefiro] PillHeight); o resto continua com SizeScale.
+#define ZEFIRO_COLLAPSED_SCALE(design, sizeScale) zefiro::CollapsedScale((design), (sizeScale))
+#else
+#define ZEFIRO_COLLAPSED_SCALE(design, sizeScale) (sizeScale)
+#endif
+
 Activity ActivityForKind(IslandKind kind, const Settings& settings, const SharedState& state) {
     Activity activity;
     activity.kind = kind;
@@ -20652,8 +20673,12 @@ Activity ActivityForKind(IslandKind kind, const Settings& settings, const Shared
             break;
     }
 
-    activity.width *= settings.sizeScale;
-    activity.height *= settings.sizeScale;
+    // ZEFIRO: pílulas recolhidas de mídia e ociosa usam a escala recolhida.
+    const float scale = (kind == IslandKind::Media) ? ZEFIRO_COLLAPSED_SCALE(44.0f, settings.sizeScale)
+                      : (kind == IslandKind::Idle)  ? ZEFIRO_COLLAPSED_SCALE(IdleStripLayout::kHeight, settings.sizeScale)
+                                                    : settings.sizeScale;
+    activity.width *= scale;
+    activity.height *= scale;
     return activity;
 }
 
@@ -22938,7 +22963,7 @@ DWORD WINAPI RenderThreadProc(void*) {
                 // The > 0 guard preserves ActivityForKind's fully-hidden case.
                 primary.width =
                     renderer.MeasureIdleStrip(snapshot, g_settings, now).totalWidth *
-                    g_settings.sizeScale;
+                    ZEFIRO_COLLAPSED_SCALE(IdleStripLayout::kHeight, g_settings.sizeScale);  // ZEFIRO:
             }
         }
         if (!isFullscreen && primary.kind == IslandKind::Idle &&
@@ -22970,9 +22995,9 @@ DWORD WINAPI RenderThreadProc(void*) {
                     : 0.0f;
                 if (CollapsedLyricsActive(snapshot, g_settings)) {
                     // Collapsed but carrying lyrics: wider pill, same height.
-                    primary.width = (kCollapsedLyricsWidth + clockSection) * g_settings.sizeScale;
+                    primary.width = (kCollapsedLyricsWidth + clockSection) * ZEFIRO_COLLAPSED_SCALE(44.0f, g_settings.sizeScale);  // ZEFIRO:
                 } else if (g_settings.mediaPillClock) {
-                    primary.width = (MediaPillLayout::kBaseWidth + clockSection) * g_settings.sizeScale;
+                    primary.width = (MediaPillLayout::kBaseWidth + clockSection) * ZEFIRO_COLLAPSED_SCALE(44.0f, g_settings.sizeScale);  // ZEFIRO:
                 }
             }
         }

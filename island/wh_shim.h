@@ -87,6 +87,11 @@ bool BarAnchorRect(HMONITOR monitor, const MONITORINFO& info, float sizeScale, b
 // criado; mudar exige reiniciar a ilha.
 bool UseSoftwareRenderer();
 
+// Escala da pílula recolhida. Com [Zefiro] PillHeight > 0, a pílula de
+// `designHeight` px de desenho (44 na mídia, 36 na ociosa) passa a ter
+// PillHeight DIP; senão devolve `sizeScale` (comportamento do mod).
+float CollapsedScale(float designHeight, float sizeScale);
+
 // Chamado pelo mod a cada quadro apresentado (marcado com // ZEFIRO:). No
 // primeiro, registra no log o tempo desde a criação do processo.
 void NoteFramePresented();

@@ -42,6 +42,7 @@ Seção `[Zefiro]`:
 | `Anchor` | `bar` | `bar`: centro do topo do monitor (de `TargetMonitor`), com a pílula recolhida centrada na faixa da barra; usa o monitor inteiro, não a área de trabalho, para não descer quando a AppBar do Zefiro reservar o topo. `mod`: posicionamento original (`Position`, `OffsetX/Y`…). |
 | `BarHeight` | `32` | Altura da barra em DIP. |
 | `PillOffsetY` | `0` | Ajuste fino vertical em DIP. |
+| `PillHeight` | `0` | Altura da pílula recolhida em DIP. A barra grava 44/28 (faixa) ou 36/24 (pílulas). `0` = tamanho do mod. O painel expandido não muda. |
 | `Renderer` | `software` | `software`: Direct2D sem dispositivo na GPU (≈ 40 MB de memória privada a menos). `hardware`: o padrão do mod. |
 
 ## Saída de som por fonte
@@ -60,4 +61,4 @@ Detalhes e o que foi testado: [ADR-0006, Saída de som por fonte](../docs/adr/00
 git diff <commit-da-importação> -- island/dynamic-island-for-windows.wh.cpp   # só as mudanças do Zefiro
 ```
 
-Para atualizar: substituir o arquivo pelo novo do upstream, reaplicar os blocos `// ZEFIRO:` (são 5: primeiro quadro, desenho por software, ancoragem em `GetAnchorWorkRect` e os dois do submenu "Saída de som" em `ShowContextMenu`), rodar `build.ps1` e atualizar a versão/commit aqui, no `zefiro_island_main.cpp` e no `THIRD_PARTY_NOTICES.md`.
+Para atualizar: substituir o arquivo pelo novo do upstream, reaplicar os blocos `// ZEFIRO:` (primeiro quadro, desenho por software, ancoragem em `GetAnchorWorkRect`, os dois do submenu "Saída de som" em `ShowContextMenu`, as setas depois do clique (`ZefiroTabKeys` e quatro ganchos) e a pílula recolhida com `PillHeight` (`ActivityForKind`, as três larguras recolhidas no laço de desenho e `DrawPill`); procure por `ZEFIRO`), rodar `build.ps1` e atualizar a versão/commit aqui, no `zefiro_island_main.cpp` e no `THIRD_PARTY_NOTICES.md`.

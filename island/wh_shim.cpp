@@ -42,6 +42,8 @@ constexpr SettingDefault kZefiroDefaults[] = {
      L"software | hardware"},
     {L"Zefiro", L"PillOffsetY", L"0",
      L"Ajuste vertical fino da pílula dentro da barra, em DIP (positivo = para baixo)", L""},
+    {L"Zefiro", L"PillHeight", L"0",
+     L"Altura da pílula recolhida em DIP (0 = a do mod). Gravada pela barra do Zefiro conforme a altura e o formato", L""},
 };
 
 // Opções do mod cujo padrão no Zefiro é diferente do upstream.
@@ -173,6 +175,7 @@ std::map<std::wstring, std::wstring> g_settings;  // "grupo.chave" (minúsculas)
 std::mutex g_valuesMutex;
 bool g_valuesLoaded = false;
 FILETIME g_valuesWriteTime{};  // para reler se outro processo gravar (ex.: ProgressPercent)
+ULONGLONG g_valuesNextCheck = 0;  // próxima checagem do arquivo; 0 força reler
 std::map<std::wstring, std::wstring> g_values;  // nome original -> valor
 
 std::mutex g_logMutex;
@@ -231,10 +234,9 @@ void EnsureLogFile(const SYSTEMTIME& st) {
 void LoadValuesLocked() {
     // O laço de desenho lê valores a cada passada (60x/s parado); checar o
     // arquivo a cada 250 ms basta para o ProgressPercent (lido a cada 250 ms).
-    static ULONGLONG s_nextCheck = 0;
     const ULONGLONG nowTick = GetTickCount64();
-    if (g_valuesLoaded && nowTick < s_nextCheck) return;
-    s_nextCheck = nowTick + 250;
+    if (g_valuesLoaded && nowTick < g_valuesNextCheck) return;
+    g_valuesNextCheck = nowTick + 250;
     WIN32_FILE_ATTRIBUTE_DATA attr{};
     const bool exists = GetFileAttributesExW(StatePath().c_str(), GetFileExInfoStandard, &attr) != FALSE;
     if (g_valuesLoaded && (!exists || CompareFileTime(&attr.ftLastWriteTime, &g_valuesWriteTime) == 0)) return;
@@ -442,6 +444,11 @@ bool LoadSettingsFile() {
         std::lock_guard lock(g_settingsMutex);
         g_settings = std::move(next);
     }
+    {
+        // A barra grava o tema no island.ini e no island-state.ini juntos; relê o segundo já.
+        std::lock_guard valuesLock(g_valuesMutex);
+        g_valuesNextCheck = 0;
+    }
     return ok;
 }
 
@@ -471,7 +478,7 @@ bool BarAnchorRect(HMONITOR monitor, const MONITORINFO& info, float sizeScale, b
     GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
     const float dpi = static_cast<float>(dpiY) / 96.0f;
     const float bar = static_cast<float>(GetZefiroInt(L"BarHeight", 32)) * dpi;
-    const float pill = kCollapsedPillHeight * sizeScale;
+    const float pill = kCollapsedPillHeight * CollapsedScale(kCollapsedPillHeight, sizeScale);
     float pillTop = std::max(0.0f, (bar - pill) * 0.5f) + static_cast<float>(GetZefiroInt(L"PillOffsetY", 0)) * dpi;
 
     *rect = info.rcWork;
@@ -480,6 +487,14 @@ bool BarAnchorRect(HMONITOR monitor, const MONITORINFO& info, float sizeScale, b
     const float top = flushTop ? pillTop : pillTop - kModTopGap - renderPadY;
     rect->top = info.rcMonitor.top + static_cast<LONG>(std::lround(top));
     return true;
+}
+
+float CollapsedScale(float designHeight, float sizeScale) {
+    const int pill = GetZefiroInt(L"PillHeight", 0);
+    if (pill <= 0 || designHeight <= 0.0f) return sizeScale;
+    UINT dpiX = 96, dpiY = 96;
+    GetDpiForMonitor(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
+    return static_cast<float>(pill) * (static_cast<float>(dpiY) / 96.0f) / designHeight;
 }
 
 bool UseSoftwareRenderer() {
