@@ -26,6 +26,9 @@ pub const USER_ISLAND: u32 = 4;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
+/// Modo de medição (`ZEFIRO_CYCLES=N`): abre e fecha o calendário N vezes e sai.
+pub const TIMER_CYCLE: usize = 4;
+const CYCLE_HALF_MS: u32 = 450;
 
 const VK_ESCAPE: u32 = 0x1B;
 const VK_RETURN: u32 = 0x0D;
@@ -41,6 +44,8 @@ pub struct Loop {
     pub controller: PanelController,
     menu: Option<MenuModel>,
     shown_month: (i32, u32),
+    /// Ciclos de medição: (total, feitos).
+    cycles: Option<(u32, u32)>,
 }
 
 fn swatches(ctx: &AppCtx) -> Vec<ThemeSwatch> {
@@ -60,7 +65,7 @@ impl Loop {
             panels.push(PanelView::create(&ctx, b.monitor())?);
         }
         let today = now_local().date;
-        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), menu: None, shown_month: (today.year, today.month) })
+        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), menu: None, shown_month: (today.year, today.month), cycles: None })
     }
 
     fn bar_index(&self, hwnd: isize) -> Option<usize> { self.bars.iter().position(|b| b.hwnd().0 as isize == hwnd) }
@@ -181,6 +186,31 @@ impl Loop {
         self.redraw_open_panel()
     }
 
+    /// Um passo do modo de medição: fecha o calendário aberto, ou abre o próximo e loga quanto
+    /// tempo levou do "clique" até o painel estar pronto para o primeiro quadro.
+    fn cycle_tick(&mut self) -> Result<()> {
+        let Some((total, done)) = self.cycles else { return Ok(()) };
+        window::set_timer(TIMER_CYCLE, CYCLE_HALF_MS);
+        if self.controller.open().is_some() {
+            let fx = self.controller.handle(PanelInput::Escape);
+            return self.run_effects(fx);
+        }
+        if done >= total {
+            window::kill_timer(TIMER_CYCLE);
+            tracing::info!(ciclos = total, "medição concluída; saindo");
+            // SAFETY: encerra o laço de mensagens desta thread.
+            unsafe { PostQuitMessage(0) };
+            return Ok(());
+        }
+        let started = std::time::Instant::now();
+        let fx = self.controller.handle(PanelInput::ChipClick { monitor: 0, chip: "clock".into() });
+        self.run_effects(fx)?;
+        let ms = started.elapsed().as_secs_f64() * 1000.0;
+        self.cycles = Some((total, done + 1));
+        tracing::info!("ciclo {}: clique→primeiro quadro {ms:.2} ms", done + 1);
+        Ok(())
+    }
+
     pub fn schedule_clock(&self) {
         let now = now_local();
         let ms = if self.ctx.config.clock.seconds { 1000 - now.millis } else { ms_to_next_minute(now.second, now.millis) };
@@ -274,6 +304,7 @@ impl Loop {
                 }
                 self.schedule_clock();
             }
+            WinEvent::Timer { id: TIMER_CYCLE } => self.cycle_tick()?,
             WinEvent::User { code: USER_PANEL_SETTLED } => {
                 for p in &mut self.panels {
                     p.hide_if_closed();
@@ -326,6 +357,11 @@ impl Loop {
 pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
     let mut l = Loop::new(ctx, bars)?;
     l.schedule_clock();
+    if let Some(n) = std::env::var("ZEFIRO_CYCLES").ok().and_then(|v| v.parse::<u32>().ok()) {
+        tracing::info!(ciclos = n, "modo de medição: abrindo e fechando o calendário");
+        l.cycles = Some((n, 0));
+        window::set_timer(TIMER_CYCLE, 2000);
+    }
     crate::island::start(&l.ctx);
     while window::pump() {
         for e in window::take_events() {

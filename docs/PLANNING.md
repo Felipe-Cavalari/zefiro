@@ -19,7 +19,7 @@ Módulos, em ordem de entrega:
 1. **Barra** (Fase 1): widgets sempre visíveis no topo, com uma **ilha de mídia** no centro, ao estilo do macOS/Dynamic Island.
 2. **Launcher** (Fase 3): atalho global que busca apps, arquivos, projetos e ações.
 3. **Dock** (Fase 4): estilo macOS, com apps fixados e abertos.
-4. **Gerenciador de janelas** (Fase 6): tiling próprio. Até lá, integração com o **komorebi**.
+4. **Gerenciador de janelas** (Fase 6): tiling próprio. Até lá, integração com o **komorebi** (depois da 1.0).
 
 O projeto será **publicado como open source**. Antes disso, eu uso no dia a dia para encontrar bugs (dogfooding), com **logs e diagnóstico embutidos desde o primeiro dia**.
 
@@ -57,7 +57,7 @@ Valores medidos com **todos os widgets da Fase 1 ligados**, em 2 monitores:
 | Fase | Entrega | Público | Inspiração |
 |---|---|---|---|
 | **0 — Fundação e spikes** | Provas técnicas das partes arriscadas (S1–S6) + esqueleto do repositório | Só eu | — |
-| **1 — Barra (MVP)** | Barra + **ilha de mídia** + painéis + **modo de edição** + **itens declarativos v1** + workspaces do komorebi | Só eu (dogfooding) | YASB, Fancy Toolbar (Seelen), Dynamic Island, Dock do PowerToys |
+| **1 — Barra (MVP)** | Barra + **ilha de mídia** + painéis + **modo de edição** + **itens declarativos v1** (komorebi fica fora até a 1.0) | Só eu (dogfooding) | YASB, Fancy Toolbar (Seelen), Dynamic Island, Dock do PowerToys |
 | **2 — Beta público** | Instalador, documentação, **app de configurações** pesquisável com pré-visualização ao vivo, formato de recursos documentado | Público (beta) | Settings do Seelen |
 | **3 — Launcher** | Busca fuzzy em apps, arquivos, projetos e **ações das integrações** | Público | Raycast, Apps Menu do Seelen |
 | **4 — Dock** | Apps fixados e abertos, ampliação com mola, badges, itens declarativos | Público | Weg do Seelen |
@@ -71,7 +71,7 @@ Valores medidos com **todos os widgets da Fase 1 ligados**, em 2 monitores:
 |---|---|---|
 | **Ilha de mídia** | Centro da barra, com 3 estados (ver §3.6). **Compacto:** visualizador + capa + data/hora. **Espiando:** título — artista por ~3 s ao trocar de faixa ou passar o mouse. **Expandido:** a pílula "derrete" para baixo com capa, linha do tempo, controles e troca de fonte (Spotify, YouTube, Twitch…). Cor de destaque tirada da capa. | Windows SMTC (`GlobalSystemMediaTransportControlsSessionManager`) + captura do som do sistema (WASAPI loopback) para o visualizador |
 | **Relógio e calendário** | Formato personalizável; painel com calendário do mês. Sem mídia tocando, a ilha mostra só data/hora. | Relógio do sistema + formatação de data do Windows por idioma (pt-BR) |
-| **Workspaces (komorebi)** | Workspaces e layout atual; clique troca de workspace | Eventos do komorebi (`komorebic subscribe-pipe`) + comandos via `komorebic` |
+| **Workspaces (komorebi)** — *fora até a 1.0* | Workspaces e layout atual; clique troca de workspace | Eventos do komorebi (`komorebic subscribe-pipe`) + comandos via `komorebic` |
 | **Projetos VS Code** | Painel com projetos recentes, busca, abrir no VS Code | `%APPDATA%\Code\User\globalStorage\state.vscdb` (SQLite, chave `history.recentlyOpenedPathsList`) + pasta configurável (ex.: `~/Projects`) |
 | **Brilho** | % na barra; painel com um slider por monitor; roda do mouse no ícone ajusta | DDC/CI via `dxva2` (`GetPhysicalMonitorsFromHMONITOR`, `Get/SetVCPFeature` código `0x10`); WMI `WmiMonitorBrightness` para tela interna |
 | **Uso do Claude** | % da janela de 5 h (e 7 dias no painel), cor por faixa | Token de `~/.claude/.credentials.json` → `GET https://api.anthropic.com/api/oauth/usage`. O token nunca vai para log. |
@@ -211,7 +211,9 @@ thread de UI: aplica estado → marca nós sujos → layout → desenha só o ne
   | Elástico | ×1,1 | ×0,70 |
   | Rápido | ×1,5 | ×1,25 |
 
-  Mais um multiplicador de velocidade (0,5×–2×). No compositor, a mola é convertida para *período* e *razão de amortecimento* (ω = √k, ζ = c / 2√k).
+  Mais um multiplicador de velocidade (0,5×–2×). No compositor, a mola é convertida para *período* e *razão de amortecimento* (ω = √k, ζ = c / 2√k). O `Period` do Windows.UI.Composition se comporta como **1/ω**, não 2π/ω: medido na tela, 2π/ω deixava as molas 4–5× mais lentas que as da ilha ([ADR-0007](adr/0007-barra-fase-1a.md)).
+- **Pílula → painel** (Fase 1a): cada painel é uma forma só (fundo, contorno, sombra e recorte) cujos x, y, largura, altura e raio são escalares de um `CompositionPropertySet`; as molas animam esses escalares e **expressões** ligam a eles a geometria, o recorte do conteúdo e a opacidade do conteúdo (aparece nos últimos 40% da altura, regra da ilha). O conteúdo é desenhado uma vez, já no lugar final; abrir é a forma crescer do chip até o painel com a mola de crescer e uma "cutucada" de −6 DIP; fechar é o caminho de volta com a mola de encolher. Trocar de painel no meio da animação só redireciona a mola.
+- **Clique atravessando:** barra e painel têm uma janela de desenho que deixa todo clique passar (`WS_EX_LAYERED | WS_EX_TRANSPARENT`) e uma janela de entrada invisível recortada (`SetWindowRgn`) nas áreas clicáveis. `HTTRANSPARENT` não serve: só repassa o clique para janelas da mesma thread.
 - **AppBar:** a barra reserva espaço na tela (`SHAppBarMessage`). Uma barra por monitor, DPI por monitor (Per-Monitor v2).
 - **Degradação automática** (validada no S6):
   - "Efeitos de animação" do Windows desligados → sem molas, transições instantâneas.
@@ -254,41 +256,43 @@ EXPANDIDO (clique)       ╭─────────────────�
 
 ### 4.1 Tema por tokens (a "sensação de CSS" sem navegador)
 
-Arquivo TOML com tokens, recarregado na hora ao salvar:
+Arquivo TOML com tokens, recarregado na hora ao salvar. O padrão é o **Obsidian** (preto verdadeiro), e vêm junto os outros 7 temas da ilha: Graphite, Slate, Nord, Evergreen, Espresso, Plum e Porcelain (claro). Formato (Fase 1a, [spec §8](superpowers/specs/2026-10-15-fase-1a-barra-design.md)):
 
 ```toml
+name = "Obsidian"
+
 [colors]
-bg      = "#161826"
-surface = "#232532"
-text    = "#e9e9ed"
-accent  = "#9184d9"
-green   = "#8ed6a8"
-amber   = "#e3b478"
-rose    = "#e89a9a"
+background     = "#08080A"
+text           = "#FFFFFF"
+text_secondary = "#9B9BA5"
+border         = "#1E1E22"   # "none" = sem contorno
+accent         = "auto"      # auto (capa da ilha) | system | "#RRGGBB"
 
-[bar]
-height    = 32
-radius    = 10
-padding   = [4, 10]
-backdrop  = "acrylic"      # acrylic | mica | solid
-opacity   = 0.55
+[material]
+opacity        = 0.96
+depth          = true
+shadow         = true
+backdrop       = "none"      # none | acrylic
+backdrop_fill  = 0.45
 
-[island]
-accent_from_cover = true
-visualizer        = "bars" # bars | none
+[shape]
+style          = "pill"      # pill | w11
+radius_max     = 44
+panel_radius   = 24
 
 [font]
-ui    = "Segoe UI Variable"
-mono  = "JetBrainsMono NFP"
-icons = "Segoe Fluent Icons"
+family         = "Segoe UI Variable"
+scale          = 1.0
 
 [animation]
-spring = "default"         # smooth | default | bouncy | snappy
-speed  = 1.0               # 0.5 – 2.0
+spring         = "default"   # smooth | default | bouncy | snappy
+speed          = 1.0
 ```
 
-- `resources/themes/acrylic.toml` é o **padrão** (segue o sistema).
-- `resources/themes/cavalaridev.toml` traz o visual atual do YASB (paleta Nocturne).
+- Os embutidos ficam em `resources/themes/<id>.toml`; os do usuário em `%APPDATA%\zefiro\themes\<id>.toml` (mesmo id substitui o embutido). **Abrir pasta de temas** no menu do Zefiro copia o tema atual para lá.
+- Erro no arquivo: a barra mantém o tema anterior e o log mostra o arquivo, a linha e o motivo.
+- No `config.toml`: `bar.height = completa | compacta` (44 ou 32 DIP) e `bar.format = faixa | pilulas` (ponta a ponta ou pílulas flutuantes). A ilha embutida segue a altura, o formato e o tema.
+- `cavalaridev.toml` (o visual atual do YASB) continua previsto para a 1g.
 
 ### 4.2 Configuração do layout
 
@@ -363,7 +367,8 @@ right_click = "action:open-task-manager"
 
 ## 6. Gerenciadores de janela
 
-- **Fase 1:** integração com o **komorebi**. Escutar eventos via `komorebic subscribe-pipe` (JSON com workspaces, layout e janela focada) e mandar comandos via `komorebic`. Cuidar da convivência: espaço reservado da AppBar, regras de ignorar as janelas do Zefiro.
+- **Até a 1.0:** o komorebi fica de fora por completo (decisão da Fase 1a).
+- **Depois da 1.0:** integração com o **komorebi**. Escutar eventos via `komorebic subscribe-pipe` (JSON com workspaces, layout e janela focada) e mandar comandos via `komorebic`. Cuidar da convivência: espaço reservado da AppBar, regras de ignorar as janelas do Zefiro.
 - **Depois do beta:** provider do **GlazeWM** (IPC próprio), no mesmo modelo.
 - **Fase 6:** gerenciador de janelas próprio, com tiling animado pelo compositor, **só se** a integração com o komorebi não bastar. Spec própria.
 
@@ -461,10 +466,10 @@ Depois dos spikes: workspace Rust, CI, logs e esqueleto de `core`/`ui`/`platform
 
 | Etapa | Entrega |
 |---|---|
-| **1a** | Barra AppBar por monitor, tema acrílico padrão, recarregar tema, **Relógio e calendário** |
+| **1a** | Barra AppBar por monitor no design da ilha: tema **Obsidian** + 7 temas editáveis, alturas completa/compacta, formatos faixa/pílulas, painéis pílula → painel, **Relógio e calendário**, menu do Zefiro e a ilha embutida no centro (fork, ADR-0006). [Spec](superpowers/specs/2026-10-15-fase-1a-barra-design.md), [ADR-0007](adr/0007-barra-fase-1a.md) |
 | **1b** | **Modo de edição** (seções, arrastar, galeria, opções por item, por monitor) |
-| **1c** | **Ilha de mídia** (3 estados + visualizador) |
-| **1d** | **Áudio** (alto-falante + microfone), **Brilho**, **Workspaces (komorebi)** |
+| **1c** | **Porte da ilha para Rust dentro da barra** (3 estados + visualizador), substituindo o `zefiro-island.exe` |
+| **1d** | **Áudio** (alto-falante + microfone), **Brilho** |
 | **1e** | **Itens declarativos v1** + linguagem de expressões; **Claude** e **Codex** já feitos como itens sobre seus providers |
 | **1f** | **Projetos VS Code**, **Pomodoro**, **Modo foco**, **Modo noturno**, **Notificações** |
 | **1g** | Tema `cavalaridev.toml`, HUD de debug, exportar diagnóstico, **2 semanas de uso diário** substituindo o YASB |
