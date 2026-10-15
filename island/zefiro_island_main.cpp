@@ -10,6 +10,7 @@
 // Aqui o wWinMain chama esses três diretamente; o código de lançamento do
 // Windhawk continua compilado, mas nunca é chamado.
 #include "wh_shim.h"
+#include "zefiro_audio_route.h"  // submenu "Saída de som", chamado pelos ganchos // ZEFIRO: do mod
 
 // O SDK do MSVC define `small` como `char` (rpcndr.h); o MinGW não, e o mod
 // usa `small` como nome de variável. Incluímos o cabeçalho antes e desfazemos

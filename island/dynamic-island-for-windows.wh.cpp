@@ -10982,6 +10982,18 @@ void ShowContextMenu(HWND hwnd, POINT screenPoint) {
         mediaSourceItems = AppendMediaSourceItems(sourceMenu);
         AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(sourceMenu), Loc(L"Media source"));
     }
+#ifdef ZEFIRO_ISLAND
+    {
+        // ZEFIRO: submenu "Saída de som" para o app da fonte atual (zefiro_audio_route.cpp).
+        std::wstring sourceAumid, sourceName;
+        {
+            std::lock_guard lock(g_stateMutex);
+            sourceAumid = g_state.media.sourceAppUserModelId;
+            sourceName = g_state.media.sourceName;
+        }
+        zefiro::audio_route::AppendOutputSubmenu(menu, sourceAumid, sourceName);
+    }
+#endif
     if (g_settings.fileTrayModule) {
         size_t trayCount = 0;
         {
@@ -11113,6 +11125,9 @@ void ShowContextMenu(HWND hwnd, POINT screenPoint) {
         return;
     }
 
+#ifdef ZEFIRO_ISLAND
+    if (zefiro::audio_route::HandleMenuCommand(cmd)) return;  // ZEFIRO: ids acima dos de fonte de mídia
+#endif
     if (cmd >= kMediaSourceMenuIdBase) {
         ApplyMediaSourceMenuCommand(cmd, mediaSourceItems);
         return;

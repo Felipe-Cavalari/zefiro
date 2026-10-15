@@ -56,7 +56,7 @@ Por que não Rust agora: a barra (Fase 1) ainda não existe, e o porte completo 
 
 ## O que mudou no código
 
-Tudo fora do arquivo do mod, exceto três blocos `#ifdef ZEFIRO_ISLAND` marcados com `// ZEFIRO:`. Sem `ZEFIRO_ISLAND`, o arquivo continua sendo um mod válido do Windhawk.
+Tudo fora do arquivo do mod, exceto cinco blocos `#ifdef ZEFIRO_ISLAND` marcados com `// ZEFIRO:`. Sem `ZEFIRO_ISLAND`, o arquivo continua sendo um mod válido do Windhawk.
 
 | Onde | O quê |
 |---|---|
@@ -65,6 +65,8 @@ Tudo fora do arquivo do mod, exceto três blocos `#ifdef ZEFIRO_ISLAND` marcados
 | `GetAnchorWorkRect()` | `// ZEFIRO:` ancoragem na barra. |
 | `CreateDCRenderTarget` | `// ZEFIRO:` desenho por software ou GPU. |
 | `UpdateLayeredWindowIndirect` | `// ZEFIRO:` mede o primeiro quadro. |
+| `ShowContextMenu()` | Dois `// ZEFIRO:`: monta o submenu "Saída de som" e trata o comando dele (ver [Saída de som por fonte](#saída-de-som-por-fonte)). |
+| `island/zefiro_audio_route.h/.cpp` | O submenu "Saída de som" e a troca de saída por app. |
 | `island/build.ps1` | MSVC 14.44 + SDK 10.0.26100 (C++/WinRT do SDK), `/std:c++20`, CRT estático, as mesmas bibliotecas do `@compilerOptions` do mod, manifesto igual ao do `windhawk.exe` (PerMonitorV2, Common Controls 6). Compila em ~20 s. |
 
 Compilar com o MSVC exigiu **zero** mudanças no código do mod além disso: o mod já era escrito com cuidado de portabilidade.
@@ -82,12 +84,39 @@ Diferenças que sobram:
 
 O mod já faz o que o Zefiro quer, sem código novo: `CollectMediaSources` lista **todas** as sessões do SMTC, tocando ou pausadas, numa ordem estável, e a ilha segue uma sessão pausada quando nada toca. A barra de troca de fonte aparece com 2 ou mais fontes (até 3 posições, ou 2 + "+N"), e o submenu "fonte" do clique direito lista todas. **Validado com o usuário:** com o Spotify (app da Store) e um vídeo no Brave, os dois pausados, ambos apareceram na barra de fontes e deu para trocar entre eles.
 
+## Saída de som por fonte
+
+Na validação, Spotify e Brave tocavam em saídas diferentes (preferência por app guardada pelo Windows) e não havia como trocar pela ilha. Agora o clique direito tem o submenu **"Saída de som"**, logo abaixo de "Media source", aplicado à fonte atual:
+
+```
+Saída de som ▸  Spotify                                   (título, desabilitado)
+                ────
+                ✓ Padrão do sistema (Alto-falantes (HECATE…))
+                ────
+                Speakers (NVIDIA Broadcast)
+                Fones de ouvido (Fuxi-H3 )
+                …  (todas as saídas ativas, com o nome amigável)
+```
+
+Como funciona (`island/zefiro_audio_route.cpp`):
+
+1. **Fonte → processos.** O AUMID do SMTC (`g_state.media.sourceAppUserModelId`) é casado com os processos que têm sessão de áudio (`IAudioSessionManager2` → `IAudioSessionControl2::GetProcessId`) em todas as saídas ativas. Apps da Store (`SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify`) casam pela família do pacote (`GetPackageFamilyName`); os outros (`Brave`, `Spotify.exe`, `MSEdge`, `Brave.<perfil>`) pelo nome do executável, o que já pega o processo de áudio filho dos navegadores (mesmo `brave.exe`). AUMIDs opacos (o Firefox usa um hash) casam pelo nome mostrado. Se nenhuma sessão casar, procura em todos os processos (Toolhelp).
+2. **Saída atual.** `GetPersistedDefaultAudioEndpoint`: vazio = "Padrão do sistema"; senão, o dispositivo marcado.
+3. **Troca.** `SetPersistedDefaultAudioEndpoint(pid, eRender, eMultimedia|eConsole, id)`, com o id no formato `\\?\SWD#MMDEVAPI#{id}#{e6327cad-…}` e string vazia para voltar ao padrão do sistema. A fábrica vem de `RoGetActivationFactory("Windows.Media.Internal.AudioPolicyConfig")`, com o GUID `ab3d4648-…` a partir do build 21390 (Windows 10 21H2) e `2a59116d-…` antes, como no EarTrumpet (se o primeiro falhar, tenta o outro).
+4. **Sem a API** (fábrica indisponível), o submenu não aparece e o log registra `IAudioPolicyConfig indisponível` uma vez.
+
+**O que aprendemos testando:** o Windows grava a escolha **por executável** (pids do Brave que não foram usados na troca já leem o novo dispositivo), mas só aceita o pid de um processo que **já abriu áudio**; os outros devolvem `E_INVALIDARG` (`0x80070057`). Por isso a ilha guarda todos os pids do app, agrupados por executável, e tenta em ordem até um aceitar. Se nenhum aceitar, o submenu mostra "<app> ainda não abriu o áudio" (desabilitado); se o app não estiver aberto, "<app> não está aberto".
+
+**Testado** (2026-10-15, Windows 11 26200, com um executável de teste que chama o mesmo `zefiro_audio_route.cpp` e lê o menu montado): o submenu lista as 8 saídas ativas; Spotify (Store) → "Fones de ouvido (High Definition Audio Device)" e Brave → "Fones de ouvido (Fuxi-H3 )" gravaram (`S_OK`), a releitura marcou o novo dispositivo, e a leitura por outros pids do Brave deu o mesmo dispositivo; "Padrão do sistema" voltou os dois ao padrão. Bloco de notas (sem áudio) e Calculadora (fechada) mostraram os itens desabilitados.
+
+**Não verificado:** a troca com som tocando (no teste, Spotify e Brave não tinham fluxo ativo, então não deu para ver o som mudar de saída na hora) e a conferência visual no Mixer de volume do Windows (Configurações › Sistema › Som › Mixer de volume), que lê a mesma preferência. O Windows move os fluxos dos apps que seguem o dispositivo padrão; um app que abriu um dispositivo específico só troca ao reabrir o fluxo.
+
 ## Consequências
 
 - `zefiro-island.exe` é um componente da Fase 1: a barra o inicia e o fecha com `--stop`. A ilha não conversa com a barra; os dois se alinham pela configuração (`BarHeight`).
 - O porte para Rust vira trabalho por partes, guiado pelas notas de porte: primeiro a pílula e as molas (no compositor), depois mídia/SMTC e visualizador, depois os módulos.
-- **Atualizar o upstream:** trocar o arquivo, reaplicar os três blocos `// ZEFIRO:` e compilar (ver `island/README.md`).
-- **Recurso futuro: saída de som por fonte.** Na validação, Spotify e Brave tocavam em saídas diferentes (preferência por app guardada pelo Windows) e não havia como trocar pela ilha. Plano: um submenu "Saída de som" no clique direito, aplicado à fonte atual. A ilha acha o processo da fonte pelas sessões de áudio (`IAudioSessionManager2`; o navegador tem um processo de áudio separado) e grava a saída com a `IAudioPolicyConfig` não documentada (a mesma do EarTrumpet). Código num arquivo próprio (`island/zefiro_audio_route.cpp`) com um gancho `// ZEFIRO:` no menu. Na barra em Rust, entra no painel de mídia.
+- **Atualizar o upstream:** trocar o arquivo, reaplicar os cinco blocos `// ZEFIRO:` e compilar (ver `island/README.md`).
+- **Saída de som por fonte: feito** (ver [Saída de som por fonte](#saída-de-som-por-fonte)). Na barra em Rust, entra no painel de mídia.
 
 ### Riscos
 
@@ -96,7 +125,7 @@ O mod já faz o que o Zefiro quer, sem código novo: `CollectMediaSources` lista
 - **Dois processos sempre no topo** (barra e ilha): a ordem entre eles pode alternar. A ilha precisa ficar acima da barra; verificar quando a barra existir.
 - **Pílula mais alta que a barra** (44 px × 32 DIP): a parte de baixo cobre 12 px de janelas maximizadas. Alternativas registradas: escala menor (~0,64) ou pílula abaixo da barra.
 - **Atalhos globais:** Ctrl+Alt+D (esconder/mostrar) e Ctrl+Alt+Espaço (pesquisa rápida) podem colidir com outros apps. Nesta máquina, Ctrl+Alt+Espaço já estava em uso (erro 1409 no log).
-- **APIs não documentadas:** `SetWindowCompositionAttribute` (desfoque/acrílico, desligado por padrão) e o registro `CapabilityAccessManager\ConsentStore` (pontos de privacidade) podem mudar com atualizações do Windows.
+- **APIs não documentadas:** `IAudioPolicyConfig` (saída de som por fonte; a tabela de métodos pode mudar como mudou o GUID no 21H2, e aí o submenu some), `SetWindowCompositionAttribute` (desfoque/acrílico, desligado por padrão) e o registro `CapabilityAccessManager\ConsentStore` (pontos de privacidade) podem mudar com atualizações do Windows.
 - **Rede:** clima (wttr.in), letras (LRCLIB) e pesquisa (Wiktionary/Wikipedia) fazem requisições externas. Desligáveis no `island.ini`.
 - **Rodar junto com o mod do Windhawk** mostra duas ilhas. O usuário deve desativar o mod no Windhawk.
 - **Divergência do upstream:** o arquivo muda muito e com frequência; quanto mais blocos `// ZEFIRO:`, mais caro cada atualização.

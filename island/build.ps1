@@ -34,7 +34,7 @@ $cl = @(
     '/DZEFIRO_ISLAND', '/DUNICODE', '/D_UNICODE', '/D_CRT_SECURE_NO_WARNINGS',
     "/I`"$gen`"", "/Fo`"$obj\\`"", "/Fd`"$obj\\vc.pdb`"", "/Fe`"$build\zefiro-island.exe`""
 ) + $opt + @(
-    "`"$here\zefiro_island_main.cpp`"", "`"$here\wh_shim.cpp`"",
+    "`"$here\zefiro_island_main.cpp`"", "`"$here\wh_shim.cpp`"", "`"$here\zefiro_audio_route.cpp`"",
     '/link', '/SUBSYSTEM:WINDOWS', '/DEBUG', '/OPT:REF', '/OPT:ICF', '/MANIFEST:EMBED',
     "/MANIFESTINPUT:`"$here\zefiro-island.manifest`"", "/PDB:`"$build\zefiro-island.pdb`""
 ) + $ltcg + $libs

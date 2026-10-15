@@ -8,6 +8,7 @@ A ilha de mídia do Zefiro, por enquanto um **fork do [Dynamic Island for Window
 |---|---|
 | `dynamic-island-for-windows.wh.cpp` | O mod do upstream (v1.3.1, commit `e6cfedb`). Mudanças do Zefiro só dentro de `#ifdef ZEFIRO_ISLAND` e marcadas com `// ZEFIRO:`. Sem `ZEFIRO_ISLAND` o arquivo continua sendo um mod válido do Windhawk. |
 | `wh_shim.h/.cpp` | Substitui a API do Windhawk (log, configurações, valores, hooks). |
+| `zefiro_audio_route.h/.cpp` | Submenu "Saída de som" do clique direito: troca a saída de áudio do app da fonte atual (ver abaixo). |
 | `zefiro_island_main.cpp` | `wWinMain`: inclui o shim e o mod numa unidade só e chama `WhTool_ModInit` / `WhTool_ModSettingsChanged` / `WhTool_ModUninit`. |
 | `gen-settings.ps1` | Gera os padrões do `island.ini` a partir do bloco `// ==WindhawkModSettings==` do mod. |
 | `build.ps1` | Compila com o MSVC (VS 2022 Build Tools). |
@@ -41,10 +42,20 @@ Seção `[Zefiro]`:
 | `PillOffsetY` | `0` | Ajuste fino vertical em DIP. |
 | `Renderer` | `software` | `software`: Direct2D sem dispositivo na GPU (≈ 40 MB de memória privada a menos). `hardware`: o padrão do mod. |
 
+## Saída de som por fonte
+
+O clique direito tem o submenu **"Saída de som"** (abaixo de "Media source"), que troca o dispositivo de saída do app da fonte de mídia atual (Spotify, Brave...), como a página "Volume e preferências de dispositivo do app" do Windows. Lista as saídas ativas com o nome amigável, marca a atual do app e tem "Padrão do sistema". A escolha vale na hora para os fluxos que seguem o dispositivo padrão e fica gravada pelo Windows por executável, então persiste depois de reabrir o app; aparece igual no Mixer de volume do Windows.
+
+- Usa a interface não documentada `IAudioPolicyConfig` (a mesma do EarTrumpet). Se ela não existir, o submenu não aparece e o log registra `Saída de som: IAudioPolicyConfig indisponível`.
+- Cada troca vai para o log (`Saída de som: Spotify (pid …) -> …`).
+- Se o app não estiver aberto ou ainda não tiver aberto o áudio, o submenu mostra isso num item desabilitado (o Windows só aceita a troca de um processo que já abriu áudio).
+
+Detalhes e o que foi testado: [ADR-0006, Saída de som por fonte](../docs/adr/0006-ilha-de-midia-fork.md#saída-de-som-por-fonte).
+
 ## Acompanhar o upstream
 
 ```powershell
 git diff <commit-da-importação> -- island/dynamic-island-for-windows.wh.cpp   # só as mudanças do Zefiro
 ```
 
-Para atualizar: substituir o arquivo pelo novo do upstream, reaplicar os blocos `// ZEFIRO:` (são 3: primeiro quadro, desenho por software, ancoragem em `GetAnchorWorkRect`), rodar `build.ps1` e atualizar a versão/commit aqui, no `zefiro_island_main.cpp` e no `THIRD_PARTY_NOTICES.md`.
+Para atualizar: substituir o arquivo pelo novo do upstream, reaplicar os blocos `// ZEFIRO:` (são 5: primeiro quadro, desenho por software, ancoragem em `GetAnchorWorkRect` e os dois do submenu "Saída de som" em `ShowContextMenu`), rodar `build.ps1` e atualizar a versão/commit aqui, no `zefiro_island_main.cpp` e no `THIRD_PARTY_NOTICES.md`.
