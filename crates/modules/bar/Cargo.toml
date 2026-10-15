@@ -7,3 +7,10 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+zefiro-core.workspace = true
+zefiro-platform.workspace = true
+zefiro-resources.workspace = true
+zefiro-ui.workspace = true
+zefiro-integration-clock.workspace = true

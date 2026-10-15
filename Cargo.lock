@@ -838,6 +838,13 @@ version = "0.1.0"
 [[package]]
 name = "zefiro-bar"
 version = "0.1.0"
+dependencies = [
+ "zefiro-core",
+ "zefiro-integration-clock",
+ "zefiro-platform",
+ "zefiro-resources",
+ "zefiro-ui",
+]
 
 [[package]]
 name = "zefiro-core"
