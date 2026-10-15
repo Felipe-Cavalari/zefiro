@@ -48,56 +48,60 @@ Antes de recompilar a ilha (`island/`), pare o `zefiro-island.exe`; senão o lin
 
 ## Estado atual (2026-10-15)
 
-### Tasks 1–22: concluídas e commitadas
+### Tasks 1–23: concluídas e commitadas
 
-O último commit é `cfc5994`.
+O último commit da Task 23 é `cbd533c`.
 
 Verificado na tela:
 
-- **Faixa/completa:** barra Obsidian, "Z Zefiro" à esquerda, relógio à direita, janelas começando abaixo da barra.
-- **Pílulas/compacta:** duas pílulas flutuantes de 32 DIP com sombra.
-- **Primeiro quadro:** 59–75 ms em 2 monitores.
+- **Barra:** as 4 combinações de altura/formato.
+- **Calendário:** abre a partir do relógio; setas e roda trocam o mês com a altura animando; Esc fecha e devolve o foco.
+- **Menu:** abre por clique e por botão direito numa pílula; as setas movem o foco; altura, formato e tema aplicam na hora, o menu continua aberto e acompanha a barra.
+- **Troca menu → calendário:** a forma é redirecionada sem esperar.
+- **Relógio:** vira no minuto.
+- **Sair:** encerra o app.
 
-### Task 23 (painéis, menu, calendário e relógio): código escrito, não commitado
+### Decisões da Task 23 que mudam o que vem depois
 
-Arquivos:
+Os detalhes estão nas linhas `Task 23: Ruling` do ledger.
 
-- **Novos:** `crates/app/src/panel_view.rs`, `crates/app/src/event_loop.rs`, `crates/app/src/island.rs` (stub) e `crates/app/src/robustness.rs` (stub).
-- **Alterado:** `crates/app/src/main.rs`, que agora chama `event_loop::run`.
+**Duas janelas por barra e por painel** (`crates/platform-windows/src/window.rs`):
 
-Compila, mas ainda não foi testado na tela.
+- A janela de desenho é `WS_EX_LAYERED | WS_EX_TRANSPARENT`, então todo clique a atravessa.
+- Uma janela de entrada invisível (classe `ZefiroInput`), dona-dependente da de desenho, recebe o mouse. Ela é recortada por `SetWindowRgn` nos retângulos de `set_interactive`.
+- Os eventos da janela de entrada chegam com o `hwnd` da janela de desenho.
+- `window::input_window(hwnd)` devolve a janela de entrada.
+- O motivo: `HTTRANSPARENT` não repassa clique para outros processos, e a margem da sombra engolia cliques.
+- Na Task 24, quem recriar barras ou painéis (troca de monitor ou DPI) precisa destruir as duas janelas.
 
-Ainda falta:
+**A janela do painel cobre o monitor inteiro**, e a forma vive sempre no mesmo espaço. Trocar de painel só redireciona a mola.
 
-1. Rodar e conferir os itens do "Step 3" do brief da Task 23:
-   - o calendário abre a partir do relógio;
-   - o menu abre a partir de "Z Zefiro";
-   - Compacta/Pílulas/tema animam a barra e o menu continua aberto;
-   - a troca menu → calendário acontece sem esperar;
-   - o relógio vira no minuto.
-2. Registrar no ledger as duas decisões já tomadas na Task 23:
-   - **Recorte:** o conteúdo do painel fica dentro de uma `ContainerVisual` (`layer`) do tamanho da janela, e o recorte (`clip_child`) e a opacidade (`bind_alpha`) são aplicados nela, não no sprite. O clipe de um visual fica no espaço do próprio visual. Com o sprite deslocado até o painel, o recorte sairia deslocado.
-   - **Unused:** os imports não usados (`HashMap`, `Monitor`) foram removidos do código do plano.
-3. Fazer o commit com a mensagem do brief e depois rodar `task-done` (ver **Scripts** abaixo).
+**Molas:** `SpringParams::compositor()` usa `period = 1/ω`. Foi medido na tela; com 2π/ω as molas ficavam 4–5× lentas.
 
-### Pontos em aberto da Task 23 (investigar e decidir)
+**Assinaturas que mudaram em relação ao plano:**
 
-**A. Cliques na margem transparente.**
+- `PanelView::close(ctx, restore_focus)`;
+- `PanelView::resize(ctx, chip, band_bottom, list)`;
+- `PanelView::has_focus()`;
+- `Comp::fade_after`.
 
-- A janela da barra tem 24 DIP de margem abaixo da faixa, que existe para a sombra.
-- O hit-test devolve `HTTRANSPARENT` fora dos retângulos interativos.
-- A documentação do Windows diz que `HTTRANSPARENT` só repassa o clique para janelas da mesma thread.
-- Teste:
-  1. Com a barra aberta, clique logo abaixo da faixa, em cima de outra janela.
-  2. Se o clique se perder, troque a estratégia de passagem de clique. Por exemplo, ligue e desligue `WS_EX_TRANSPARENT | WS_EX_LAYERED` conforme o mouse entra ou sai dos retângulos interativos, ou reduza a janela à faixa e desenhe a sombra em outra janela.
-  3. A mesma questão vale para a janela do painel.
+**Pendente para a Task 24:** o `cargo clippy -D warnings` acusa código morto que a Task 24 passa a usar:
 
-**B. Redirecionar a forma entre painéis.**
+- as constantes `USER_CONFIG_CHANGED`, `USER_THEMES_CHANGED`, `TIMER_DISPLAY` e `TIMER_RAISE`;
+- `reposition_appbar`;
+- `AppCtx.gfx`;
+- `PanelView::size`.
 
-- A spec pede que, ao trocar de painel no mesmo monitor (fecha um e abre outro), a forma seja redirecionada e a mola parta do valor atual.
-- Hoje `PanelView::place` reposiciona a janela (`window_bounds` muda) e, se o painel estava fechado ou fechando, coloca a forma no chip novo com um salto.
-- Uma saída: fixar a origem da janela do painel na origem do monitor, para que as coordenadas da forma não mudem. Só vale a pena depois de resolver o ponto A.
-- Revise também a condição `if !was_open || old_window != self.window && !opening` em `place`. No `resize` com a janela mudando de lugar, ela recoloca a forma no chip, e o correto é partir do painel antigo convertido para o novo espaço.
+Ao fim da Task 24 o clippy tem de passar.
+
+**Ferramentas de teste da UI:** estão fora do repo, no scratchpad do Claude, e servem só de referência:
+
+- `tools/ui.ps1`: clicar, teclar, rolar e capturar com tempo;
+- `probe.ps1`: diz qual janela recebe o clique num ponto.
+
+O Codex pode recriar algo equivalente.
+
+**Bug conhecido (minor):** fechar, reabrir e fechar de novo em menos de ~0,3 s faz o primeiro `USER_PANEL_SETTLED` esconder o painel no meio da segunda animação. É raro; um contador de geração resolveria.
 
 ### Tasks 24 e 25: não começadas
 
@@ -140,4 +144,4 @@ Os scripts usados no fluxo (superpowers) são bash e rodam no Git Bash.
 
 `task-start` imprime o caminho do brief e o BASE da tarefa. `task-done` só grava a linha `complete` no ledger se o comando de teste passar. Se preferir não usar os scripts, acrescente as linhas no ledger à mão, no mesmo formato.
 
-BASE da Task 23: `cfc5994`. Comando de teste dela: `cargo build -p zefiro-app`.
+A próxima é a Task 24, com BASE `cbd533c`. Rode `task-start` para obter o brief.
