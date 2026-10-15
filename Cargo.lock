@@ -885,6 +885,15 @@ version = "0.1.0"
 [[package]]
 name = "zefiro-platform-windows"
 version = "0.1.0"
+dependencies = [
+ "tracing",
+ "windows",
+ "windows-core",
+ "windows-numerics",
+ "zefiro-platform",
+ "zefiro-resources",
+ "zefiro-ui",
+]
 
 [[package]]
 name = "zefiro-resources"

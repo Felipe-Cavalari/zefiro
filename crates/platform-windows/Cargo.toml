@@ -7,3 +7,12 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+zefiro-platform.workspace = true
+zefiro-resources.workspace = true
+zefiro-ui.workspace = true
+windows.workspace = true
+windows-core.workspace = true
+windows-numerics.workspace = true
+tracing.workspace = true
