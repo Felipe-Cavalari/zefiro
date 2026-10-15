@@ -106,7 +106,14 @@ Arquivos: `scripts/out/zefiro-repouso.json` e `scripts/out/zefiro-paineis.json` 
 
 ## Validação com o usuário
 
-A preencher na validação: as 4 combinações (completa/faixa, completa/pílulas, compacta/faixa, compacta/pílulas) com Obsidian e Porcelain, o calendário aberto e o menu aberto.
+Em 2026-10-15, o usuário viu a galeria com as 4 combinações (completa/faixa, completa/pílulas, compacta/faixa, compacta/pílulas) em Obsidian e em Porcelain, mais o menu e o calendário abertos nos dois temas. Ele **aprovou tudo como está**, sem pedir mudanças.
+
+Continuam pendentes, para ele rodar na própria máquina:
+
+- reiniciar o Explorer de verdade;
+- Win+P;
+- desligar os "Efeitos de animação";
+- a medição de quadros com o PresentMon elevado.
 
 ## Consequências
 

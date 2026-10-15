@@ -130,7 +130,7 @@ Os caminhos de código foram exercitados assim: `TaskbarCreated` e 3× `WM_DISPL
 - A janela da ilha só fica click-through quando está Idle (`SetClickThrough`, `island/dynamic-island-for-windows.wh.cpp:23121`).
 - Mostrando mídia, a margem dela, por volta de y 44–100 no centro, engole cliques nas janelas de baixo.
 
-### Task 25 (medições, ADR-0007, docs): concluída, exceto a validação do usuário
+### Task 25 (medições, ADR-0007, docs): concluída; galeria aprovada pelo usuário
 
 O commit é `f0b8091`.
 
@@ -151,7 +151,7 @@ O modo de medição está no código: `ZEFIRO_CYCLES=N` abre e fecha o calendár
 **Pendente com o usuário:**
 
 - A galeria `validacao-fase-1a.png`, na raiz do worktree e não versionada, mostra as 4 combinações × Obsidian e Porcelain, mais o menu e o calendário.
-- O que o usuário aprovar ou pedir vai para a seção "Validação com o usuário" do ADR-0007.
+- O usuário **aprovou a galeria como está**; a aprovação está registrada no ADR-0007.
 - Também ficam com ele os testes reais de Explorer reiniciado, Win+P e efeitos de animação desligados.
 
 ### Revisão final (em andamento: um revisor independente foi disparado no commit `f0b8091`)
