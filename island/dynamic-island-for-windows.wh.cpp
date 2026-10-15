@@ -3523,6 +3523,14 @@ RECT GetAnchorWorkRect() {
 
     MONITORINFO mi = {sizeof(mi)};
     GetMonitorInfoW(selectedMonitor, &mi);
+#ifdef ZEFIRO_ISLAND
+    // ZEFIRO: ancora a pílula no centro da barra do Zefiro ([Zefiro] Anchor=bar no island.ini).
+    RECT barRect;
+    if (zefiro::BarAnchorRect(selectedMonitor, mi, g_settings.sizeScale,
+                              g_settings.notchStyle || g_settings.borderMergedMode, kRenderPadY, &barRect)) {
+        return barRect;
+    }
+#endif
     return mi.rcWork;
 }
 
@@ -11477,7 +11485,12 @@ class Renderer {
         }
 
         D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
+#ifdef ZEFIRO_ISLAND
+            // ZEFIRO: desenho por software por padrão ([Zefiro] Renderer), como o WARP do ADR-0001.
+            zefiro::UseSoftwareRenderer() ? D2D1_RENDER_TARGET_TYPE_SOFTWARE : D2D1_RENDER_TARGET_TYPE_DEFAULT,
+#else
             D2D1_RENDER_TARGET_TYPE_DEFAULT,
+#endif
             D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
             0.0f, 0.0f,
             D2D1_RENDER_TARGET_USAGE_GDI_COMPATIBLE);
@@ -11644,6 +11657,9 @@ class Renderer {
 
         const bool presented = UpdateLayeredWindowIndirect(hwnd_, &info) != FALSE;
         if (presented) {
+#ifdef ZEFIRO_ISLAND
+            zefiro::NoteFramePresented();  // ZEFIRO: mede o primeiro quadro
+#endif
             stageValid_ = true;
             lastOrigin_ = stage.origin;
             lastBounds_ = bounds;
