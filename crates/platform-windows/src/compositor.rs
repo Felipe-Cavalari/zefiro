@@ -114,9 +114,15 @@ impl Comp {
     }
 
     pub fn fade(&self, visual: &Visual, to: f32, seconds: f32) -> Result<()> {
+        self.fade_after(visual, to, seconds, 0.0)
+    }
+
+    /// Como `fade`, mas começa depois de `delay_s` segundos.
+    pub fn fade_after(&self, visual: &Visual, to: f32, seconds: f32, delay_s: f32) -> Result<()> {
         let a = self.compositor.CreateScalarKeyFrameAnimation()?;
         a.InsertKeyFrame(1.0, to)?;
         a.SetDuration(TimeSpan { Duration: (seconds as f64 * 1e7) as i64 })?;
+        a.SetDelayTime(TimeSpan { Duration: (delay_s as f64 * 1e7) as i64 })?;
         visual.StartAnimation(&HSTRING::from("Opacity"), &a)
     }
 

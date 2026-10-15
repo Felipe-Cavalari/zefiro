@@ -2,6 +2,10 @@
 
 mod app;
 mod bar_view;
+mod event_loop;
+mod island;
+mod panel_view;
+mod robustness;
 mod theme_state;
 
 use std::time::Instant;
@@ -53,12 +57,5 @@ fn run(started: Instant) -> windows::core::Result<()> {
     for b in &mut bars {
         b.register_appbar(&ctx);
     }
-    while window::pump() {
-        for e in window::take_events() {
-            if matches!(e, window::WinEvent::Quit) {
-                return Ok(());
-            }
-        }
-    }
-    Ok(())
+    event_loop::run(ctx, bars)
 }
