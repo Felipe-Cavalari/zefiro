@@ -1,0 +1,15 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pwsh -NoProfile -File scripts/check-windows-imports.ps1
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+  linux-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo check -p zefiro-core -p zefiro-platform -p zefiro-resources -p zefiro-ui -p zefiro-integration-clock -p zefiro-bar -p zefiro-island-host
