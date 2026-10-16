@@ -65,7 +65,8 @@ fn island_content(ctx: &AppCtx, pill_h: f32) -> PillContent {
         (Collapsed::Timer(t), _) => timer_pill(&t, ctx.now(), pill_h, font_scale, tokens),
         _ => {
             let clock = ctx.clock.chip_text(&now_local(), "", false);
-            with_privacy(idle_pill(&clock, pill_h, font_scale, tokens, &ctx.text), ctx.island.privacy)
+            let weather = ctx.island.weather.as_ref().map(|w| (zefiro_island::weather::icon(w.code), w.temp_c));
+            with_privacy(idle_pill(&clock, weather, pill_h, font_scale, tokens, &ctx.text), ctx.island.privacy)
         }
     }
 }

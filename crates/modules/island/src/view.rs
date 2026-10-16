@@ -223,13 +223,27 @@ fn round2(v: f32) -> f32 {
 }
 
 /// Ocioso: só o relógio. Largura medida pelo texto (mín. 72, máx. 280), arredondada para 2 px.
-pub fn idle_pill(clock: &str, pill_h: f32, font_scale: f32, tokens: &Tokens, m: &dyn TextMeasurer) -> PillContent {
+/// Com clima: relógio, divisor de 1 px (margem vertical de 9) e "ícone temperatura°", espaço de 9 px.
+pub fn idle_pill(clock: &str, weather: Option<(&str, i32)>, pill_h: f32, font_scale: f32, tokens: &Tokens, m: &dyn TextMeasurer) -> PillContent {
     let k = pill_h / IDLE_DESIGN_H;
     let text = style(13.0 * k * font_scale, FontWeight::SemiBold);
     let tw = m.measure(clock, &text).w.ceil();
-    let w = round2((tw + 28.0 * k).clamp(72.0 * k, 280.0 * k));
+    let gap = 9.0 * k;
+    let weather_text = weather.map(|(icon, t)| format!("{icon} {t}°"));
+    let ww = weather_text.as_ref().map_or(0.0, |s| m.measure(s, &text).w.ceil());
+    let content = if weather_text.is_some() { tw + 2.0 * gap + 1.0 + ww } else { tw };
+    let w = round2((content + 28.0 * k).clamp(72.0 * k, 280.0 * k));
     let mut list = DisplayList::new(Size { w, h: pill_h });
-    list.push(DrawOp::Text { rect: Rect::new(0.0, 0.0, w, pill_h), text: clock.into(), style: text, color: tokens.text, align: Align::Center });
+    let x = ((w - content) / 2.0).round();
+    match weather_text {
+        Some(wt) => {
+            list.push(DrawOp::Text { rect: Rect::new(x, 0.0, tw, pill_h), text: clock.into(), style: text, color: tokens.text, align: Align::Leading });
+            let dx = x + tw + gap;
+            list.push(DrawOp::RoundRect { rect: Rect::new(dx, 9.0 * k, 1.0, pill_h - 18.0 * k), radius: 0.0, color: tokens.hairline });
+            list.push(DrawOp::Text { rect: Rect::new(dx + 1.0 + gap, 0.0, ww + 2.0, pill_h), text: wt, style: text, color: tokens.text_secondary, align: Align::Leading });
+        }
+        None => list.push(DrawOp::Text { rect: Rect::new(0.0, 0.0, w, pill_h), text: clock.into(), style: text, color: tokens.text, align: Align::Center }),
+    }
     PillContent { size: Size { w, h: pill_h }, list, visualizer: None, dots: Vec::new() }
 }
 
@@ -402,11 +416,15 @@ mod tests {
 
     #[test]
     fn idle_width_follows_the_clock_text_within_limits() {
-        let short = idle_pill("12:00", 36.0, 1.0, &tokens(), &FixedWidthMeasurer);
+        let short = idle_pill("12:00", None, 36.0, 1.0, &tokens(), &FixedWidthMeasurer);
         assert_eq!(short.size.w, 72.0);
-        let long = idle_pill(&"x".repeat(80), 36.0, 1.0, &tokens(), &FixedWidthMeasurer);
+        let long = idle_pill(&"x".repeat(80), None, 36.0, 1.0, &tokens(), &FixedWidthMeasurer);
         assert_eq!(long.size.w, 280.0);
         assert_eq!(long.size.w % 2.0, 0.0);
+        let with_weather = idle_pill("12:00", Some(("☀️", 21)), 36.0, 1.0, &tokens(), &FixedWidthMeasurer);
+        assert!(with_weather.size.w > short.size.w);
+        let texts: Vec<_> = with_weather.list.ops.iter().filter_map(|o| if let DrawOp::Text { text, .. } = o { Some(text.as_str()) } else { None }).collect();
+        assert_eq!(texts, ["12:00", "☀️ 21°"]);
     }
 
     #[test]

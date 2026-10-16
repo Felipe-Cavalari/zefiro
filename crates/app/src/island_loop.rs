@@ -3,10 +3,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use windows::core::Result;
-use zefiro_bar::calendar::{calendar_names, calendar_paint};
 use zefiro_bar::controller::PanelKind;
-use zefiro_integration_clock::format::ClockText;
-use zefiro_integration_clock::grid::month_grid;
 use zefiro_integration_clock::windows::now_local;
 use zefiro_island::accent::cover_accent;
 use zefiro_island::view::{ExpandedView, IslandAction, expanded, hit};
@@ -23,6 +20,9 @@ use zefiro_platform_windows::notifications::NotificationWatcher;
 use zefiro_platform_windows::system_events;
 use zefiro_platform_windows::dnd;
 use zefiro_platform_windows::bluetooth::BluetoothWatcher;
+use zefiro_platform_windows::weather::WeatherService;
+use zefiro_platform_windows::hardware::HardwareMonitor;
+use zefiro_island::tabs::{self, Tab};
 use zefiro_island::view::Privacy;
 use zefiro_island::menu::{self, AppOutput, MenuCommand, MenuInput};
 use zefiro_island::state::{Activity, Notice};
@@ -31,7 +31,7 @@ use zefiro_platform_windows::window;
 use zefiro_ui::paint::DisplayList;
 
 use crate::bar_view::ISLAND_CHIP;
-use crate::event_loop::{Loop, TIMER_FOCUS, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_BLUETOOTH, USER_DND, USER_MEDIA, USER_NOTIFICATION, USER_PRIVACY, USER_VISUALIZER, USER_VOLUME};
+use crate::event_loop::{Loop, TIMER_FOCUS, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_BLUETOOTH, USER_DND, USER_HARDWARE, USER_MEDIA, USER_NOTIFICATION, USER_PRIVACY, USER_VISUALIZER, USER_VOLUME, USER_WEATHER};
 
 /// Destaque quando a capa não tem cor viva (o mesmo padrão da ilha C++).
 const DEFAULT_ACCENT: Rgba = Rgba { r: 0x4C as f32 / 255.0, g: 0xC9 as f32 / 255.0, b: 0xF0 as f32 / 255.0, a: 1.0 };
@@ -45,6 +45,9 @@ pub struct IslandRuntime {
     privacy: Option<PrivacyWatcher>,
     notifications: Option<NotificationWatcher>,
     bluetooth: Option<BluetoothWatcher>,
+    weather: Option<WeatherService>,
+    hardware: Option<HardwareMonitor>,
+    tab: Tab,
     /// Área de transferência e Caps Lock ligados na janela de mensagens.
     listening: bool,
     capture: Option<AudioCapture>,
@@ -94,6 +97,15 @@ impl Loop {
             }
         } else if !embedded {
             self.island.notifications = None;
+        }
+        if embedded && self.island.weather.is_none() {
+            match WeatherService::start(String::new(), Arc::new(|| window::post_user(USER_WEATHER))) {
+                Ok(w) => self.island.weather = Some(w),
+                Err(e) => tracing::warn!("clima indisponível: {e}"),
+            }
+        } else if !embedded {
+            self.island.weather = None;
+            self.ctx.island.weather = None;
         }
         if embedded && self.island.bluetooth.is_none() {
             match BluetoothWatcher::start(Arc::new(|| window::post_user(USER_BLUETOOTH))) {
@@ -300,31 +312,83 @@ impl Loop {
         self.bars[i].set_visualizer(wave.as_ref())
     }
 
-    /// O painel da ilha: a mídia expandida ou, sem mídia, o calendário (a pílula ociosa é o relógio).
+    fn island_tabs(&self) -> Vec<Tab> {
+        tabs::available(self.ctx.island.media().is_some(), self.ctx.island.weather.is_some())
+    }
+
+    /// O painel da ilha: a aba atual (mídia, clima ou hardware) e os pontos das abas.
     pub fn island_panel_list(&mut self, scale: f32) -> DisplayList {
+        let available = self.island_tabs();
+        if !available.contains(&self.island.tab) {
+            self.island.tab = available[0];
+        }
+        let tab = self.island.tab;
+        // O monitor de hardware só amostra com a aba na tela.
+        if tab == Tab::Hardware && self.island.hardware.is_none() {
+            self.island.hardware = HardwareMonitor::start(Arc::new(|| window::post_user(USER_HARDWARE))).map_err(|e| tracing::warn!("monitor de hardware indisponível: {e}")).ok();
+        } else if tab != Tab::Hardware {
+            self.island.hardware = None;
+        }
+        let font_scale = self.ctx.theme.theme.font.scale;
         let tokens = &self.ctx.theme.tokens;
-        match self.ctx.island.media() {
-            Some(s) => {
-                let view = expanded(s, &self.ctx.island.sources(), now_unix_ms(), scale, self.ctx.theme.theme.font.scale, tokens);
+        let mut list = match (tab, self.ctx.island.media(), &self.ctx.island.weather) {
+            (Tab::Media, Some(s), _) => {
+                let view = expanded(s, &self.ctx.island.sources(), now_unix_ms(), scale, font_scale, tokens);
                 let list = view.list.clone();
                 self.island.expanded = Some(view);
                 window::set_timer(TIMER_ISLAND_TICK, 1000);
                 list
             }
-            None => {
+            (Tab::Weather, _, Some(w)) => {
                 self.island.expanded = None;
-                let today = now_local().date;
-                let (y, mo) = self.shown_month;
-                let grid = month_grid(y, mo, self.ctx.clock.first_weekday(), today);
-                calendar_paint(&grid, &calendar_names(&self.ctx.clock, y, mo, today), scale, tokens)
+                tabs::weather_tab(w, &forecast_names(), scale, font_scale, tokens)
             }
-        }
+            _ => {
+                self.island.expanded = None;
+                let h = self.island.hardware.as_ref().and_then(HardwareMonitor::latest).unwrap_or_default();
+                tabs::hardware_tab(&h, scale, font_scale, tokens)
+            }
+        };
+        let index = available.iter().position(|t| *t == tab).unwrap_or(0);
+        tabs::tab_dots(&mut list, available.len(), index, scale, tokens);
+        list
     }
 
-    /// Tipo efetivo do painel aberto (a ilha sem mídia se comporta como o calendário).
+    /// Roda do mouse no painel da ilha: troca de aba.
+    pub fn island_wheel(&mut self, delta: i32) -> Result<()> {
+        let next = tabs::step(&self.island_tabs(), self.island.tab, delta);
+        if next != self.island.tab {
+            self.island.tab = next;
+            self.redraw_island_panel()?;
+        }
+        Ok(())
+    }
+
+    /// Nova leitura do clima: pílula ociosa e aba do clima.
+    pub fn island_weather(&mut self) -> Result<()> {
+        let w = self.island.weather.as_ref().and_then(WeatherService::weather);
+        if w != self.ctx.island.weather {
+            self.ctx.island.weather = w;
+            self.island_refresh()?;
+            if self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) && self.island.tab == Tab::Weather {
+                self.redraw_island_panel()?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Nova amostra do hardware, com a aba aberta.
+    pub fn island_hardware(&mut self) -> Result<()> {
+        if self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) && self.island.tab == Tab::Hardware {
+            self.redraw_island_panel()?;
+        } else {
+            self.island.hardware = None;
+        }
+        Ok(())
+    }
+
     pub fn effective_open_kind(&self) -> Option<PanelKind> {
-        let kind = self.controller.open()?.kind;
-        Some(if kind == PanelKind::Island && self.ctx.island.media().is_none() { PanelKind::Calendar } else { kind })
+        Some(self.controller.open()?.kind)
     }
 
     fn redraw_island_panel(&mut self) -> Result<()> {
@@ -338,7 +402,7 @@ impl Loop {
 
     /// A linha do tempo anda uma vez por segundo enquanto o painel da ilha está aberto.
     pub fn island_tick(&mut self) -> Result<()> {
-        if !self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) || self.ctx.island.media().is_none() {
+        if !self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) || self.ctx.island.media().is_none() || self.island.tab != Tab::Media {
             window::kill_timer(TIMER_ISLAND_TICK);
             self.island.expanded = None;
             return Ok(());
@@ -441,6 +505,14 @@ impl Loop {
     /// Ao fechar: o painel da ilha não guarda áreas de clique de um desenho antigo.
     pub fn island_panel_closed(&mut self) {
         self.island.expanded = None;
+        self.island.hardware = None;
         window::kill_timer(TIMER_ISLAND_TICK);
     }
+}
+
+/// Rótulos da previsão: "Hoje", "Amanhã" e o dia da semana de depois de amanhã.
+fn forecast_names() -> [String; 3] {
+    const SHORT: [&str; 7] = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+    let after = (zefiro_integration_clock::grid::weekday(now_local().date) + 2) % 7;
+    ["Hoje".into(), "Amanhã".into(), SHORT[after as usize].into()]
 }

@@ -42,6 +42,10 @@ pub const USER_NOTIFICATION: u32 = 11;
 pub const USER_DND: u32 = 12;
 /// Um dispositivo Bluetooth conectou ou desconectou.
 pub const USER_BLUETOOTH: u32 = 13;
+/// Nova leitura do clima.
+pub const USER_WEATHER: u32 = 14;
+/// Nova amostra do monitor de hardware.
+pub const USER_HARDWARE: u32 = 15;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
@@ -440,6 +444,9 @@ impl Loop {
                 }
             }
             WinEvent::Wheel { hwnd, delta } => {
+                if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) {
+                    return self.island_wheel(delta).map(|_| true);
+                }
                 if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind == PanelKind::Overflow) {
                     self.overflow_scroll = if delta > 0 { self.overflow_scroll.saturating_sub(1) } else { (self.overflow_scroll + 1).min(self.overflow_ids.len().saturating_sub(1)) };
                     self.redraw_open_panel()?;
@@ -468,6 +475,8 @@ impl Loop {
             WinEvent::User { code: USER_NOTIFICATION } => self.island_notifications()?,
             WinEvent::User { code: USER_DND } => self.island_dnd_changed()?,
             WinEvent::User { code: USER_BLUETOOTH } => self.island_bluetooth()?,
+            WinEvent::User { code: USER_WEATHER } => self.island_weather()?,
+            WinEvent::User { code: USER_HARDWARE } => self.island_hardware()?,
             WinEvent::DeviceChange { arrived, volume } => self.island_device(arrived, volume)?,
             WinEvent::ClipboardChanged => self.island_clipboard()?,
             WinEvent::LockKey { caps } => self.island_lock_key(caps)?,

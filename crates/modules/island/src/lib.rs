@@ -9,6 +9,8 @@ pub mod media;
 pub mod menu;
 pub mod model;
 pub mod state;
+pub mod tabs;
 pub mod timer;
 pub mod view;
 pub mod waveform;
+pub mod weather;

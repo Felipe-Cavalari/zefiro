@@ -43,7 +43,8 @@ pub fn paint(dc: &ID2D1DeviceContext, list: &DisplayList, text: &DWriteText) -> 
                     let b = dc.CreateSolidColorBrush(&d2d_color(*color), None)?;
                     let format = text.format(style, *align)?;
                     let utf16: Vec<u16> = s.encode_utf16().collect();
-                    dc.DrawText(&utf16, &format, &d2d_rect(*rect), &b, D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
+                    // Fonte colorida: os emojis do clima saem coloridos (Segoe UI Emoji por fallback).
+                    dc.DrawText(&utf16, &format, &d2d_rect(*rect), &b, D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT, DWRITE_MEASURING_MODE_NATURAL);
                 }
                 DrawOp::Image { rect, image, radius, opacity } => {
                     let props = D2D1_BITMAP_PROPERTIES1 {

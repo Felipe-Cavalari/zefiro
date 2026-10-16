@@ -12,6 +12,8 @@ pub struct IslandModel {
     pub state: IslandState,
     /// Câmera e microfone em uso (pontos de privacidade).
     pub privacy: crate::view::Privacy,
+    /// Última leitura do clima (pílula ociosa e aba do clima).
+    pub weather: Option<crate::weather::Weather>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -12,3 +12,5 @@ workspace = true
 zefiro-platform.workspace = true
 zefiro-resources.workspace = true
 zefiro-ui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
