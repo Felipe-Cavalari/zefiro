@@ -81,3 +81,14 @@ fn invalid_external_text_blocks_reload_and_keeps_last_valid_cancel_base() {
     editor.reload();
     assert_eq!(editor.draft, Config::default());
 }
+
+#[test]
+fn gallery_rejects_capacity_overflow_without_mutating_existing_unknown_items() {
+    let config = Config { bar: zefiro_core::config::BarConfig {
+        sections: zefiro_core::config::Sections { start: (0..64).map(|i| format!("@autor/item-{i}")).collect(), center: Vec::new(), end: Vec::new() },
+        ..Default::default()
+    }, ..Default::default() };
+    let mut editor = EditorSession::new(config.clone(), String::new());
+    assert!(editor.add("clock", Section::End).is_err());
+    assert_eq!(editor.draft, config);
+}

@@ -48,6 +48,7 @@ impl EditorSession {
     pub fn add(&mut self, id: &str, section: Section) -> Result<(), String> {
         if super::catalog::descriptor(id).is_none() { return Err("Item indisponível".into()); }
         if self.sections().ids().any(|item| item == id) { return Err("Já adicionado".into()); }
+        if self.sections().ids().count() >= 64 { return Err("O layout já tem 64 itens; remova um antes de adicionar".into()); }
         section.items_mut(self.sections_mut()?).push(id.into());
         Ok(())
     }

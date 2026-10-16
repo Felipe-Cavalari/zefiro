@@ -17,3 +17,17 @@ fn keyboard_focus_scrolls_to_controls_and_footer_stays_accessible() {
     assert!(boxes.iter().any(|(a, _)| *a == EditorAction::Save));
     for (_, r) in boxes { assert!(r.y >= 0.0 && r.bottom() <= 280.0); }
 }
+
+#[test]
+fn selected_item_focus_follows_identity_after_moving_between_sections() {
+    let mut session = EditorSession::new(Config::default(), String::new());
+    let mut panel = EditorPanel::default();
+    let names = ["Principal".into()];
+    let item = EditorAction::SelectItem("clock".into());
+    panel.focus_action(&session, &names, &item, 4);
+    assert_eq!(panel.rows(&session, &names)[panel.focus].action, item);
+    session.move_item("clock", zefiro_bar::editor::Section::Start, 0).unwrap();
+    panel.focus_action(&session, &names, &item, 4);
+    assert_eq!(panel.rows(&session, &names)[panel.focus].action, item);
+    assert!(panel.focus >= panel.scroll && panel.focus < panel.scroll + 4);
+}

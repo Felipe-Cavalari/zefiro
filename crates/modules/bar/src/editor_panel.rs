@@ -62,8 +62,9 @@ impl EditorPanel {
                 row("Mover antes".into(), EditorAction::MoveBefore, self.selected.is_some());
                 row("Mover depois".into(), EditorAction::MoveAfter, self.selected.is_some());
                 for section in Section::ALL { row(format!("Mover para {}", section.label()), EditorAction::MoveSection(section), self.selected.is_some()); }
-                for id in session.draft.bar.monitors.keys().filter(|id| Some(id.as_str()) != session.monitor_id.as_deref()) {
-                    row(format!("Copiar layout salvo: {id}"), EditorAction::CopyMonitor(id.clone()), session.draft.bar.layout_mode == LayoutMode::PerMonitor && session.monitor_id.is_some());
+                for (index, (id, monitor)) in session.draft.bar.monitors.iter().filter(|(id, _)| Some(id.as_str()) != session.monitor_id.as_deref()).enumerate() {
+                    let preview = monitor.sections.ids().map(crate::catalog::name).collect::<Vec<_>>().join(", ");
+                    row(format!("Copiar layout salvo {} · {}", index + 1, if preview.is_empty() { "vazio" } else { &preview }), EditorAction::CopyMonitor(id.clone()), session.draft.bar.layout_mode == LayoutMode::PerMonitor && session.monitor_id.is_some());
                 }
             }
             EditorPage::Gallery => {
@@ -94,6 +95,15 @@ impl EditorPanel {
         if self.focus < body {
             if self.focus < self.scroll { self.scroll = self.focus; }
             if self.focus >= self.scroll + visible { self.scroll = self.focus + 1 - visible; }
+        }
+    }
+
+    pub fn focus_action(&mut self, session: &EditorSession, names: &[String], action: &EditorAction, visible: usize) {
+        let rows = self.rows(session, names);
+        if let Some(index) = rows.iter().position(|row| &row.action == action) {
+            self.focus = index;
+            if index < self.scroll { self.scroll = index; }
+            if index >= self.scroll + visible { self.scroll = index + 1 - visible; }
         }
     }
 
