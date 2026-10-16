@@ -3,18 +3,19 @@
 
 use zefiro_platform::color::Rgba;
 use zefiro_platform::geometry::{Point, Rect, Size};
-use zefiro_platform::text::{Align, Family, FontWeight, TextStyle};
+use zefiro_platform::text::{Align, Family, FontWeight, TextMeasurer, TextStyle};
 use zefiro_resources::tokens::Tokens;
 use zefiro_ui::paint::{DisplayList, DrawOp};
 
 use crate::view::EXPANDED_DESIGN;
+use crate::lyrics::{Lyrics, current_line, line_progress};
 use crate::weather::{Weather, icon};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Tab { #[default] Media, Weather, Hardware }
+pub enum Tab { #[default] Media, Weather, Hardware, Lyrics }
 
 /// Abas disponíveis agora, na ordem da ilha.
-pub fn available(has_media: bool, has_weather: bool) -> Vec<Tab> {
+pub fn available(has_media: bool, has_weather: bool, has_lyrics: bool) -> Vec<Tab> {
     let mut tabs = Vec::new();
     if has_media {
         tabs.push(Tab::Media);
@@ -23,6 +24,9 @@ pub fn available(has_media: bool, has_weather: bool) -> Vec<Tab> {
         tabs.push(Tab::Weather);
     }
     tabs.push(Tab::Hardware);
+    if has_media && has_lyrics {
+        tabs.push(Tab::Lyrics);
+    }
     tabs
 }
 
@@ -139,6 +143,52 @@ pub fn hardware_tab(h: &Hardware, scale: f32, font_scale: f32, tokens: &Tokens) 
     list
 }
 
+/// Letras: linha anterior apagada, a atual grande com o karaokê (parte cantada acende da esquerda
+/// para a direita) e as duas próximas apagadas. Sem sincronia, só o começo do texto.
+pub fn lyrics_tab(l: &Lyrics, position_ms: i64, scale: f32, font_scale: f32, tokens: &Tokens, m: &dyn TextMeasurer) -> DisplayList {
+    let px = |v: f32| v * scale;
+    let fs = |v: f32| v * scale * font_scale;
+    let mut list = panel(scale);
+    let x = px(24.0);
+    let w = list.size.w - 2.0 * x;
+    let dim = text(fs(13.0), FontWeight::Regular);
+    let line = |list: &mut DisplayList, s: &str, y: f32, h: f32, style: TextStyle, color: Rgba| list.push(DrawOp::Text { rect: Rect::new(x, y, w, h), text: s.to_string(), style, color, align: Align::Center });
+    if !l.synced {
+        for (i, t) in l.lines.iter().take(6).enumerate() {
+            line(&mut list, &t.text, px(14.0) + i as f32 * px(24.0), px(22.0), dim, tokens.text_secondary);
+        }
+        return list;
+    }
+    let current = current_line(&l.lines, position_ms);
+    let text_at = |i: usize| l.lines.get(i).map(|x| if x.text.is_empty() { "♪" } else { x.text.as_str() });
+    if let Some(prev) = current.and_then(|i| i.checked_sub(1)).and_then(text_at) {
+        line(&mut list, prev, px(16.0), px(22.0), dim, tokens.text_tertiary);
+    }
+    let big = text(fs(19.5), FontWeight::SemiBold);
+    let main_y = px(50.0);
+    let main_h = px(38.0);
+    match current.and_then(|i| text_at(i).map(|t| (i, t))) {
+        Some((i, t)) => {
+            // Parte não cantada a 60 %, depois a parte cantada recortada até a frente da varredura.
+            line(&mut list, t, main_y, main_h, big, tokens.text.with_alpha(0.6 * tokens.text.a));
+            let tw = m.measure(t, &big).w.min(w);
+            let start = x + (w - tw) / 2.0;
+            let front = start + tw * line_progress(&l.lines, i, position_ms);
+            list.push(DrawOp::PushClip(Rect::new(x, main_y, (front - x).max(0.0), main_h)));
+            line(&mut list, t, main_y, main_h, big, tokens.accent);
+            list.push(DrawOp::PopClip);
+        }
+        None => line(&mut list, "♪", main_y, main_h, big, tokens.text_secondary),
+    }
+    let next = current.map_or(0, |i| i + 1);
+    for (k, y) in [(0, 98.0), (1, 124.0)] {
+        if let Some(t) = text_at(next + k) {
+            line(&mut list, t, px(y), px(22.0), dim, if k == 0 { tokens.text_secondary } else { tokens.text_tertiary });
+        }
+    }
+    list
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,9 +206,11 @@ mod tests {
 
     #[test]
     fn tabs_follow_what_is_available_and_the_wheel_does_not_wrap() {
-        assert_eq!(available(true, true), vec![Tab::Media, Tab::Weather, Tab::Hardware]);
-        assert_eq!(available(false, false), vec![Tab::Hardware]);
-        let tabs = available(true, true);
+        assert_eq!(available(true, true, false), vec![Tab::Media, Tab::Weather, Tab::Hardware]);
+        assert_eq!(available(true, false, true), vec![Tab::Media, Tab::Hardware, Tab::Lyrics]);
+        assert_eq!(available(false, false, true), vec![Tab::Hardware], "sem mídia, sem letra");
+        assert_eq!(available(false, false, false), vec![Tab::Hardware]);
+        let tabs = available(true, true, false);
         assert_eq!(step(&tabs, Tab::Media, -120), Tab::Weather);
         assert_eq!(step(&tabs, Tab::Media, 120), Tab::Media);
         assert_eq!(step(&tabs, Tab::Hardware, -120), Tab::Hardware);
@@ -186,5 +238,40 @@ mod tests {
         assert_eq!(load_color(95.0, &tokens()), Rgba::rgb(0xFF, 0x45, 0x3A));
         assert_eq!(load_color(80.0, &tokens()), Rgba::rgb(0xFF, 0x9F, 0x0A));
         assert_eq!(load_color(10.0, &tokens()), tokens().accent);
+    }
+}
+
+#[cfg(test)]
+mod lyrics_tests {
+    use super::*;
+    use crate::lyrics::{parse_lrc, parse_plain};
+    use zefiro_platform::text::FixedWidthMeasurer;
+    use zefiro_resources::theme::{BUILTIN, parse_theme};
+    use zefiro_resources::tokens::derive_tokens;
+
+    fn tokens() -> Tokens {
+        derive_tokens(&parse_theme("obsidian", "o", BUILTIN[0].1).unwrap(), Rgba::rgb(0, 120, 215), None)
+    }
+
+    #[test]
+    fn current_line_is_drawn_twice_with_the_sung_part_clipped() {
+        let l = Lyrics { synced: true, lines: parse_lrc("[00:01.00]um\n[00:05.00]dois três\n[00:09.00]quatro\n[00:12.00]cinco\n") };
+        let list = lyrics_tab(&l, 6_510, 1.0, 1.0, &tokens(), &FixedWidthMeasurer);
+        let texts: Vec<&str> = list.ops.iter().filter_map(|o| if let DrawOp::Text { text, .. } = o { Some(text.as_str()) } else { None }).collect();
+        assert_eq!(texts, ["um", "dois três", "dois três", "quatro", "cinco"]);
+        let clip = list.ops.iter().find_map(|o| if let DrawOp::PushClip(r) = o { Some(*r) } else { None }).unwrap();
+        // Metade da linha cantada: a frente fica no meio do texto centralizado.
+        let tw = FixedWidthMeasurer.measure("dois três", &text(19.5, FontWeight::SemiBold)).w;
+        assert!((clip.right() - (190.0 - tw / 2.0 + tw * 0.5)).abs() < 1.0, "{clip:?}");
+        assert!(list.ops.contains(&DrawOp::PopClip));
+    }
+
+    #[test]
+    fn before_the_first_line_and_plain_lyrics() {
+        let l = Lyrics { synced: true, lines: parse_lrc("[00:10.00]um\n") };
+        let list = lyrics_tab(&l, 0, 1.0, 1.0, &tokens(), &FixedWidthMeasurer);
+        assert!(list.ops.iter().any(|o| matches!(o, DrawOp::Text { text, .. } if text == "♪")));
+        let plain = Lyrics { synced: false, lines: parse_plain("a\nb") };
+        assert_eq!(lyrics_tab(&plain, 0, 1.0, 1.0, &tokens(), &FixedWidthMeasurer).ops.len(), 2);
     }
 }

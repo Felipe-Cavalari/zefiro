@@ -13,6 +13,9 @@ pub enum DrawOp {
     Text { rect: Rect, text: String, style: TextStyle, color: Rgba, align: Align },
     /// Imagem esticada para `rect`, recortada num retângulo arredondado.
     Image { rect: Rect, image: Image, radius: f32, opacity: f32 },
+    /// Recorta as operações seguintes até `PopClip` (karaokê das letras).
+    PushClip(Rect),
+    PopClip,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -39,6 +42,8 @@ impl DisplayList {
                 DrawOp::Circle { center, radius, color } => DrawOp::Circle { center: Point { x: center.x + dx, y: center.y + dy }, radius, color },
                 DrawOp::Text { rect, text, style, color, align } => DrawOp::Text { rect: mv(rect), text, style, color, align },
                 DrawOp::Image { rect, image, radius, opacity } => DrawOp::Image { rect: mv(rect), image, radius, opacity },
+                DrawOp::PushClip(rect) => DrawOp::PushClip(mv(rect)),
+                DrawOp::PopClip => DrawOp::PopClip,
             })
             .collect();
         DisplayList { size: self.size, ops }

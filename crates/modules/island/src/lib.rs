@@ -5,6 +5,7 @@
 pub mod accent;
 pub mod analyzer;
 pub mod audio_route;
+pub mod lyrics;
 pub mod media;
 pub mod menu;
 pub mod model;

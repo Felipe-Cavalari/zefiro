@@ -46,6 +46,8 @@ pub const USER_BLUETOOTH: u32 = 13;
 pub const USER_WEATHER: u32 = 14;
 /// Nova amostra do monitor de hardware.
 pub const USER_HARDWARE: u32 = 15;
+/// Chegou (ou não) a letra da faixa atual.
+pub const USER_LYRICS: u32 = 16;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
@@ -58,6 +60,8 @@ pub const TIMER_ISLAND_PEEK: usize = 6;
 pub const TIMER_ISLAND_TICK: usize = 7;
 /// Timer de foco, uma vez por segundo enquanto roda.
 pub const TIMER_FOCUS: usize = 8;
+/// Karaokê da aba de letras (15 Hz, só com a aba na tela e tocando).
+pub const TIMER_LYRICS: usize = 9;
 const CYCLE_HALF_MS: u32 = 450;
 
 const VK_ESCAPE: u32 = 0x1B;
@@ -477,6 +481,8 @@ impl Loop {
             WinEvent::User { code: USER_BLUETOOTH } => self.island_bluetooth()?,
             WinEvent::User { code: USER_WEATHER } => self.island_weather()?,
             WinEvent::User { code: USER_HARDWARE } => self.island_hardware()?,
+            WinEvent::User { code: USER_LYRICS } => self.island_lyrics()?,
+            WinEvent::Timer { id: TIMER_LYRICS } => self.island_lyrics_tick()?,
             WinEvent::DeviceChange { arrived, volume } => self.island_device(arrived, volume)?,
             WinEvent::ClipboardChanged => self.island_clipboard()?,
             WinEvent::LockKey { caps } => self.island_lock_key(caps)?,

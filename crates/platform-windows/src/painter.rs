@@ -46,6 +46,8 @@ pub fn paint(dc: &ID2D1DeviceContext, list: &DisplayList, text: &DWriteText) -> 
                     // Fonte colorida: os emojis do clima saem coloridos (Segoe UI Emoji por fallback).
                     dc.DrawText(&utf16, &format, &d2d_rect(*rect), &b, D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT, DWRITE_MEASURING_MODE_NATURAL);
                 }
+                DrawOp::PushClip(rect) => dc.PushAxisAlignedClip(&d2d_rect(*rect), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE),
+                DrawOp::PopClip => dc.PopAxisAlignedClip(),
                 DrawOp::Image { rect, image, radius, opacity } => {
                     let props = D2D1_BITMAP_PROPERTIES1 {
                         pixelFormat: D2D1_PIXEL_FORMAT { format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED },

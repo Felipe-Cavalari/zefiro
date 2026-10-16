@@ -14,6 +14,8 @@ pub struct IslandModel {
     pub privacy: crate::view::Privacy,
     /// Última leitura do clima (pílula ociosa e aba do clima).
     pub weather: Option<crate::weather::Weather>,
+    /// Letra da faixa atual, quando o LRCLIB tem.
+    pub lyrics: Option<crate::lyrics::Lyrics>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -12,6 +12,7 @@ pub mod gfx;
 pub mod hardware;
 pub mod http;
 pub mod imaging;
+pub mod lyrics;
 pub mod island_zorder;
 pub mod media;
 pub mod monitors;

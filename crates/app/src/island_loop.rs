@@ -22,6 +22,7 @@ use zefiro_platform_windows::dnd;
 use zefiro_platform_windows::bluetooth::BluetoothWatcher;
 use zefiro_platform_windows::weather::WeatherService;
 use zefiro_platform_windows::hardware::HardwareMonitor;
+use zefiro_platform_windows::lyrics::{LyricsRequest, LyricsService};
 use zefiro_island::tabs::{self, Tab};
 use zefiro_island::view::Privacy;
 use zefiro_island::menu::{self, AppOutput, MenuCommand, MenuInput};
@@ -31,7 +32,7 @@ use zefiro_platform_windows::window;
 use zefiro_ui::paint::DisplayList;
 
 use crate::bar_view::ISLAND_CHIP;
-use crate::event_loop::{Loop, TIMER_FOCUS, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_BLUETOOTH, USER_DND, USER_HARDWARE, USER_MEDIA, USER_NOTIFICATION, USER_PRIVACY, USER_VISUALIZER, USER_VOLUME, USER_WEATHER};
+use crate::event_loop::{Loop, TIMER_FOCUS, TIMER_LYRICS, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_BLUETOOTH, USER_DND, USER_HARDWARE, USER_LYRICS, USER_MEDIA, USER_NOTIFICATION, USER_PRIVACY, USER_VISUALIZER, USER_VOLUME, USER_WEATHER};
 
 /// Destaque quando a capa não tem cor viva (o mesmo padrão da ilha C++).
 const DEFAULT_ACCENT: Rgba = Rgba { r: 0x4C as f32 / 255.0, g: 0xC9 as f32 / 255.0, b: 0xF0 as f32 / 255.0, a: 1.0 };
@@ -48,6 +49,9 @@ pub struct IslandRuntime {
     weather: Option<WeatherService>,
     hardware: Option<HardwareMonitor>,
     tab: Tab,
+    lyrics: Option<LyricsService>,
+    /// Faixa cuja letra foi pedida por último.
+    lyrics_for: Option<LyricsRequest>,
     /// Área de transferência e Caps Lock ligados na janela de mensagens.
     listening: bool,
     capture: Option<AudioCapture>,
@@ -106,6 +110,16 @@ impl Loop {
         } else if !embedded {
             self.island.weather = None;
             self.ctx.island.weather = None;
+        }
+        if embedded && self.island.lyrics.is_none() {
+            let dir = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from).unwrap_or_default().join("zefiro").join("lyrics");
+            match LyricsService::start(dir, Arc::new(|| window::post_user(USER_LYRICS))) {
+                Ok(s) => self.island.lyrics = Some(s),
+                Err(e) => tracing::warn!("letras indisponíveis: {e}"),
+            }
+        } else if !embedded {
+            self.island.lyrics = None;
+            self.ctx.island.lyrics = None;
         }
         if embedded && self.island.bluetooth.is_none() {
             match BluetoothWatcher::start(Arc::new(|| window::post_user(USER_BLUETOOTH))) {
@@ -237,12 +251,49 @@ impl Loop {
                 self.apply_bars(true)?;
             }
         }
+        self.island_request_lyrics();
         self.island_refresh()?;
         if self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) {
             self.redraw_island_panel()?;
         }
         self.island_capture();
         Ok(())
+    }
+
+    /// Faixa nova: pede a letra (cache ou LRCLIB) e esquece a da faixa anterior.
+    fn island_request_lyrics(&mut self) {
+        let req = self.ctx.island.media().map(|s| LyricsRequest { artist: s.artist.clone(), title: s.title.clone(), album: s.album.clone(), duration_s: s.duration_s.round() as u32 });
+        if req == self.island.lyrics_for {
+            return;
+        }
+        self.ctx.island.lyrics = None;
+        if let (Some(r), Some(service)) = (&req, &self.island.lyrics) {
+            service.request(r.clone());
+        }
+        self.island.lyrics_for = req;
+    }
+
+    pub fn island_lyrics(&mut self) -> Result<()> {
+        let Some((req, lyrics)) = self.island.lyrics.as_ref().and_then(LyricsService::state) else { return Ok(()) };
+        if Some(&req) != self.island.lyrics_for.as_ref() {
+            return Ok(());
+        }
+        self.ctx.island.lyrics = lyrics;
+        if self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) {
+            self.redraw_island_panel()?;
+        }
+        Ok(())
+    }
+
+    /// Karaokê: redesenha a aba de letras a 15 Hz enquanto toca e ela está na tela.
+    pub fn island_lyrics_tick(&mut self) -> Result<()> {
+        let visible = self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) && self.island.tab == Tab::Lyrics;
+        if visible && self.ctx.island.playing() && self.ctx.island.lyrics.as_ref().is_some_and(|l| l.synced) {
+            self.redraw_island_panel()
+        } else {
+            window::kill_timer(TIMER_LYRICS);
+            Ok(())
+        }
     }
 
     /// Redesenha a pílula e agenda o fim da espiada.
@@ -313,7 +364,7 @@ impl Loop {
     }
 
     fn island_tabs(&self) -> Vec<Tab> {
-        tabs::available(self.ctx.island.media().is_some(), self.ctx.island.weather.is_some())
+        tabs::available(self.ctx.island.media().is_some(), self.ctx.island.weather.is_some(), self.ctx.island.lyrics.is_some())
     }
 
     /// O painel da ilha: a aba atual (mídia, clima ou hardware) e os pontos das abas.
@@ -342,6 +393,14 @@ impl Loop {
             (Tab::Weather, _, Some(w)) => {
                 self.island.expanded = None;
                 tabs::weather_tab(w, &forecast_names(), scale, font_scale, tokens)
+            }
+            (Tab::Lyrics, Some(s), _) if self.ctx.island.lyrics.is_some() => {
+                self.island.expanded = None;
+                let position_ms = (s.position_at(now_unix_ms()) * 1000.0) as i64;
+                if self.ctx.island.playing() {
+                    window::set_timer(TIMER_LYRICS, 66);
+                }
+                tabs::lyrics_tab(self.ctx.island.lyrics.as_ref().expect("conferido no padrão"), position_ms, scale, font_scale, tokens, &self.ctx.text)
             }
             _ => {
                 self.island.expanded = None;
