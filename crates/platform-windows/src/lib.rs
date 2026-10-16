@@ -14,4 +14,5 @@ pub mod painter;
 pub mod system;
 pub mod text;
 pub mod text_input;
+pub mod volume;
 pub mod window;

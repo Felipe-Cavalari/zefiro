@@ -32,6 +32,8 @@ pub const USER_EDITOR_IO: u32 = 6;
 pub const USER_MEDIA: u32 = 7;
 /// Chegou áudio novo para o visualizador (no máximo a 60 Hz).
 pub const USER_VISUALIZER: u32 = 8;
+/// O volume ou o mudo da saída padrão mudou.
+pub const USER_VOLUME: u32 = 9;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
@@ -445,6 +447,7 @@ impl Loop {
             WinEvent::Timer { id: TIMER_ISLAND_TICK } => self.island_tick()?,
             WinEvent::User { code: USER_MEDIA } => self.island_media_changed()?,
             WinEvent::User { code: USER_VISUALIZER } => self.island_visualizer()?,
+            WinEvent::User { code: USER_VOLUME } => self.island_volume_changed()?,
             WinEvent::Timer { id: TIMER_GRAPHICS_TRIM } => {
                 window::kill_timer(TIMER_GRAPHICS_TRIM);
                 if self.controller.open().is_none() && self.editor.is_none() { self.ctx.gfx.trim_idle_resources(); }

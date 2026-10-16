@@ -11,6 +11,7 @@ use zefiro_resources::tokens::Tokens;
 use zefiro_ui::paint::{DisplayList, DrawOp};
 
 use crate::media::{MediaSession, Playback};
+use crate::state::Activity;
 
 /// Alturas de projeto de cada estado recolhido.
 pub const MEDIA_DESIGN: Size = Size { w: 150.0, h: 44.0 };
@@ -26,8 +27,41 @@ const ICON_NEXT: &str = "\u{E893}";
 const ICON_PLAY: &str = "\u{E768}";
 const ICON_PAUSE: &str = "\u{E769}";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Collapsed { Idle, Media, Peek }
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Collapsed { Idle, Media, Peek, Activity(Activity) }
+
+/// Aviso de volume/brilho: 300 × 54 (px de conteúdo), ícone, barra e porcentagem.
+pub const OSD_DESIGN: Size = Size { w: 300.0, h: 54.0 };
+
+const ICON_MUTE: &str = "\u{E74F}";
+const ICON_VOLUME: [&str; 4] = ["\u{E992}", "\u{E993}", "\u{E994}", "\u{E995}"];
+const ICON_BRIGHTNESS: &str = "\u{E706}";
+
+pub fn activity_pill(a: Activity, pill_h: f32, font_scale: f32, tokens: &Tokens) -> PillContent {
+    let k = pill_h / OSD_DESIGN.h;
+    let w = round2(OSD_DESIGN.w * k);
+    let mut list = DisplayList::new(Size { w, h: pill_h });
+    let (glyph, level, dim) = match a {
+        Activity::Volume { level, muted } => {
+            let glyph = if muted || level <= 0.0 { ICON_MUTE } else { ICON_VOLUME[((level * 3.0).ceil() as usize).clamp(1, 3)] };
+            (glyph, level, muted)
+        }
+        Activity::Brightness { level } => (ICON_BRIGHTNESS, level, false),
+    };
+    let level = level.clamp(0.0, 1.0);
+    let icon_rect = Rect::new(16.0 * k, 0.0, 26.0 * k, pill_h);
+    list.push(DrawOp::Text { rect: icon_rect, text: glyph.into(), style: icon(18.0 * k), color: tokens.text, align: Align::Center });
+    let pct_w = 44.0 * k;
+    let track = Rect::new(icon_rect.right() + 10.0 * k, (pill_h - 6.0 * k) / 2.0, w - icon_rect.right() - 10.0 * k - pct_w - 18.0 * k, 6.0 * k);
+    list.push(DrawOp::RoundRect { rect: track, radius: track.h / 2.0, color: tokens.raised_strong });
+    let fill = if dim { tokens.text_tertiary } else { tokens.accent };
+    if level > 0.0 {
+        list.push(DrawOp::RoundRect { rect: Rect::new(track.x, track.y, (track.w * level).max(track.h), track.h), radius: track.h / 2.0, color: fill });
+    }
+    let pct = format!("{}", (level * 100.0).round() as u32);
+    list.push(DrawOp::Text { rect: Rect::new(w - pct_w - 14.0 * k, 0.0, pct_w, pill_h), text: pct, style: style(14.0 * k * font_scale, FontWeight::SemiBold), color: tokens.text, align: Align::Trailing });
+    PillContent { size: Size { w, h: pill_h }, list, visualizer: None }
+}
 
 /// Conteúdo de uma pílula recolhida: tamanho, desenho e onde ficam as barras do visualizador.
 #[derive(Debug, Clone, PartialEq)]
@@ -274,5 +308,33 @@ mod tests {
         assert_eq!(time_text(65.4), "1:05");
         assert_eq!(time_text(3725.0), "1:02:05");
         assert_eq!(visualizer_bars(Rect::new(0.0, 0.0, 46.0, 10.0), 1.0), 10);
+    }
+}
+
+#[cfg(test)]
+mod osd_tests {
+    use super::*;
+    use zefiro_platform::color::Rgba;
+    use zefiro_resources::theme::{BUILTIN, parse_theme};
+    use zefiro_resources::tokens::derive_tokens;
+
+    fn tokens() -> Tokens {
+        derive_tokens(&parse_theme("obsidian", "o", BUILTIN[0].1).unwrap(), Rgba::rgb(0, 120, 215), None)
+    }
+
+    fn texts(p: &PillContent) -> Vec<String> {
+        p.list.ops.iter().filter_map(|o| if let DrawOp::Text { text, .. } = o { Some(text.clone()) } else { None }).collect()
+    }
+
+    #[test]
+    fn volume_pill_shows_icon_level_and_percent() {
+        let p = activity_pill(Activity::Volume { level: 0.42, muted: false }, 54.0, 1.0, &tokens());
+        assert_eq!(p.size, Size { w: 300.0, h: 54.0 });
+        assert_eq!(texts(&p), vec!["\u{E994}".to_string(), "42".into()]);
+        let muted = activity_pill(Activity::Volume { level: 0.42, muted: true }, 27.0, 1.0, &tokens());
+        assert_eq!(muted.size.w, 150.0);
+        assert_eq!(texts(&muted)[0], ICON_MUTE);
+        let b = activity_pill(Activity::Brightness { level: 1.2 }, 54.0, 1.0, &tokens());
+        assert_eq!(texts(&b), vec![ICON_BRIGHTNESS.to_string(), "100".into()]);
     }
 }
