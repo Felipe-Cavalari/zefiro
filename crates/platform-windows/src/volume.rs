@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use windows::Win32::Media::Audio::Endpoints::{IAudioEndpointVolume, IAudioEndpointVolumeCallback, IAudioEndpointVolumeCallback_Impl};
 use windows::Win32::Media::Audio::{
     AUDIO_VOLUME_NOTIFICATION_DATA, DEVICE_STATE, EDataFlow, ERole, IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator, eConsole,
-    eRender,
+    eCapture, eRender,
 };
 use windows::Win32::System::Com::{CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize};
 use windows::Win32::Foundation::PROPERTYKEY;
@@ -32,7 +32,7 @@ impl IAudioEndpointVolumeCallback_Impl for VolumeCallback_Impl {
 }
 
 #[implement(IMMNotificationClient)]
-struct DeviceCallback { tx: Sender<Msg> }
+struct DeviceCallback { tx: Sender<Msg>, flow: EDataFlow }
 
 impl IMMNotificationClient_Impl for DeviceCallback_Impl {
     fn OnDeviceStateChanged(&self, _: &PCWSTR, _: DEVICE_STATE) -> Result<()> {
@@ -45,7 +45,7 @@ impl IMMNotificationClient_Impl for DeviceCallback_Impl {
         Ok(())
     }
     fn OnDefaultDeviceChanged(&self, flow: EDataFlow, role: ERole, _: &PCWSTR) -> Result<()> {
-        if flow == eRender && role == eConsole {
+        if flow == self.flow && role == eConsole {
             let _ = self.tx.send(Msg::DefaultChanged);
         }
         Ok(())
@@ -63,14 +63,16 @@ pub struct VolumeWatcher {
 
 impl VolumeWatcher {
     /// `notify` é chamado (em outra thread) a cada mudança de volume ou mudo feita por qualquer app.
-    pub fn start(notify: Arc<dyn Fn() + Send + Sync>) -> std::io::Result<VolumeWatcher> {
+    /// `flow`: saída padrão (alto-falante) ou entrada padrão (microfone).
+    pub fn start(flow: crate::audio_devices::Flow, notify: Arc<dyn Fn() + Send + Sync>) -> std::io::Result<VolumeWatcher> {
+        let data_flow = if flow == crate::audio_devices::Flow::Output { eRender } else { eCapture };
         let (tx, rx) = mpsc::channel();
         let state = Arc::new(Mutex::new(None));
         let (worker_tx, worker_state) = (tx.clone(), state.clone());
         let thread = std::thread::Builder::new().name("zefiro-volume".into()).spawn(move || {
             // SAFETY: COM nesta thread, liberado no fim.
             let inited = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_ok();
-            if let Err(e) = run(&rx, &worker_tx, &worker_state, notify.as_ref()) {
+            if let Err(e) = run(&rx, &worker_tx, &worker_state, notify.as_ref(), data_flow) {
                 tracing::warn!("volume do Windows indisponível: {e}");
             }
             if inited {
@@ -97,10 +99,10 @@ impl Drop for VolumeWatcher {
 
 struct Bound { volume: IAudioEndpointVolume, callback: IAudioEndpointVolumeCallback }
 
-fn bind(enumerator: &IMMDeviceEnumerator, tx: &Sender<Msg>) -> Result<(Bound, VolumeState)> {
+fn bind(enumerator: &IMMDeviceEnumerator, tx: &Sender<Msg>, flow: EDataFlow) -> Result<(Bound, VolumeState)> {
     // SAFETY: interfaces COM válidas nesta thread; o callback vive em `Bound` até ser removido.
     unsafe {
-        let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole)?;
+        let device = enumerator.GetDefaultAudioEndpoint(flow, eConsole)?;
         let volume: IAudioEndpointVolume = device.Activate(CLSCTX_ALL, None)?;
         let callback: IAudioEndpointVolumeCallback = VolumeCallback { tx: tx.clone() }.into();
         volume.RegisterControlChangeNotify(&callback)?;
@@ -114,10 +116,10 @@ fn unbind(b: &Bound) {
     let _ = unsafe { b.volume.UnregisterControlChangeNotify(&b.callback) };
 }
 
-fn run(rx: &mpsc::Receiver<Msg>, tx: &Sender<Msg>, state: &Mutex<Option<VolumeState>>, notify: &(dyn Fn() + Send + Sync)) -> Result<()> {
+fn run(rx: &mpsc::Receiver<Msg>, tx: &Sender<Msg>, state: &Mutex<Option<VolumeState>>, notify: &(dyn Fn() + Send + Sync), flow: EDataFlow) -> Result<()> {
     // SAFETY: enumerador COM criado nesta thread; o cliente de notificação é removido antes de sair.
     let enumerator: IMMDeviceEnumerator = unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)? };
-    let devices: IMMNotificationClient = DeviceCallback { tx: tx.clone() }.into();
+    let devices: IMMNotificationClient = DeviceCallback { tx: tx.clone(), flow }.into();
     // SAFETY: idem.
     unsafe { enumerator.RegisterEndpointNotificationCallback(&devices)? };
     let mut bound = None;
@@ -125,7 +127,7 @@ fn run(rx: &mpsc::Receiver<Msg>, tx: &Sender<Msg>, state: &Mutex<Option<VolumeSt
         if let Some(b) = bound.take() {
             unbind(&b);
         }
-        match bind(&enumerator, tx) {
+        match bind(&enumerator, tx, flow) {
             Ok((b, s)) => {
                 *bound = Some(b);
                 // O valor inicial (ou do dispositivo novo) não é uma mudança feita pelo usuário.
@@ -145,7 +147,11 @@ fn run(rx: &mpsc::Receiver<Msg>, tx: &Sender<Msg>, state: &Mutex<Option<VolumeSt
                     notify();
                 }
             }
-            Msg::DefaultChanged => rebind(&mut bound),
+            Msg::DefaultChanged => {
+                // Outro dispositivo padrão: a barra mostra o nível dele.
+                rebind(&mut bound);
+                notify();
+            }
             Msg::Stop => break,
         }
     }

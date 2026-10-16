@@ -5,6 +5,7 @@ pub mod app_icon;
 pub mod appbar;
 pub mod audio_devices;
 pub mod bluetooth;
+pub mod brightness;
 pub mod audio_capture;
 pub mod bar_context;
 pub mod compositor;

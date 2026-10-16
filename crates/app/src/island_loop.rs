@@ -85,7 +85,7 @@ impl Loop {
             self.ctx.island.update(Vec::new(), self.ctx.now());
         }
         if embedded && self.island.volume.is_none() {
-            match VolumeWatcher::start(Arc::new(|| window::post_user(USER_VOLUME))) {
+            match VolumeWatcher::start(Flow::Output, Arc::new(|| window::post_user(USER_VOLUME))) {
                 Ok(w) => self.island.volume = Some(w),
                 Err(e) => tracing::error!("não consegui iniciar a thread de volume: {e}"),
             }

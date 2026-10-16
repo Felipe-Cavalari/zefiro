@@ -187,19 +187,29 @@ pub fn set_default(id: &str) -> Result<()> {
     Ok(())
 }
 
-fn capture_volume() -> Result<IAudioEndpointVolume> {
-    // SAFETY: interfaces COM da entrada padrão.
-    unsafe { enumerator()?.GetDefaultAudioEndpoint(eCapture, eConsole)?.Activate(CLSCTX_ALL, None) }
+fn endpoint_volume(flow: Flow) -> Result<IAudioEndpointVolume> {
+    // SAFETY: interfaces COM do dispositivo padrão.
+    unsafe { enumerator()?.GetDefaultAudioEndpoint(flow.data_flow(), eConsole)?.Activate(CLSCTX_ALL, None) }
 }
 
 pub fn mic_muted() -> Option<bool> {
     // SAFETY: leitura simples do mudo.
-    capture_volume().ok().and_then(|v| unsafe { v.GetMute() }.ok()).map(|b| b.as_bool())
+    endpoint_volume(Flow::Input).ok().and_then(|v| unsafe { v.GetMute() }.ok()).map(|b| b.as_bool())
 }
 
 pub fn set_mic_muted(muted: bool) -> Result<()> {
-    // SAFETY: muda só o mudo da entrada padrão.
-    unsafe { capture_volume()?.SetMute(muted, std::ptr::null()) }
+    set_muted(Flow::Input, muted)
+}
+
+/// Volume do dispositivo padrão (0–100 %). O aviso de mudança volta pelo `VolumeWatcher`.
+pub fn set_volume(flow: Flow, percent: u32) -> Result<()> {
+    // SAFETY: muda só o nível do dispositivo padrão.
+    unsafe { endpoint_volume(flow)?.SetMasterVolumeLevelScalar(percent.min(100) as f32 / 100.0, std::ptr::null()) }
+}
+
+pub fn set_muted(flow: Flow, muted: bool) -> Result<()> {
+    // SAFETY: muda só o mudo do dispositivo padrão.
+    unsafe { endpoint_volume(flow)?.SetMute(muted, std::ptr::null()) }
 }
 
 /// Processos de um app agrupados por executável. O Windows grava a escolha por executável, mas só
