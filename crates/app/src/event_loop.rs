@@ -351,8 +351,13 @@ impl Loop {
                     }
                 }
             }
-            WinEvent::RightUp { hwnd, .. } => {
+            WinEvent::RightUp { hwnd, x, y } => {
+                tracing::debug!(hwnd, x, y, "botão direito");
                 if let Some(i) = self.bar_index(hwnd) {
+                    if self.bars[i].chip_at(x, y).as_deref() == Some(crate::bar_view::ISLAND_CHIP) {
+                        self.close_open_panel()?;
+                        return self.island_menu(i).map(|_| true);
+                    }
                     let already = self.controller.open().is_some_and(|o| o.chip == "zefiro" && o.monitor == i);
                     if !already {
                         let fx = self.controller.handle(PanelInput::ChipClick { monitor: i, chip: "zefiro".into() });

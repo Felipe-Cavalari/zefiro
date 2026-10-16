@@ -842,6 +842,7 @@ dependencies = [
  "zefiro-bar",
  "zefiro-core",
  "zefiro-integration-clock",
+ "zefiro-island",
  "zefiro-island-host",
  "zefiro-platform",
  "zefiro-platform-windows",

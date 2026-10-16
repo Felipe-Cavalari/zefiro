@@ -16,6 +16,9 @@ use zefiro_platform::geometry::Point;
 use zefiro_platform_windows::audio_capture::AudioCapture;
 use zefiro_platform_windows::media::{MediaCommand, MediaService, now_unix_ms};
 use zefiro_platform_windows::volume::VolumeWatcher;
+use zefiro_platform_windows::audio_devices::{self, AudioDevice, Flow, RouteState};
+use zefiro_platform_windows::popup_menu;
+use zefiro_island::menu::{self, AppOutput, MenuCommand, MenuInput};
 use zefiro_island::state::Activity;
 use zefiro_platform_windows::window;
 use zefiro_ui::paint::DisplayList;
@@ -232,6 +235,52 @@ impl Loop {
             service.command(command);
         }
         Ok(true)
+    }
+
+    /// Botão direito na ilha: fonte de mídia, saída de som do app, saída e microfone padrão.
+    pub fn island_menu(&mut self, bar: usize) -> Result<()> {
+        let pairs = |list: Vec<AudioDevice>| list.into_iter().map(|d| (d.id, d.name)).collect::<Vec<_>>();
+        let (outputs, default_output) = audio_devices::devices(Flow::Output).unwrap_or_default();
+        let (inputs, default_input) = audio_devices::devices(Flow::Input).unwrap_or_default();
+        let current = self.ctx.island.current().map(|s| (s.id.clone(), s.app_name.clone()));
+        let route = current.as_ref().map(|(id, name)| audio_devices::app_route(id, name));
+        let app_output = route.as_ref().map(|r| match r {
+            None => AppOutput::Unavailable,
+            Some((_, RouteState::Current(d))) => AppOutput::Current(d.clone()),
+            Some((_, RouteState::NoAudioYet)) => AppOutput::NoAudioYet,
+            Some((_, RouteState::NotRunning)) => AppOutput::NotRunning,
+        });
+        let input = MenuInput {
+            sources: self.ctx.island.sources(),
+            current_source: current.map(|(id, _)| id),
+            outputs: pairs(outputs),
+            default_output,
+            inputs: pairs(inputs),
+            default_input,
+            app_output,
+            mic_muted: audio_devices::mic_muted(),
+        };
+        let entries = menu::build(&input);
+        tracing::info!(itens = entries.len(), "menu da ilha");
+        let Some(id) = popup_menu::show(self.bars[bar].hwnd(), &entries)? else { return Ok(()) };
+        let result = match menu::command(&input, id) {
+            Some(MenuCommand::Source(source)) => {
+                let now = self.ctx.now();
+                self.ctx.island.pick(&source, now);
+                return self.island_refresh();
+            }
+            Some(MenuCommand::AppOutput(device)) => match route.flatten() {
+                Some((r, _)) => audio_devices::set_app_output(&r, device.as_deref()),
+                None => Ok(()),
+            },
+            Some(MenuCommand::DefaultOutput(d) | MenuCommand::DefaultInput(d)) => audio_devices::set_default(&d),
+            Some(MenuCommand::ToggleMicMute) => audio_devices::set_mic_muted(!input.mic_muted.unwrap_or(false)),
+            None => Ok(()),
+        };
+        if let Err(e) = result {
+            tracing::warn!(id, "ação do menu da ilha falhou: {e}");
+        }
+        Ok(())
     }
 
     /// Ao fechar: o painel da ilha não guarda áreas de clique de um desenho antigo.

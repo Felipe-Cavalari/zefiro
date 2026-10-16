@@ -2,6 +2,7 @@
 #![cfg(windows)]
 
 pub mod appbar;
+pub mod audio_devices;
 pub mod audio_capture;
 pub mod bar_context;
 pub mod compositor;
@@ -11,6 +12,7 @@ pub mod media;
 pub mod monitors;
 pub mod morph;
 pub mod painter;
+pub mod popup_menu;
 pub mod system;
 pub mod text;
 pub mod text_input;
