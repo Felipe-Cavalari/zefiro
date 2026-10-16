@@ -50,6 +50,8 @@ pub const TIMER_GRAPHICS_TRIM: usize = 5;
 pub const TIMER_ISLAND_PEEK: usize = 6;
 /// Linha do tempo do painel da ilha, uma vez por segundo.
 pub const TIMER_ISLAND_TICK: usize = 7;
+/// Timer de foco, uma vez por segundo enquanto roda.
+pub const TIMER_FOCUS: usize = 8;
 const CYCLE_HALF_MS: u32 = 450;
 
 const VK_ESCAPE: u32 = 0x1B;
@@ -456,6 +458,7 @@ impl Loop {
             WinEvent::Timer { id: TIMER_CYCLE } => self.cycle_tick()?,
             WinEvent::Timer { id: TIMER_ISLAND_PEEK } => self.island_peek_timer()?,
             WinEvent::Timer { id: TIMER_ISLAND_TICK } => self.island_tick()?,
+            WinEvent::Timer { id: TIMER_FOCUS } => self.island_focus_tick()?,
             WinEvent::User { code: USER_MEDIA } => self.island_media_changed()?,
             WinEvent::User { code: USER_VISUALIZER } => self.island_visualizer()?,
             WinEvent::User { code: USER_VOLUME } => self.island_volume_changed()?,

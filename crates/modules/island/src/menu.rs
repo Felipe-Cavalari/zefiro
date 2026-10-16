@@ -50,6 +50,8 @@ pub struct MenuInput {
     pub default_input: Option<String>,
     pub app_output: Option<AppOutput>,
     pub mic_muted: Option<bool>,
+    /// Timer de foco: `None` = parado; `Some(true)` = rodando; `Some(false)` = pausado.
+    pub timer_running: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +62,10 @@ pub enum MenuCommand {
     DefaultOutput(String),
     DefaultInput(String),
     ToggleMicMute,
+    /// (foco?, minutos)
+    StartTimer(bool, u32),
+    PauseResumeTimer,
+    StopTimer,
 }
 
 const SOURCE: u32 = 100;
@@ -67,6 +73,11 @@ const APP_OUTPUT: u32 = 200;
 const OUTPUT: u32 = 300;
 const INPUT: u32 = 400;
 const MIC_MUTE: u32 = 500;
+const TIMER_25: u32 = 600;
+const TIMER_50: u32 = 601;
+const TIMER_BREAK: u32 = 602;
+const TIMER_PAUSE: u32 = 603;
+const TIMER_STOP: u32 = 604;
 
 pub fn build(input: &MenuInput) -> Vec<MenuEntry> {
     let mut menu = Vec::new();
@@ -110,6 +121,14 @@ pub fn build(input: &MenuInput) -> Vec<MenuEntry> {
     if let Some(muted) = input.mic_muted {
         menu.push(MenuEntry::item("Microfone mudo", MIC_MUTE, muted));
     }
+    menu.push(MenuEntry::separator());
+    let mut timer = vec![MenuEntry::item("Foco de 25 min", TIMER_25, false), MenuEntry::item("Foco de 50 min", TIMER_50, false), MenuEntry::item("Pausa de 5 min", TIMER_BREAK, false)];
+    if let Some(running) = input.timer_running {
+        timer.push(MenuEntry::separator());
+        timer.push(MenuEntry::item(if running { "Pausar" } else { "Retomar" }, TIMER_PAUSE, false));
+        timer.push(MenuEntry::item("Parar", TIMER_STOP, false));
+    }
+    menu.push(MenuEntry::submenu("Timer de foco", timer));
     menu
 }
 
@@ -117,6 +136,11 @@ pub fn build(input: &MenuInput) -> Vec<MenuEntry> {
 pub fn command(input: &MenuInput, id: u32) -> Option<MenuCommand> {
     let at = |list: &[(String, String)], base: u32| list.get(id.checked_sub(base)? as usize).map(|(id, _)| id.clone());
     match id {
+        TIMER_25 => Some(MenuCommand::StartTimer(true, 25)),
+        TIMER_50 => Some(MenuCommand::StartTimer(true, 50)),
+        TIMER_BREAK => Some(MenuCommand::StartTimer(false, 5)),
+        TIMER_PAUSE => Some(MenuCommand::PauseResumeTimer),
+        TIMER_STOP => Some(MenuCommand::StopTimer),
         MIC_MUTE => Some(MenuCommand::ToggleMicMute),
         INPUT.. if id < MIC_MUTE => at(&input.inputs, INPUT).map(MenuCommand::DefaultInput),
         OUTPUT.. if id < INPUT => at(&input.outputs, OUTPUT).map(MenuCommand::DefaultOutput),
@@ -145,6 +169,7 @@ mod tests {
             default_input: Some("i1".into()),
             app_output: Some(AppOutput::Current(Some("O2".into()))),
             mic_muted: Some(false),
+            timer_running: None,
         }
     }
 
@@ -193,5 +218,24 @@ mod tests {
         let empty = MenuInput { outputs: pairs(&[("o1", "A")]), ..Default::default() };
         let menu = build(&empty);
         assert_eq!(menu[0].label, "Saída de som", "sem mídia, começa pelos dispositivos");
+    }
+}
+
+#[cfg(test)]
+mod timer_menu_tests {
+    use super::*;
+
+    #[test]
+    fn timer_submenu_offers_start_and_controls_only_when_running() {
+        let stopped = MenuInput::default();
+        let menu = build(&stopped);
+        let timer = menu.iter().find(|e| e.label == "Timer de foco").unwrap();
+        assert_eq!(timer.children.len(), 3);
+        assert_eq!(command(&stopped, timer.children[1].id), Some(MenuCommand::StartTimer(true, 50)));
+        let running = MenuInput { timer_running: Some(true), ..Default::default() };
+        let menu = build(&running);
+        let timer = menu.iter().find(|e| e.label == "Timer de foco").unwrap();
+        assert_eq!(timer.children[4].label, "Pausar");
+        assert_eq!(command(&running, timer.children[5].id), Some(MenuCommand::StopTimer));
     }
 }

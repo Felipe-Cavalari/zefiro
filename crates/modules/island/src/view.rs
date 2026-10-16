@@ -12,6 +12,7 @@ use zefiro_ui::paint::{DisplayList, DrawOp};
 
 use crate::media::{MediaSession, Playback};
 use crate::state::Activity;
+use crate::timer::{FocusTimer, TimerKind};
 
 /// Alturas de projeto de cada estado recolhido.
 pub const MEDIA_DESIGN: Size = Size { w: 150.0, h: 44.0 };
@@ -28,7 +29,7 @@ const ICON_PLAY: &str = "\u{E768}";
 const ICON_PAUSE: &str = "\u{E769}";
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Collapsed { Idle, Media, Peek, Activity(Activity) }
+pub enum Collapsed { Idle, Media, Peek, Activity(Activity), Timer(FocusTimer) }
 
 /// Aviso de volume/brilho: 300 × 54 (px de conteúdo), ícone, barra e porcentagem.
 pub const OSD_DESIGN: Size = Size { w: 300.0, h: 54.0 };
@@ -40,6 +41,29 @@ const ICON_COPY: &str = "\u{E8C8}";
 const ICON_KEYBOARD: &str = "\u{E765}";
 const ICON_QUIET: &str = "\u{E708}";
 const ICON_BELL: &str = "\u{EA8F}";
+
+const ICON_TIMER: &str = "\u{E916}";
+const ICON_BREAK: &str = "\u{EC32}";
+
+/// Timer de foco: 260 × 54, ícone, tempo restante e barra de progresso.
+pub fn timer_pill(t: &FocusTimer, now: f64, pill_h: f32, font_scale: f32, tokens: &Tokens) -> PillContent {
+    let k = pill_h / 54.0;
+    let w = round2(260.0 * k);
+    let mut list = DisplayList::new(Size { w, h: pill_h });
+    let paused = !t.running();
+    let color = if paused { tokens.text_tertiary } else { tokens.accent };
+    let glyph = if t.kind == TimerKind::Focus { ICON_TIMER } else { ICON_BREAK };
+    list.push(DrawOp::Text { rect: Rect::new(16.0 * k, 0.0, 26.0 * k, pill_h), text: glyph.into(), style: icon(18.0 * k), color, align: Align::Center });
+    let time_w = 64.0 * k;
+    list.push(DrawOp::Text { rect: Rect::new(52.0 * k, 0.0, time_w, pill_h), text: crate::timer::clock(t.remaining(now)), style: TextStyle { size: 15.0 * k * font_scale, weight: FontWeight::SemiBold, family: Family::Display }, color: tokens.text, align: Align::Leading });
+    let track = Rect::new(52.0 * k + time_w + 8.0 * k, (pill_h - 6.0 * k) / 2.0, w - (52.0 * k + time_w + 8.0 * k) - 18.0 * k, 6.0 * k);
+    list.push(DrawOp::RoundRect { rect: track, radius: track.h / 2.0, color: tokens.raised_strong });
+    let p = t.progress(now);
+    if p > 0.0 {
+        list.push(DrawOp::RoundRect { rect: Rect::new(track.x, track.y, (track.w * p).max(track.h), track.h), radius: track.h / 2.0, color });
+    }
+    PillContent { size: Size { w, h: pill_h }, list, visualizer: None, dots: Vec::new() }
+}
 
 /// Tamanho de projeto de cada aviso (tabela §3.2 das notas de porte).
 fn activity_design(a: &Activity) -> Size {

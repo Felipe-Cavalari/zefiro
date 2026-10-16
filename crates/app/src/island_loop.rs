@@ -25,11 +25,12 @@ use zefiro_platform_windows::dnd;
 use zefiro_island::view::Privacy;
 use zefiro_island::menu::{self, AppOutput, MenuCommand, MenuInput};
 use zefiro_island::state::{Activity, Notice};
+use zefiro_island::timer::{FocusTimer, TimerKind};
 use zefiro_platform_windows::window;
 use zefiro_ui::paint::DisplayList;
 
 use crate::bar_view::ISLAND_CHIP;
-use crate::event_loop::{Loop, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_DND, USER_MEDIA, USER_NOTIFICATION, USER_PRIVACY, USER_VISUALIZER, USER_VOLUME};
+use crate::event_loop::{Loop, TIMER_FOCUS, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_DND, USER_MEDIA, USER_NOTIFICATION, USER_PRIVACY, USER_VISUALIZER, USER_VOLUME};
 
 /// Destaque quando a capa não tem cor viva (o mesmo padrão da ilha C++).
 const DEFAULT_ACCENT: Rgba = Rgba { r: 0x4C as f32 / 255.0, g: 0xC9 as f32 / 255.0, b: 0xF0 as f32 / 255.0, a: 1.0 };
@@ -115,6 +116,22 @@ impl Loop {
             self.island_refresh()?;
         }
         Ok(())
+    }
+
+    /// Um segundo do timer de foco: atualiza a pílula e avisa ao terminar.
+    pub fn island_focus_tick(&mut self) -> Result<()> {
+        let now = self.ctx.now();
+        match self.ctx.island.state.timer {
+            None => window::kill_timer(TIMER_FOCUS),
+            Some(t) if t.finished(now) => {
+                self.ctx.island.state.timer = None;
+                window::kill_timer(TIMER_FOCUS);
+                let text = if t.kind == TimerKind::Focus { "Foco concluído; hora da pausa" } else { "Pausa concluída" };
+                self.ctx.island.state.activity(Activity::Notification(Notice { app: "Timer de foco".into(), text: text.into(), icon: None }), now);
+            }
+            Some(_) => {}
+        }
+        self.island_refresh()
     }
 
     pub fn island_dnd_changed(&mut self) -> Result<()> {
@@ -348,6 +365,7 @@ impl Loop {
             default_input,
             app_output,
             mic_muted: audio_devices::mic_muted(),
+            timer_running: self.ctx.island.state.timer.map(|t| t.running()),
         };
         let entries = menu::build(&input);
         tracing::info!(itens = entries.len(), "menu da ilha");
@@ -364,6 +382,24 @@ impl Loop {
             },
             Some(MenuCommand::DefaultOutput(d) | MenuCommand::DefaultInput(d)) => audio_devices::set_default(&d),
             Some(MenuCommand::ToggleMicMute) => audio_devices::set_mic_muted(!input.mic_muted.unwrap_or(false)),
+            Some(MenuCommand::StartTimer(focus, minutes)) => {
+                let kind = if focus { TimerKind::Focus } else { TimerKind::Break };
+                self.ctx.island.state.timer = Some(FocusTimer::start(kind, minutes, self.ctx.now()));
+                window::set_timer(TIMER_FOCUS, 1000);
+                return self.island_refresh();
+            }
+            Some(MenuCommand::PauseResumeTimer) => {
+                let now = self.ctx.now();
+                if let Some(t) = &mut self.ctx.island.state.timer {
+                    if t.running() { t.pause(now) } else { t.resume(now) }
+                }
+                return self.island_refresh();
+            }
+            Some(MenuCommand::StopTimer) => {
+                self.ctx.island.state.timer = None;
+                window::kill_timer(TIMER_FOCUS);
+                return self.island_refresh();
+            }
             None => Ok(()),
         };
         if let Err(e) = result {

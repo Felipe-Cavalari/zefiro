@@ -57,6 +57,8 @@ pub struct IslandState {
     hovering: bool,
     track: Option<(String, String, String)>,
     activities: Vec<(Activity, f64)>,
+    /// Timer de foco rodando ou pausado: ocupa a pílula acima da mídia.
+    pub timer: Option<crate::timer::FocusTimer>,
 }
 
 impl IslandState {
@@ -100,6 +102,9 @@ impl IslandState {
     pub fn collapsed(&self, has_media: bool, now: f64) -> Collapsed {
         if let Some(a) = self.current_activity(now) {
             return Collapsed::Activity(a);
+        }
+        if let Some(t) = self.timer {
+            return Collapsed::Timer(t);
         }
         if !has_media {
             return Collapsed::Idle;
