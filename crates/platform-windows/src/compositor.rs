@@ -132,6 +132,31 @@ impl Comp {
         visual.StartAnimation(&HSTRING::from("Opacity"), &a)
     }
 
+    /// Pulso de opacidade sem fim (1 → `low` → 1 a cada `period_s`), rodando só no compositor.
+    pub fn pulse(&self, visual: &Visual, low: f32, period_s: f32) -> Result<()> {
+        let a = self.compositor.CreateScalarKeyFrameAnimation()?;
+        a.InsertKeyFrame(0.0, 1.0)?;
+        a.InsertKeyFrame(0.5, low)?;
+        a.InsertKeyFrame(1.0, 1.0)?;
+        a.SetDuration(TimeSpan { Duration: (period_s as f64 * 1e7) as i64 })?;
+        a.SetIterationBehavior(AnimationIterationBehavior::Forever)?;
+        visual.StartAnimation(&HSTRING::from("Opacity"), &a)
+    }
+
+    /// Círculo cheio (ponto de privacidade) centrado em (0, 0) do visual devolvido.
+    pub fn dot(&self, radius: f32, color: Rgba) -> Result<ShapeVisual> {
+        let c = &self.compositor;
+        let g = c.CreateEllipseGeometry()?;
+        g.SetRadius(Vector2 { X: radius, Y: radius })?;
+        g.SetCenter(Vector2 { X: radius, Y: radius })?;
+        let s = c.CreateSpriteShapeWithGeometry(&g)?;
+        s.SetFillBrush(&c.CreateColorBrushWithColor(ui_color(color))?)?;
+        let v = c.CreateShapeVisual()?;
+        v.Shapes()?.Append(&s.cast::<CompositionShape>()?)?;
+        v.SetSize(Vector2 { X: 2.0 * radius, Y: 2.0 * radius })?;
+        Ok(v)
+    }
+
     /// Lote que avisa quando as animações iniciadas até `End()` terminarem. O aviso chega na thread de UI.
     pub fn on_settled(&self, f: impl FnOnce() + Send + 'static) -> Result<CompositionScopedBatch> {
         let batch = self.compositor.CreateScopedBatch(CompositionBatchTypes::Animation)?;

@@ -34,6 +34,8 @@ pub const USER_MEDIA: u32 = 7;
 pub const USER_VISUALIZER: u32 = 8;
 /// O volume ou o mudo da saída padrão mudou.
 pub const USER_VOLUME: u32 = 9;
+/// Câmera ou microfone passaram a ser usados (ou pararam).
+pub const USER_PRIVACY: u32 = 10;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
@@ -453,6 +455,7 @@ impl Loop {
             WinEvent::User { code: USER_MEDIA } => self.island_media_changed()?,
             WinEvent::User { code: USER_VISUALIZER } => self.island_visualizer()?,
             WinEvent::User { code: USER_VOLUME } => self.island_volume_changed()?,
+            WinEvent::User { code: USER_PRIVACY } => self.island_privacy_changed()?,
             WinEvent::Timer { id: TIMER_GRAPHICS_TRIM } => {
                 window::kill_timer(TIMER_GRAPHICS_TRIM);
                 if self.controller.open().is_none() && self.editor.is_none() { self.ctx.gfx.trim_idle_resources(); }

@@ -24,7 +24,7 @@ use zefiro_platform::text::{Align, Family, FontWeight, TextStyle};
 use crate::app::AppCtx;
 use crate::island_view::IslandView;
 use crate::theme_state::SurfaceKind;
-use zefiro_island::view::{Collapsed, PillContent, RESERVE_DESIGN_W, activity_pill, idle_pill, media_pill};
+use zefiro_island::view::{Collapsed, PillContent, RESERVE_DESIGN_W, activity_pill, idle_pill, media_pill, with_privacy};
 
 /// Id do "chip" da ilha embutida (clique, painel e foco usam o mesmo caminho dos chips).
 pub const ISLAND_CHIP: &str = "island";
@@ -59,12 +59,12 @@ fn island_content(ctx: &AppCtx, pill_h: f32) -> PillContent {
     let font_scale = ctx.theme.theme.font.scale;
     let tokens = &ctx.theme.tokens;
     match (ctx.island.collapsed(ctx.now()), ctx.island.media()) {
-        (Collapsed::Media, Some(s)) => media_pill(s, false, pill_h, font_scale, tokens),
-        (Collapsed::Peek, Some(s)) => media_pill(s, true, pill_h, font_scale, tokens),
+        (Collapsed::Media, Some(s)) => with_privacy(media_pill(s, false, pill_h, font_scale, tokens), ctx.island.privacy),
+        (Collapsed::Peek, Some(s)) => with_privacy(media_pill(s, true, pill_h, font_scale, tokens), ctx.island.privacy),
         (Collapsed::Activity(a), _) => activity_pill(a, pill_h, font_scale, tokens),
         _ => {
             let clock = ctx.clock.chip_text(&now_local(), "", false);
-            idle_pill(&clock, pill_h, font_scale, tokens, &ctx.text)
+            with_privacy(idle_pill(&clock, pill_h, font_scale, tokens, &ctx.text), ctx.island.privacy)
         }
     }
 }

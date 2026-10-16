@@ -18,13 +18,15 @@ use zefiro_platform_windows::media::{MediaCommand, MediaService, now_unix_ms};
 use zefiro_platform_windows::volume::VolumeWatcher;
 use zefiro_platform_windows::audio_devices::{self, AudioDevice, Flow, RouteState};
 use zefiro_platform_windows::popup_menu;
+use zefiro_platform_windows::privacy::PrivacyWatcher;
+use zefiro_island::view::Privacy;
 use zefiro_island::menu::{self, AppOutput, MenuCommand, MenuInput};
 use zefiro_island::state::Activity;
 use zefiro_platform_windows::window;
 use zefiro_ui::paint::DisplayList;
 
 use crate::bar_view::ISLAND_CHIP;
-use crate::event_loop::{Loop, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_MEDIA, USER_VISUALIZER, USER_VOLUME};
+use crate::event_loop::{Loop, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_MEDIA, USER_PRIVACY, USER_VISUALIZER, USER_VOLUME};
 
 /// Destaque quando a capa não tem cor viva (o mesmo padrão da ilha C++).
 const DEFAULT_ACCENT: Rgba = Rgba { r: 0x4C as f32 / 255.0, g: 0xC9 as f32 / 255.0, b: 0xF0 as f32 / 255.0, a: 1.0 };
@@ -35,6 +37,7 @@ const VISUALIZER_FRAME_MS: u128 = 16;
 pub struct IslandRuntime {
     media: Option<MediaService>,
     volume: Option<VolumeWatcher>,
+    privacy: Option<PrivacyWatcher>,
     capture: Option<AudioCapture>,
     waveform: Arc<Mutex<Waveform>>,
     expanded: Option<ExpandedView>,
@@ -65,6 +68,26 @@ impl Loop {
             }
         } else if !embedded {
             self.island.volume = None;
+        }
+        if embedded && self.island.privacy.is_none() {
+            match PrivacyWatcher::start(Arc::new(|| window::post_user(USER_PRIVACY))) {
+                Ok(w) => self.island.privacy = Some(w),
+                Err(e) => tracing::warn!("pontos de privacidade indisponíveis: {e}"),
+            }
+            self.island_privacy_changed()?;
+        } else if !embedded {
+            self.island.privacy = None;
+        }
+        Ok(())
+    }
+
+    /// Câmera ou microfone mudaram: os pontos aparecem ou somem na pílula.
+    pub fn island_privacy_changed(&mut self) -> Result<()> {
+        let state = self.island.privacy.as_ref().map(PrivacyWatcher::state).unwrap_or_default();
+        let privacy = Privacy { mic: state.mic, cam: state.cam };
+        if privacy != self.ctx.island.privacy {
+            self.ctx.island.privacy = privacy;
+            self.island_refresh()?;
         }
         Ok(())
     }

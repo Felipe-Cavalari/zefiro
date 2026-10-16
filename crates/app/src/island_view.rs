@@ -5,7 +5,8 @@ use windows::UI::Composition::{CompositionColorBrush, CompositionDrawingSurface,
 use windows::core::{HSTRING, Interface, Result};
 use windows_numerics::{Vector2, Vector3};
 use zefiro_island::view::{PillContent, visualizer_bars};
-use zefiro_platform::geometry::Rect;
+use zefiro_platform::color::Rgba;
+use zefiro_platform::geometry::{Point, Rect};
 use zefiro_platform_windows::compositor::ui_color;
 use zefiro_platform_windows::morph::{MorphShape, MorphStyle};
 use zefiro_ui::panel_layout::Shape;
@@ -22,6 +23,7 @@ pub struct IslandView {
     content: SpriteVisual,
     surface: CompositionDrawingSurface,
     bars: ContainerVisual,
+    dots: ContainerVisual,
     bar_sprites: Vec<SpriteVisual>,
     brush: CompositionColorBrush,
     pub rect: Rect,
@@ -46,8 +48,10 @@ impl IslandView {
         inner.Children()?.InsertAtTop(&content)?;
         let bars = c.CreateContainerVisual()?;
         inner.Children()?.InsertAtTop(&bars)?;
+        let dots = c.CreateContainerVisual()?;
+        inner.Children()?.InsertAtTop(&dots)?;
         let brush = c.CreateColorBrushWithColor(ui_color(ctx.theme.tokens.accent))?;
-        Ok(IslandView { shape, holder, inner, content, surface, bars, bar_sprites: Vec::new(), brush, rect: Rect::default(), vis: None, k: 1.0, drawn: None, shown: false })
+        Ok(IslandView { shape, holder, inner, content, surface, bars, dots, bar_sprites: Vec::new(), brush, rect: Rect::default(), vis: None, k: 1.0, drawn: None, shown: false })
     }
 
     pub fn root(&self) -> &ContainerVisual {
@@ -77,6 +81,9 @@ impl IslandView {
             self.content.SetSize(Vector2 { X: size.w, Y: size.h })?;
             self.k = rect.h / 44.0;
             self.place_bars(ctx, content.visualizer)?;
+            if self.drawn.as_ref().map(|d| &d.dots) != Some(&content.dots) {
+                self.place_dots(ctx, &content.dots)?;
+            }
             self.drawn = Some(content);
         }
         Ok(())
@@ -103,6 +110,20 @@ impl IslandView {
             self.bars.SetOffset(Vector3 { X: v.x, Y: v.y, Z: 0.0 })?;
         }
         self.set_levels(&[])
+    }
+
+    /// Pontos de privacidade pulsando (2 s por ciclo), só no compositor.
+    fn place_dots(&mut self, ctx: &AppCtx, dots: &[(Point, f32, Rgba)]) -> Result<()> {
+        self.dots.Children()?.RemoveAll()?;
+        for (center, radius, color) in dots {
+            let v = ctx.comp.dot(*radius, *color)?;
+            v.SetOffset(Vector3 { X: center.x - radius, Y: center.y - radius, Z: 0.0 })?;
+            self.dots.Children()?.InsertAtTop(&v)?;
+            if ctx.theme.animations {
+                ctx.comp.pulse(&v.cast::<Visual>()?, 0.35, 2.0)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn bar_count(&self) -> usize {

@@ -10,6 +10,8 @@ pub struct IslandModel {
     current: Option<String>,
     chooser: SourceChooser,
     pub state: IslandState,
+    /// Câmera e microfone em uso (pontos de privacidade).
+    pub privacy: crate::view::Privacy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

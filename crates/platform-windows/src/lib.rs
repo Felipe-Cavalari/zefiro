@@ -13,6 +13,7 @@ pub mod monitors;
 pub mod morph;
 pub mod painter;
 pub mod popup_menu;
+pub mod privacy;
 pub mod system;
 pub mod text;
 pub mod text_input;

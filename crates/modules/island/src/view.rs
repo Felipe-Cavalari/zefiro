@@ -20,7 +20,7 @@ pub const IDLE_DESIGN_H: f32 = 36.0;
 pub const EXPANDED_DESIGN: Size = Size { w: 380.0, h: 184.0 };
 /// Reserva estável no centro da barra: a maior pílula recolhida (espiando), para os chips das
 /// laterais não pularem quando a ilha muda de estado.
-pub const RESERVE_DESIGN_W: f32 = PEEK_DESIGN.w + 40.0;
+pub const RESERVE_DESIGN_W: f32 = PEEK_DESIGN.w + 60.0;
 
 const ICON_PREVIOUS: &str = "\u{E892}";
 const ICON_NEXT: &str = "\u{E893}";
@@ -60,7 +60,7 @@ pub fn activity_pill(a: Activity, pill_h: f32, font_scale: f32, tokens: &Tokens)
     }
     let pct = format!("{}", (level * 100.0).round() as u32);
     list.push(DrawOp::Text { rect: Rect::new(w - pct_w - 14.0 * k, 0.0, pct_w, pill_h), text: pct, style: style(14.0 * k * font_scale, FontWeight::SemiBold), color: tokens.text, align: Align::Trailing });
-    PillContent { size: Size { w, h: pill_h }, list, visualizer: None }
+    PillContent { size: Size { w, h: pill_h }, list, visualizer: None, dots: Vec::new() }
 }
 
 /// Conteúdo de uma pílula recolhida: tamanho, desenho e onde ficam as barras do visualizador.
@@ -70,6 +70,40 @@ pub struct PillContent {
     pub list: DisplayList,
     /// Área das barras do visualizador (coordenadas da pílula), quando há mídia.
     pub visualizer: Option<Rect>,
+    /// Pontos de privacidade (centro, raio, cor), desenhados e pulsados pelo compositor.
+    pub dots: Vec<(Point, f32, Rgba)>,
+}
+
+/// Câmera e microfone em uso.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Privacy { pub mic: bool, pub cam: bool }
+
+/// Cores da ilha: laranja `#FF9500` (microfone) e verde `#34C759` (câmera).
+pub fn mic_color() -> Rgba {
+    Rgba::rgb(0xFF, 0x95, 0x00)
+}
+
+pub fn cam_color() -> Rgba {
+    Rgba::rgb(0x34, 0xC7, 0x59)
+}
+
+/// Alarga a pílula à direita e põe os pontos (câmera antes do microfone), como a ilha reserva
+/// espaço para o ponto na ponta direita.
+pub fn with_privacy(mut c: PillContent, p: Privacy) -> PillContent {
+    let colors: Vec<Rgba> = [(p.cam, cam_color()), (p.mic, mic_color())].into_iter().filter(|(on, _)| *on).map(|(_, c)| c).collect();
+    if colors.is_empty() {
+        return c;
+    }
+    let k = c.size.h / 44.0;
+    let step = (11.0 * k).max(7.0);
+    let radius = (4.0 * k).max(2.5);
+    let start = c.size.w - 4.0 * k;
+    for (i, color) in colors.iter().enumerate() {
+        c.dots.push((Point { x: (start + step * (i as f32 + 0.5)).round(), y: (c.size.h / 2.0).round() }, radius, *color));
+    }
+    c.size.w = round2(start + step * colors.len() as f32 + 8.0 * k);
+    c.list.size.w = c.size.w;
+    c
 }
 
 /// Quantas barras cabem na área do visualizador.
@@ -98,7 +132,7 @@ pub fn idle_pill(clock: &str, pill_h: f32, font_scale: f32, tokens: &Tokens, m: 
     let w = round2((tw + 28.0 * k).clamp(72.0 * k, 280.0 * k));
     let mut list = DisplayList::new(Size { w, h: pill_h });
     list.push(DrawOp::Text { rect: Rect::new(0.0, 0.0, w, pill_h), text: clock.into(), style: text, color: tokens.text, align: Align::Center });
-    PillContent { size: Size { w, h: pill_h }, list, visualizer: None }
+    PillContent { size: Size { w, h: pill_h }, list, visualizer: None, dots: Vec::new() }
 }
 
 /// Mídia recolhida: capa redonda à esquerda e visualizador à direita. Espiando: capa, "título —
@@ -125,7 +159,7 @@ pub fn media_pill(s: &MediaSession, peek: bool, pill_h: f32, font_scale: f32, to
         let text_w = (vis.x - 10.0 * k - x).max(0.0);
         list.push(DrawOp::Text { rect: Rect::new(x, 0.0, text_w, pill_h), text: s.headline(), style: style(13.0 * k * font_scale, FontWeight::SemiBold), color: tokens.text, align: Align::Leading });
     }
-    PillContent { size: Size { w, h: pill_h }, list, visualizer: Some(vis) }
+    PillContent { size: Size { w, h: pill_h }, list, visualizer: Some(vis), dots: Vec::new() }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -336,5 +370,27 @@ mod osd_tests {
         assert_eq!(texts(&muted)[0], ICON_MUTE);
         let b = activity_pill(Activity::Brightness { level: 1.2 }, 54.0, 1.0, &tokens());
         assert_eq!(texts(&b), vec![ICON_BRIGHTNESS.to_string(), "100".into()]);
+    }
+}
+
+#[cfg(test)]
+mod privacy_tests {
+    use super::*;
+
+    fn pill(w: f32) -> PillContent {
+        PillContent { size: Size { w, h: 44.0 }, list: DisplayList::new(Size { w, h: 44.0 }), visualizer: None, dots: Vec::new() }
+    }
+
+    #[test]
+    fn no_dot_keeps_the_pill_and_each_dot_widens_it() {
+        assert_eq!(with_privacy(pill(150.0), Privacy::default()), pill(150.0));
+        let mic = with_privacy(pill(150.0), Privacy { mic: true, cam: false });
+        assert_eq!(mic.dots.len(), 1);
+        assert_eq!(mic.dots[0].2, mic_color());
+        assert!(mic.size.w > 150.0 && mic.dots[0].0.x < mic.size.w && mic.dots[0].0.x > 146.0);
+        let both = with_privacy(pill(150.0), Privacy { mic: true, cam: true });
+        assert_eq!(both.dots.iter().map(|d| d.2).collect::<Vec<_>>(), vec![cam_color(), mic_color()]);
+        assert!(both.size.w > mic.size.w && both.size.w % 2.0 == 0.0);
+        assert_eq!(both.list.size.w, both.size.w);
     }
 }
