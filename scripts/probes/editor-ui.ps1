@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('SuspendExisting','RestoreExisting','Start','Open','Capture','Key','Click','RightClick','Drag','Cycles','Close','Stop')][string]$Action = 'Start',
+    [ValidateSet('SuspendExisting','RestoreExisting','Start','Open','Capture','Inspect','DisplayChanged','Key','Click','RightClick','Drag','Cycles','Close','Stop')][string]$Action = 'Start',
     [string]$Exe = 'target/debug/zefiro.exe',
     [int]$X = 40, [int]$Y = 20, [int]$Key = 0,
     [int]$EndX = 1800, [int]$EndY = 20, [int]$Cycles = 50,
@@ -25,6 +25,8 @@ public class ZefiroEditorProbe {
   public delegate bool EnumProc(IntPtr h,IntPtr l);
   public static IntPtr Bar(uint pid) { IntPtr found=IntPtr.Zero; EnumWindows((h,l)=>{ uint p; GetWindowThreadProcessId(h,out p); var c=new System.Text.StringBuilder(100); GetClassName(h,c,100); if(p==pid&&c.ToString()=="ZefiroBar")found=h; return true; },IntPtr.Zero); return found; }
   public static int WindowCount(uint pid) { int count=0; EnumWindows((h,l)=>{ uint p; GetWindowThreadProcessId(h,out p); if(p==pid)count++; return true; },IntPtr.Zero); return count; }
+  public static int AppWindowCount(uint pid) { int count=0; EnumWindows((h,l)=>{ uint p; GetWindowThreadProcessId(h,out p); if(p==pid){var c=new System.Text.StringBuilder(120); GetClassName(h,c,120);if(c.ToString().StartsWith("Zefiro",StringComparison.Ordinal))count++;}return true;},IntPtr.Zero);return count; }
+  public static string WindowClasses(uint pid) { var names=new System.Collections.Generic.List<string>(); EnumWindows((h,l)=>{ uint p; GetWindowThreadProcessId(h,out p); if(p==pid){var c=new System.Text.StringBuilder(120); GetClassName(h,c,120);names.Add(c.ToString());}return true;},IntPtr.Zero);return String.Join(", ",names); }
 }
 '@
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -66,6 +68,18 @@ if ($Action -eq 'Start') {
 $probeId = [uint32](Get-Content $processFile)
 $process = Get-Process -Id $probeId -ErrorAction Stop
 if ($process.ProcessName -ne 'zefiro') { throw 'O PID salvo não pertence ao Zefiro.' }
+if ($Action -eq 'Inspect') {
+    [pscustomobject]@{ Pid=$probeId; Classes=[ZefiroEditorProbe]::WindowClasses($probeId); PrivateMB=$process.PrivateMemorySize64/1MB; WorkingSetMB=$process.WorkingSet64/1MB } | ConvertTo-Json
+    exit
+}
+if ($Action -eq 'DisplayChanged') {
+    $bar = [ZefiroEditorProbe]::Bar($probeId)
+    if ($bar -eq [IntPtr]::Zero) { throw 'Nenhuma barra de teste encontrada.' }
+    for ($i=0; $i -lt 3; $i++) { [void][ZefiroEditorProbe]::PostMessage($bar,0x7e,[IntPtr]::Zero,[IntPtr]::Zero) }
+    Start-Sleep -Milliseconds 800
+    Write-Output 'Três notificações WM_DISPLAYCHANGE enviadas; topologia física preservada.'
+    exit
+}
 if ($Action -eq 'Stop') {
     $bar = [ZefiroEditorProbe]::Bar($probeId)
     if ($bar -eq [IntPtr]::Zero) { throw 'Nenhuma ZefiroBar encontrada.' }
@@ -103,7 +117,8 @@ try {
         exit
     }
     if ($Action -eq 'Cycles') {
-        $initialWindows = [ZefiroEditorProbe]::WindowCount($probeId)
+        $initialWindows = [ZefiroEditorProbe]::AppWindowCount($probeId)
+        $initialClasses = [ZefiroEditorProbe]::WindowClasses($probeId)
         $process.Refresh()
         $initialPrivate = $process.PrivateMemorySize64
         for ($cycle = 0; $cycle -lt $Cycles; $cycle++) {
@@ -126,9 +141,9 @@ try {
         }
         Start-Sleep -Milliseconds 800
         $process.Refresh()
-        $finalWindows = [ZefiroEditorProbe]::WindowCount($probeId)
+        $finalWindows = [ZefiroEditorProbe]::AppWindowCount($probeId)
         if ($initialWindows -ne $finalWindows) { throw "Janelas cresceram: $initialWindows → $finalWindows" }
-        [pscustomobject]@{ Cycles=$Cycles; WindowsBefore=$initialWindows; WindowsAfter=$finalWindows; PrivateBeforeMB=$initialPrivate/1MB; PrivateAfterMB=$process.PrivateMemorySize64/1MB } | ConvertTo-Json | Tee-Object -FilePath (Join-Path $runtime 'editor-cycles.json')
+        [pscustomobject]@{ Cycles=$Cycles; ZefiroWindowsBefore=$initialWindows; ZefiroWindowsAfter=$finalWindows; ClassesBefore=$initialClasses; ClassesAfter=[ZefiroEditorProbe]::WindowClasses($probeId); PrivateBeforeMB=$initialPrivate/1MB; PrivateAfterMB=$process.PrivateMemorySize64/1MB } | ConvertTo-Json | Tee-Object -FilePath (Join-Path $runtime 'editor-cycles.json')
         exit
     }
     if ($Action -eq 'Open' -or $Action -eq 'Click' -or $Action -eq 'RightClick') {
