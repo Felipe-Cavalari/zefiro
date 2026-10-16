@@ -23118,7 +23118,15 @@ DWORD WINAPI RenderThreadProc(void*) {
         const bool ctrlHeld = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
         const bool ctrlHoverCT = hover && ctrlHeld && !g_lookupUi.open;
 
+#ifdef ZEFIRO_ISLAND
+        // ZEFIRO: click-through sempre que o cursor está fora da pílula, em qualquer estado. O
+        // HTTRANSPARENT do WM_NCHITTEST só repassa o clique para janelas da mesma thread, então a
+        // margem da janela engolia cliques nos outros programas (abas, barra de título) logo
+        // abaixo da barra enquanto a ilha mostrava mídia.
+        SetClickThrough(hwnd, (!draggingOrHover && !pinned) || ctrlHoverCT);
+#else
         SetClickThrough(hwnd, (primary.kind == IslandKind::Idle && !draggingOrHover && !pinned) || ctrlHoverCT);
+#endif
 
         // Check if animating structurally
         if (std::abs(widthSpring.velocity) > 0.01f || std::abs(widthSpring.target - widthSpring.value) > 0.01f ||
