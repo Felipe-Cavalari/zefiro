@@ -215,6 +215,9 @@ pub fn set_value(path: &Path, keys: &[&str], value: &str) -> std::io::Result<()>
 
 /// `%APPDATA%\zefiro` (ou `$XDG_CONFIG_HOME/zefiro`, ou `~/.config/zefiro`).
 pub fn default_config_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("ZEFIRO_CONFIG_DIR") {
+        return PathBuf::from(dir);
+    }
     if let Some(appdata) = std::env::var_os("APPDATA") {
         return PathBuf::from(appdata).join("zefiro");
     }

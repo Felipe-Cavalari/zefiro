@@ -11594,6 +11594,19 @@ class Renderer {
         }
 
         const StageLayout stage = ComputeStageLayout(settings, width, height);
+#ifdef ZEFIRO_ISLAND
+        // ZEFIRO: publica um limite comprovado pelo clamp do palco, inclusive durante overshoot.
+        // Sem palco fixo, reservar toda a largura do monitor evita supor limites do upstream.
+        const RECT reserveMonitor = GetAnchorWorkRect();
+        const int reserveWidth = UsesFixedStage(settings)
+            ? static_cast<int>(std::ceil(kStageContentWidth * settings.sizeScale))
+            : reserveMonitor.right - reserveMonitor.left;
+        const auto previousReserve = reinterpret_cast<INT_PTR>(GetPropW(hwnd_, L"Zefiro.ReservedWidth"));
+        if (previousReserve != reserveWidth && SetPropW(hwnd_, L"Zefiro.ReservedWidth", reinterpret_cast<HANDLE>(static_cast<INT_PTR>(reserveWidth)))) {
+            HWND barMessages = FindWindowExW(HWND_MESSAGE, nullptr, L"ZefiroMessage", nullptr);
+            if (barMessages) PostMessageW(barMessages, RegisterWindowMessageW(L"Zefiro.IslandGeometry"), 0, 0);
+        }
+#endif
         const int pixelWidth = stage.width;
         const int pixelHeight = stage.height;
 

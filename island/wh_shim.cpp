@@ -399,6 +399,13 @@ namespace zefiro {
 
 const std::wstring& ConfigDir() {
     static const std::wstring dir = [] {
+        // Diretório explícito para sondas isoladas e perfis portáteis; padrão continua em AppData.
+        wchar_t overrideDir[32768]{};
+        DWORD length = GetEnvironmentVariableW(L"ZEFIRO_CONFIG_DIR", overrideDir, 32768);
+        if (length > 0 && length < 32768) {
+            CreateDirectoryW(overrideDir, nullptr);
+            return std::wstring(overrideDir);
+        }
         std::wstring d = KnownFolder(FOLDERID_RoamingAppData) + L"\\zefiro";
         CreateDirectoryW(d.c_str(), nullptr);
         return d;
