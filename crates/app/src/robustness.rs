@@ -42,6 +42,8 @@ pub fn handle(l: &mut Loop, e: WinEvent) -> Result<bool> {
             }
             island_zorder::raise_island();
             l.editor_topology_changed()?;
+            // Monitores novos ou religados: o DDC/CI reabre os handles e relê o brilho.
+            l.devices_displays_changed();
         }
         WinEvent::SettingChanged => {
             l.ctx.theme.animations = system::animations_enabled();

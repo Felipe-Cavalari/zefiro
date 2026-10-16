@@ -139,6 +139,8 @@ fn run(rx: &mpsc::Receiver<Msg>, tx: &Sender<Msg>, state: &Mutex<Option<VolumeSt
         }
     };
     rebind(&mut bound);
+    // O valor inicial também é avisado: a barra mostra o nível desde o começo.
+    notify();
     while let Ok(msg) = rx.recv() {
         match msg {
             Msg::Changed(s) => {

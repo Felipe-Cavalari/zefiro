@@ -119,6 +119,32 @@ impl Comp {
         Ok(a)
     }
 
+    /// Posição animável por mola: `Offset` do visual ligado por expressão a `x`/`y` de um conjunto de
+    /// propriedades (a mola escalar em `Offset.X` não move o visual; nas propriedades, sim).
+    pub fn spring_offset(&self, visual: &Visual, x: f32, y: f32) -> Result<CompositionPropertySet> {
+        let props = self.compositor.CreatePropertySet()?;
+        props.InsertScalar(&HSTRING::from("x"), x)?;
+        props.InsertScalar(&HSTRING::from("y"), y)?;
+        let e = self.compositor.CreateExpressionAnimationWithExpression(&HSTRING::from("Vector3(p.x, p.y, 0)"))?;
+        e.SetReferenceParameter(&HSTRING::from("p"), &props.cast::<CompositionObject>()?)?;
+        visual.StartAnimation(&HSTRING::from("Offset"), &e)?;
+        Ok(props)
+    }
+
+    /// Move uma posição de `spring_offset`: com mola (parte do valor atual) ou na hora.
+    pub fn move_offset(&self, props: &CompositionPropertySet, x: f32, y: f32, spring: Option<SpringParams>) -> Result<()> {
+        for (k, v) in [("x", x), ("y", y)] {
+            match spring {
+                Some(p) => props.StartAnimation(&HSTRING::from(k), &self.scalar_spring(v, p)?)?,
+                None => {
+                    props.StopAnimation(&HSTRING::from(k))?;
+                    props.InsertScalar(&HSTRING::from(k), v)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn fade(&self, visual: &Visual, to: f32, seconds: f32) -> Result<()> {
         self.fade_after(visual, to, seconds, 0.0)
     }

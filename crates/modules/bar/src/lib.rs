@@ -3,6 +3,7 @@
 pub mod calendar;
 pub mod chips;
 pub mod controller;
+pub mod devices;
 pub mod catalog;
 pub mod editor;
 pub mod editor_panel;

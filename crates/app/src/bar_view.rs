@@ -6,6 +6,7 @@ use windows::Win32::Foundation::HWND;
 use windows::core::{Interface, Result};
 use windows_numerics::{Vector2, Vector3};
 use zefiro_bar::chips::{ChipContent, clock_chip, zefiro_chip};
+use zefiro_bar::devices::{ICON_BRIGHTNESS, Level, level_chip, mic_icon, speaker_icon};
 use zefiro_core::config::BarHeight;
 use zefiro_integration_clock::format::ClockText;
 use zefiro_integration_clock::windows::now_local;
@@ -29,7 +30,7 @@ use zefiro_island::view::{Collapsed, PillContent, RESERVE_DESIGN_W, activity_pil
 /// Id do "chip" da ilha embutida (clique, painel e foco usam o mesmo caminho dos chips).
 pub const ISLAND_CHIP: &str = "island";
 
-struct ChipView { id: String, hover: MorphShape, content: SpriteVisual, surface: CompositionDrawingSurface, rect: Rect }
+struct ChipView { id: String, hover: MorphShape, content: SpriteVisual, surface: CompositionDrawingSurface, rect: Rect, pos: windows::UI::Composition::CompositionPropertySet }
 
 pub struct BarView {
     hwnd: HWND,
@@ -71,7 +72,8 @@ fn island_content(ctx: &AppCtx, pill_h: f32) -> PillContent {
     }
 }
 
-fn chip_content(ctx: &AppCtx, id: &str, height: BarHeight, chip_h: f32, font_px: f32, scale: f32) -> ChipContent {
+/// `device`: monitor desta barra (o chip de brilho mostra o brilho dele).
+fn chip_content(ctx: &AppCtx, id: &str, device: &str, height: BarHeight, chip_h: f32, font_px: f32, scale: f32) -> ChipContent {
     let t = &ctx.theme.tokens;
     match id {
         "zefiro" => zefiro_chip(chip_h, font_px, height == BarHeight::Compacta, scale, t, &ctx.text),
@@ -84,6 +86,24 @@ fn chip_content(ctx: &AppCtx, id: &str, height: BarHeight, chip_h: f32, font_px:
                 s.push('…');
             }
             clock_chip(&s, chip_h, font_px, t, &ctx.text)
+        }
+        "audio" => {
+            let v = ctx.devices.speaker;
+            let p = v.map_or(0, |v| (v.level * 100.0).round() as u32);
+            let muted = v.is_some_and(|v| v.muted);
+            let text = if v.is_some() { format!("{p}%") } else { String::new() };
+            level_chip(Level { glyph: speaker_icon(p, muted), text: &text, dim: muted || v.is_none() }, chip_h, font_px, scale, t, &ctx.text)
+        }
+        "mic" => {
+            let v = ctx.devices.mic;
+            let muted = v.is_some_and(|v| v.muted);
+            let text = v.filter(|v| !v.muted).map(|v| format!("{}%", (v.level * 100.0).round() as u32)).unwrap_or_default();
+            level_chip(Level { glyph: mic_icon(muted), text: &text, dim: muted || v.is_none() }, chip_h, font_px, scale, t, &ctx.text)
+        }
+        "brightness" => {
+            let p = ctx.devices.brightness_of(device);
+            let text = p.map(|p| format!("{p}%")).unwrap_or_default();
+            level_chip(Level { glyph: ICON_BRIGHTNESS, text: &text, dim: p.is_none() }, chip_h, font_px, scale, t, &ctx.text)
         }
         _ => clock_chip("⋯", chip_h, font_px, t, &ctx.text),
     }
@@ -134,7 +154,7 @@ impl BarView {
         let mut contents: Vec<(String, ChipContent)> = sections
             .ids()
             .filter(|id| zefiro_bar::catalog::descriptor(id).is_some())
-            .map(|id| (id.to_string(), chip_content(ctx, id, cfg.height, chip_h, font_px, self.scale)))
+            .map(|id| (id.to_string(), chip_content(ctx, id, &self.monitor.device, cfg.height, chip_h, font_px, self.scale)))
             .collect();
         let spec = |ids: &[String]| {
             ids.iter().filter(|id| zefiro_bar::catalog::descriptor(id).is_some())
@@ -156,7 +176,7 @@ impl BarView {
             self.groups.push(group);
         }
         for group in &layout.overflow {
-            contents.push((group.id.clone(), chip_content(ctx, &group.id, cfg.height, chip_h, font_px, self.scale)));
+            contents.push((group.id.clone(), chip_content(ctx, &group.id, &self.monitor.device, cfg.height, chip_h, font_px, self.scale)));
         }
         let mut index = 0;
         while index < self.chips.len() {
@@ -226,16 +246,16 @@ impl BarView {
                 let surface = ctx.comp.surface(content.list.size.w, content.list.size.h)?;
                 let sprite = ctx.comp.sprite_for(&surface, content.list.size.w, content.list.size.h)?;
                 self.root.Children()?.InsertAtTop(&sprite)?;
-                self.chips.push(ChipView { id: id.clone(), hover, content: sprite, surface, rect: b.rect });
+                let pos = ctx.comp.spring_offset(&sprite.cast::<Visual>()?, b.rect.x + pad, b.rect.y)?;
+                self.chips.push(ChipView { id: id.clone(), hover, content: sprite, surface, rect: b.rect, pos });
             }
             let chip = self.chips.iter_mut().find(|c| &c.id == id).expect("criado acima");
             ctx.comp.draw(&chip.surface, content.list.size.w, content.list.size.h, &content.list, &ctx.text)?;
             chip.content.SetSize(Vector2 { X: content.list.size.w, Y: content.list.size.h })?;
             if animate && !is_new && chip.rect != b.rect {
-                chip.content.StartAnimation(&windows::core::HSTRING::from("Offset.X"), &ctx.comp.scalar_spring(b.rect.x + pad, spring)?)?;
-                chip.content.StartAnimation(&windows::core::HSTRING::from("Offset.Y"), &ctx.comp.scalar_spring(b.rect.y, spring)?)?;
+                ctx.comp.move_offset(&chip.pos, b.rect.x + pad, b.rect.y, Some(spring))?;
             } else if is_new || !animate {
-                chip.content.SetOffset(Vector3 { X: b.rect.x + pad, Y: b.rect.y, Z: 0.0 })?;
+                ctx.comp.move_offset(&chip.pos, b.rect.x + pad, b.rect.y, None)?;
             }
             let r = Shape { rect: b.rect, radius: pill_radius(b.rect.h, radius_max, style, self.scale) };
             if animate { chip.hover.animate(&ctx.comp, r, spring)? } else { chip.hover.set(r)? }
@@ -336,6 +356,11 @@ impl BarView {
 
     pub fn is_hidden(&self) -> bool {
         self.hidden
+    }
+
+    /// Chip sob o mouse agora (a roda ajusta som, microfone e brilho por ele).
+    pub fn hovered(&self) -> Option<&str> {
+        self.hover.as_deref()
     }
 
     pub fn chip_at(&self, x: f32, y: f32) -> Option<String> {

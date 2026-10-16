@@ -16,7 +16,6 @@ use zefiro_platform::color::Rgba;
 use zefiro_platform::geometry::Point;
 use zefiro_platform_windows::audio_capture::AudioCapture;
 use zefiro_platform_windows::media::{MediaCommand, MediaService, now_unix_ms};
-use zefiro_platform_windows::volume::VolumeWatcher;
 use zefiro_platform_windows::audio_devices::{self, AudioDevice, Flow, RouteState};
 use zefiro_platform_windows::popup_menu;
 use zefiro_platform_windows::privacy::PrivacyWatcher;
@@ -36,7 +35,7 @@ use zefiro_platform_windows::window;
 use zefiro_ui::paint::DisplayList;
 
 use crate::bar_view::ISLAND_CHIP;
-use crate::event_loop::{Loop, TIMER_FOCUS, TIMER_ISLAND_ANIM, TIMER_LYRICS, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_BLUETOOTH, USER_DND, USER_HARDWARE, USER_LYRICS, USER_MEDIA, USER_NOTIFICATION, USER_PRIVACY, USER_VISUALIZER, USER_VOLUME, USER_WEATHER};
+use crate::event_loop::{Loop, TIMER_FOCUS, TIMER_ISLAND_ANIM, TIMER_LYRICS, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_BLUETOOTH, USER_DND, USER_HARDWARE, USER_LYRICS, USER_MEDIA, USER_NOTIFICATION, USER_PRIVACY, USER_VISUALIZER, USER_WEATHER};
 
 /// Destaque quando a capa não tem cor viva (o mesmo padrão da ilha C++).
 const DEFAULT_ACCENT: Rgba = Rgba { r: 0x4C as f32 / 255.0, g: 0xC9 as f32 / 255.0, b: 0xF0 as f32 / 255.0, a: 1.0 };
@@ -46,7 +45,6 @@ const VISUALIZER_FRAME_MS: u128 = 16;
 #[derive(Default)]
 pub struct IslandRuntime {
     media: Option<MediaService>,
-    volume: Option<VolumeWatcher>,
     privacy: Option<PrivacyWatcher>,
     notifications: Option<NotificationWatcher>,
     bluetooth: Option<BluetoothWatcher>,
@@ -83,14 +81,6 @@ impl Loop {
             self.island.media = None;
             self.island.capture = None;
             self.ctx.island.update(Vec::new(), self.ctx.now());
-        }
-        if embedded && self.island.volume.is_none() {
-            match VolumeWatcher::start(Flow::Output, Arc::new(|| window::post_user(USER_VOLUME))) {
-                Ok(w) => self.island.volume = Some(w),
-                Err(e) => tracing::error!("não consegui iniciar a thread de volume: {e}"),
-            }
-        } else if !embedded {
-            self.island.volume = None;
         }
         if embedded && self.island.privacy.is_none() {
             match PrivacyWatcher::start(Arc::new(|| window::post_user(USER_PRIVACY))) {
@@ -240,9 +230,22 @@ impl Loop {
 
     /// Volume ou mudo mudou (por qualquer app, tecla ou o mixer): aviso de 1,8 s na pílula.
     pub fn island_volume_changed(&mut self) -> Result<()> {
-        let Some(v) = self.island.volume.as_ref().and_then(VolumeWatcher::state) else { return Ok(()) };
+        if !self.ctx.config.island.embedded() {
+            return Ok(());
+        }
+        let Some(v) = self.ctx.devices.speaker else { return Ok(()) };
         let now = self.ctx.now();
         self.ctx.island.state.activity(Activity::Volume { level: v.level, muted: v.muted }, now);
+        self.island_refresh()
+    }
+
+    /// Brilho mudado pela barra (roda ou slider): aviso de 1,8 s na pílula.
+    pub fn island_brightness_changed(&mut self, percent: u32) -> Result<()> {
+        if !self.ctx.config.island.embedded() {
+            return Ok(());
+        }
+        let now = self.ctx.now();
+        self.ctx.island.state.activity(Activity::Brightness { level: percent as f32 / 100.0 }, now);
         self.island_refresh()
     }
 

@@ -5,6 +5,7 @@ mod bar_view;
 mod config_worker;
 mod editor_view;
 mod event_loop;
+mod devices_loop;
 mod island;
 mod island_loop;
 mod island_view;
@@ -57,7 +58,7 @@ fn run(started: Instant) -> windows::core::Result<()> {
     let gfx = Gfx::new()?;
     let comp = Comp::new(&gfx)?;
     let text = DWriteText::new(gfx.dwrite.clone(), &theme.theme.font.family);
-    let ctx = app::AppCtx { gfx, comp, text, theme, config, config_path, themes_dir, clock: zefiro_integration_clock::windows::WindowsClock, island: Default::default(), epoch: started };
+    let ctx = app::AppCtx { gfx, comp, text, theme, config, config_path, themes_dir, clock: zefiro_integration_clock::windows::WindowsClock, island: Default::default(), devices: Default::default(), epoch: started };
 
     let mut bars = Vec::new();
     for m in monitors::list() {

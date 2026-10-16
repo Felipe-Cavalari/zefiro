@@ -1,11 +1,14 @@
 # Zefiro
 
+<img src="assets/branding/logo.svg" alt="Símbolo do Zefiro" width="96" height="96" />
+
 Um ambiente de desktop nativo para Windows (barra, ilha de mídia, launcher, dock), sem WebView: leve, fluido e personalizável.
 
 > **Status:** em desenvolvimento (Fase 1a: a barra no design da ilha, com a ilha embutida). Uso pessoal, ainda sem instalador.
 
 - Planejamento: [`docs/PLANNING.md`](docs/PLANNING.md)
 - Decisões de arquitetura: [`docs/adr/`](docs/adr/)
+- Identidade visual e ícones: [`assets/branding/`](assets/branding/README.md)
 
 ## Rodar
 

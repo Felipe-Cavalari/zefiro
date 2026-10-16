@@ -2,7 +2,7 @@
 //! do visualizador, tudo no compositor da própria barra.
 
 use windows::UI::Composition::{CompositionColorBrush, CompositionDrawingSurface, ContainerVisual, SpriteVisual, Visual};
-use windows::core::{HSTRING, Interface, Result};
+use windows::core::{Interface, Result};
 use windows_numerics::{Vector2, Vector3};
 use zefiro_island::view::{PillContent, visualizer_bars};
 use zefiro_platform::color::Rgba;
@@ -18,8 +18,9 @@ pub struct IslandView {
     shape: MorphShape,
     /// Do tamanho da barra, recortado pela pílula: o conteúdo nunca sai dela durante a mola.
     holder: ContainerVisual,
-    /// Conteúdo + visualizador; desloca junto com a pílula.
-    inner: ContainerVisual,
+
+    /// Posição do conteúdo + visualizador (x, y), animada por mola com a pílula.
+    inner_pos: windows::UI::Composition::CompositionPropertySet,
     content: SpriteVisual,
     surface: CompositionDrawingSurface,
     bars: ContainerVisual,
@@ -51,7 +52,8 @@ impl IslandView {
         let dots = c.CreateContainerVisual()?;
         inner.Children()?.InsertAtTop(&dots)?;
         let brush = c.CreateColorBrushWithColor(ui_color(ctx.theme.tokens.accent))?;
-        Ok(IslandView { shape, holder, inner, content, surface, bars, dots, bar_sprites: Vec::new(), brush, rect: Rect::default(), vis: None, k: 1.0, drawn: None, shown: false })
+        let inner_pos = ctx.comp.spring_offset(&inner.cast::<Visual>()?, 0.0, 0.0)?;
+        Ok(IslandView { shape, holder, inner_pos, content, surface, bars, dots, bar_sprites: Vec::new(), brush, rect: Rect::default(), vis: None, k: 1.0, drawn: None, shown: false })
     }
 
     pub fn root(&self) -> &ContainerVisual {
@@ -67,11 +69,10 @@ impl IslandView {
         if animate && !first {
             let spring = ctx.theme.spring(SpringParams::toward(self.rect.w, rect.w));
             self.shape.animate(&ctx.comp, target, spring)?;
-            self.inner.StartAnimation(&HSTRING::from("Offset.X"), &ctx.comp.scalar_spring(rect.x, spring)?)?;
-            self.inner.StartAnimation(&HSTRING::from("Offset.Y"), &ctx.comp.scalar_spring(rect.y, spring)?)?;
+            ctx.comp.move_offset(&self.inner_pos, rect.x, rect.y, Some(spring))?;
         } else {
             self.shape.set(target)?;
-            self.inner.SetOffset(Vector3 { X: rect.x, Y: rect.y, Z: 0.0 })?;
+            ctx.comp.move_offset(&self.inner_pos, rect.x, rect.y, None)?;
         }
         self.shown = true;
         self.rect = rect;
