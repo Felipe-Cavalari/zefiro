@@ -9,6 +9,7 @@ use crate::event_loop::{Loop, TIMER_DISPLAY};
 use crate::panel_view::PanelView;
 
 const ABN_POSCHANGED: u32 = 1;
+const ABN_FULLSCREENAPP: u32 = 2;
 
 pub fn handle(l: &mut Loop, e: WinEvent) -> Result<bool> {
     match e {
@@ -42,6 +43,23 @@ pub fn handle(l: &mut Loop, e: WinEvent) -> Result<bool> {
         WinEvent::SettingChanged => {
             l.ctx.theme.animations = system::animations_enabled();
             l.apply_bars(false)?;
+        }
+        // App em tela cheia (vídeo, jogo, apresentação): a barra daquele monitor sai da frente,
+        // como a barra de tarefas; volta quando o app sai da tela cheia.
+        WinEvent::AppBar { notification: ABN_FULLSCREENAPP, param, .. } => {
+            for i in 0..l.bars.len() {
+                let fullscreen = system::foreground_fullscreen_on(l.bars[i].monitor().rect);
+                if param != 0 && !fullscreen {
+                    continue;
+                }
+                if fullscreen && l.controller.open().is_some_and(|o| o.monitor == i) {
+                    l.close_open_panel()?;
+                }
+                l.bars[i].set_hidden(fullscreen);
+            }
+            if param == 0 {
+                island_zorder::raise_island();
+            }
         }
         WinEvent::AppBar { notification: ABN_POSCHANGED, .. } => {
             for b in &l.bars {

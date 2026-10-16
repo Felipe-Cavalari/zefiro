@@ -264,6 +264,15 @@ impl BarView {
         Ok(())
     }
 
+    /// Some (app em tela cheia neste monitor) ou volta. A reserva da AppBar continua.
+    pub fn set_hidden(&self, hidden: bool) {
+        if hidden {
+            window::hide(self.hwnd);
+        } else {
+            window::show(self.hwnd);
+        }
+    }
+
     pub fn destroy(self) {
         if self.appbar {
             appbar::unregister(self.hwnd);

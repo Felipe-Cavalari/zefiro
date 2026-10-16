@@ -32,10 +32,13 @@ pub enum WinEvent {
     Timer { id: usize },
     DpiChanged { hwnd: isize },
     DisplayChanged,
-    AppBar { hwnd: isize, notification: u32 },
+    /// Notificação da AppBar (`ABN_*`) com o seu parâmetro (ex.: ABN_FULLSCREENAPP: 1 abriu, 0 fechou).
+    AppBar { hwnd: isize, notification: u32, param: isize },
     TaskbarCreated,
     SettingChanged,
     User { code: u32 },
+    /// Pedido de fechar a janela (Alt+F4, `taskkill` sem /f): o app decide o que fechar.
+    Close { hwnd: isize },
     Quit,
 }
 
@@ -154,8 +157,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             // SAFETY: repassa ao Windows.
             return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
         }
-        WM_CLOSE => push(WinEvent::Quit),
-        m if m == WM_APPBAR => push(WinEvent::AppBar { hwnd: h, notification: wp.0 as u32 }),
+        // Não repassa ao DefWindowProc: ele destruiria a janela sem a AppBar sair da tela.
+        WM_CLOSE => push(WinEvent::Close { hwnd: h }),
+        m if m == WM_APPBAR => push(WinEvent::AppBar { hwnd: h, notification: wp.0 as u32, param: lp.0 }),
         m if (WM_USER_BASE..WM_USER_BASE + 0x100).contains(&m) => push(WinEvent::User { code: m - WM_USER_BASE }),
         m if Some(&m) == TASKBAR_CREATED.get() => push(WinEvent::TaskbarCreated),
         // SAFETY: mensagens não tratadas vão para o Windows.
@@ -241,6 +245,15 @@ pub fn set_bounds(hwnd: HWND, r: Rect, show: bool) {
     for h in std::iter::once(hwnd).chain(input_window(hwnd)) {
         // SAFETY: hwnd válido.
         let _ = unsafe { SetWindowPos(h, Some(HWND_TOPMOST), r.x as i32, r.y as i32, r.w as i32, r.h as i32, flags) };
+    }
+}
+
+/// Mostra de novo (sem ativar) uma janela escondida com `hide`, por cima das outras.
+pub fn show(hwnd: HWND) {
+    let flags = SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW;
+    for h in std::iter::once(hwnd).chain(input_window(hwnd)) {
+        // SAFETY: hwnd válido.
+        let _ = unsafe { SetWindowPos(h, Some(HWND_TOPMOST), 0, 0, 0, 0, flags) };
     }
 }
 
@@ -381,6 +394,21 @@ mod tests {
         unsafe { SendMessageW(input, WM_LBUTTONUP, Some(WPARAM(0)), Some(LPARAM((15 << 16) | 20))) };
         let events = take_events();
         assert!(events.contains(&WinEvent::LeftUp { hwnd: hwnd.0 as isize, x: 20.0, y: 15.0 }), "{events:?}");
+
+        // Alt+F4 na janela de entrada vira um pedido de fechar aquela janela, não "sair do app".
+        // SAFETY: mensagem síncrona para a nossa janela.
+        unsafe { SendMessageW(input, WM_CLOSE, None, None) };
+        let events = take_events();
+        assert!(events.contains(&WinEvent::Close { hwnd: hwnd.0 as isize }), "{events:?}");
+        assert!(!events.contains(&WinEvent::Quit), "{events:?}");
+        // SAFETY: idem.
+        assert!(unsafe { IsWindow(Some(input)) }.as_bool(), "WM_CLOSE não destrói a janela");
+
+        // Notificação da AppBar chega com o parâmetro (ABN_FULLSCREENAPP: 1 = abriu, 0 = fechou).
+        // SAFETY: mensagem síncrona para a nossa janela.
+        unsafe { SendMessageW(hwnd, WM_APP + 1, Some(WPARAM(2)), Some(LPARAM(1))) };
+        let events = take_events();
+        assert!(events.contains(&WinEvent::AppBar { hwnd: hwnd.0 as isize, notification: 2, param: 1 }), "{events:?}");
 
         destroy(hwnd);
         assert!(input_window(hwnd).is_none());

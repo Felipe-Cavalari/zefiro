@@ -120,6 +120,12 @@ impl Loop {
         Ok(())
     }
 
+    /// Fecha o painel aberto, se houver (como o Esc).
+    pub fn close_open_panel(&mut self) -> Result<()> {
+        let fx = self.controller.handle(PanelInput::Escape);
+        self.run_effects(fx)
+    }
+
     fn redraw_open_panel(&mut self) -> Result<()> {
         let Some(open) = self.controller.open().cloned() else { return Ok(()) };
         let scale = self.bars[open.monitor].scale();
@@ -220,12 +226,26 @@ impl Loop {
     pub fn handle(&mut self, e: WinEvent) -> Result<bool> {
         match e {
             WinEvent::Quit => return Ok(false),
+            // Alt+F4 num painel fecha só o painel; na barra (ou `taskkill` sem /f), encerra o app
+            // pelo caminho normal, que tira a AppBar da tela.
+            WinEvent::Close { hwnd } => {
+                if self.panel_index(hwnd).is_some() {
+                    let fx = self.controller.handle(PanelInput::Escape);
+                    self.run_effects(fx)?;
+                } else {
+                    return Ok(false);
+                }
+            }
             WinEvent::LeftUp { hwnd, x, y } => {
                 if let Some(i) = self.bar_index(hwnd) {
-                    if let Some(chip) = self.bars[i].chip_at(x, y) {
-                        let fx = self.controller.handle(PanelInput::ChipClick { monitor: i, chip });
-                        self.run_effects(fx)?;
-                    }
+                    let input = match self.bars[i].chip_at(x, y) {
+                        Some(chip) => PanelInput::ChipClick { monitor: i, chip },
+                        // Faixa vazia: é "clicar fora" do painel aberto (a barra não rouba o foco,
+                        // então nenhum FocusLost chegaria).
+                        None => PanelInput::ClickOutside,
+                    };
+                    let fx = self.controller.handle(input);
+                    self.run_effects(fx)?;
                 } else if let Some(i) = self.panel_index(hwnd) {
                     let (ox, oy) = self.panels[i].content_origin();
                     let scale = self.bars[i].scale();
@@ -363,22 +383,28 @@ pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
         window::set_timer(TIMER_CYCLE, 2000);
     }
     crate::island::start(&l.ctx);
-    while window::pump() {
+    'pump: while window::pump() {
         for e in window::take_events() {
             match l.handle(e) {
                 Ok(true) => {}
-                Ok(false) => {
-                    crate::island::stop();
-                    return Ok(());
-                }
+                Ok(false) => break 'pump,
                 Err(err) => tracing::error!(error = %err, ?e, "erro tratando evento"),
             }
         }
     }
-    crate::island::stop();
+    shutdown(&mut l);
+    Ok(())
+}
+
+/// Saída por qualquer caminho: primeiro as AppBars saem da tela (a área reservada volta na hora),
+/// depois a ilha, que pode levar até 3 s para fechar.
+fn shutdown(l: &mut Loop) {
     for b in l.bars.drain(..) {
         b.destroy();
     }
-    Ok(())
+    for p in l.panels.drain(..) {
+        p.destroy();
+    }
+    crate::island::stop();
 }
 
