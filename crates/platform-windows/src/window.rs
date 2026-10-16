@@ -32,6 +32,8 @@ pub enum WinEvent {
     ClipboardChanged,
     /// Caps Lock (`caps`) ou Num Lock foi solto em qualquer app.
     LockKey { caps: bool },
+    /// Pendrive (`volume`) ou porta serial conectada (`arrived`) ou removida.
+    DeviceChange { arrived: bool, volume: bool },
     PanelSettled { hwnd: isize, ticket: usize },
     MouseMove { hwnd: isize, x: f32, y: f32 },
     MouseLeave { hwnd: isize },
@@ -157,6 +159,15 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         WM_CAPTURECHANGED | WM_CANCELMODE => push(WinEvent::CaptureLost { hwnd: h }),
         WM_CHAR => push(WinEvent::Character { hwnd: h, code: wp.0 as u32 }),
         WM_CLIPBOARDUPDATE => push(WinEvent::ClipboardChanged),
+        // DBT_DEVICEARRIVAL (0x8000) / DBT_DEVICEREMOVECOMPLETE (0x8004): só pendrives (volume, 2) e portas (3).
+        WM_DEVICECHANGE if (wp.0 == 0x8000 || wp.0 == 0x8004) && lp.0 != 0 => {
+            // SAFETY: para esses avisos, lParam aponta para um DEV_BROADCAST_HDR válido durante a mensagem.
+            let kind = unsafe { *((lp.0 as *const u32).add(1)) };
+            if kind == 2 || kind == 3 {
+                push(WinEvent::DeviceChange { arrived: wp.0 == 0x8000, volume: kind == 2 });
+            }
+            return LRESULT(1);
+        }
         WM_INPUT => {
             if let Some(caps) = crate::system_events::lock_key(lp) {
                 push(WinEvent::LockKey { caps });

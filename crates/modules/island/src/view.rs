@@ -42,6 +42,25 @@ const ICON_KEYBOARD: &str = "\u{E765}";
 const ICON_QUIET: &str = "\u{E708}";
 const ICON_BELL: &str = "\u{EA8F}";
 
+const ICON_USB: &str = "\u{E88E}";
+const ICON_BLUETOOTH: &str = "\u{E702}";
+const ICON_HEADPHONE: &str = "\u{E7F6}";
+const ICON_MOUSE: &str = "\u{E962}";
+
+/// Ícone pelo nome do dispositivo (fones, mouse, teclado ou Bluetooth genérico).
+fn bluetooth_icon(name: &str) -> &'static str {
+    let n = name.to_lowercase();
+    if ["buds", "headphone", "headset", "fone", "airpods", "earbuds", "wh-", "wf-", "jbl", "audio"].iter().any(|k| n.contains(k)) {
+        ICON_HEADPHONE
+    } else if n.contains("mouse") || n.contains("mx ") {
+        ICON_MOUSE
+    } else if n.contains("keyboard") || n.contains("teclado") || n.contains("keys") {
+        ICON_KEYBOARD
+    } else {
+        ICON_BLUETOOTH
+    }
+}
+
 const ICON_TIMER: &str = "\u{E916}";
 const ICON_BREAK: &str = "\u{EC32}";
 
@@ -70,6 +89,8 @@ fn activity_design(a: &Activity) -> Size {
     match a {
         Activity::Clipboard { .. } => Size { w: 340.0, h: 56.0 },
         Activity::Lock { .. } => Size { w: 180.0, h: 42.0 },
+        Activity::Device { .. } => Size { w: 240.0, h: 50.0 },
+        Activity::Bluetooth { .. } => Size { w: 280.0, h: 54.0 },
         Activity::DoNotDisturb { .. } => Size { w: 220.0, h: 42.0 },
         Activity::Volume { .. } | Activity::Brightness { .. } => OSD_DESIGN,
         Activity::Notification(_) => Size { w: 360.0, h: 58.0 },
@@ -115,6 +136,12 @@ pub fn activity_pill(a: &Activity, pill_h: f32, font_scale: f32, tokens: &Tokens
             glyph(&mut list, ICON_KEYBOARD, if *on { tokens.accent } else { tokens.text_secondary });
             let name = if *caps { "Caps Lock" } else { "Num Lock" };
             line(&mut list, format!("{name} {}", if *on { "ligado" } else { "desligado" }), primary, tokens.text, 0.0, pill_h);
+        }
+        Activity::Device { name, connected } | Activity::Bluetooth { name, connected } => {
+            let g = if matches!(a, Activity::Device { .. }) { ICON_USB } else { bluetooth_icon(name) };
+            glyph(&mut list, g, if *connected { tokens.accent } else { tokens.text_secondary });
+            line(&mut list, name.clone(), primary, tokens.text, pill_h * 0.12, pill_h * 0.42);
+            line(&mut list, if *connected { "Conectado" } else { "Desconectado" }.into(), secondary, tokens.text_secondary, pill_h * 0.5, pill_h * 0.38);
         }
         Activity::DoNotDisturb { on } => {
             glyph(&mut list, ICON_QUIET, if *on { tokens.accent } else { tokens.text_secondary });

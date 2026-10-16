@@ -22,6 +22,7 @@ use zefiro_platform_windows::privacy::PrivacyWatcher;
 use zefiro_platform_windows::notifications::NotificationWatcher;
 use zefiro_platform_windows::system_events;
 use zefiro_platform_windows::dnd;
+use zefiro_platform_windows::bluetooth::BluetoothWatcher;
 use zefiro_island::view::Privacy;
 use zefiro_island::menu::{self, AppOutput, MenuCommand, MenuInput};
 use zefiro_island::state::{Activity, Notice};
@@ -30,7 +31,7 @@ use zefiro_platform_windows::window;
 use zefiro_ui::paint::DisplayList;
 
 use crate::bar_view::ISLAND_CHIP;
-use crate::event_loop::{Loop, TIMER_FOCUS, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_DND, USER_MEDIA, USER_NOTIFICATION, USER_PRIVACY, USER_VISUALIZER, USER_VOLUME};
+use crate::event_loop::{Loop, TIMER_FOCUS, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_BLUETOOTH, USER_DND, USER_MEDIA, USER_NOTIFICATION, USER_PRIVACY, USER_VISUALIZER, USER_VOLUME};
 
 /// Destaque quando a capa não tem cor viva (o mesmo padrão da ilha C++).
 const DEFAULT_ACCENT: Rgba = Rgba { r: 0x4C as f32 / 255.0, g: 0xC9 as f32 / 255.0, b: 0xF0 as f32 / 255.0, a: 1.0 };
@@ -43,6 +44,7 @@ pub struct IslandRuntime {
     volume: Option<VolumeWatcher>,
     privacy: Option<PrivacyWatcher>,
     notifications: Option<NotificationWatcher>,
+    bluetooth: Option<BluetoothWatcher>,
     /// Área de transferência e Caps Lock ligados na janela de mensagens.
     listening: bool,
     capture: Option<AudioCapture>,
@@ -93,6 +95,14 @@ impl Loop {
         } else if !embedded {
             self.island.notifications = None;
         }
+        if embedded && self.island.bluetooth.is_none() {
+            match BluetoothWatcher::start(Arc::new(|| window::post_user(USER_BLUETOOTH))) {
+                Ok(w) => self.island.bluetooth = Some(w),
+                Err(e) => tracing::warn!("Bluetooth indisponível: {e}"),
+            }
+        } else if !embedded {
+            self.island.bluetooth = None;
+        }
         if embedded != self.island.listening {
             if embedded {
                 dnd::watch(Arc::new(|| window::post_user(USER_DND)));
@@ -105,6 +115,26 @@ impl Loop {
             self.island.listening = embedded;
         }
         Ok(())
+    }
+
+    pub fn island_bluetooth(&mut self) -> Result<()> {
+        let Some(w) = &self.island.bluetooth else { return Ok(()) };
+        if let Some(e) = w.take().pop() {
+            let now = self.ctx.now();
+            self.ctx.island.state.activity(Activity::Bluetooth { name: e.name, connected: e.connected }, now);
+            self.island_refresh()?;
+        }
+        Ok(())
+    }
+
+    pub fn island_device(&mut self, arrived: bool, volume: bool) -> Result<()> {
+        if !self.ctx.config.island.embedded() {
+            return Ok(());
+        }
+        let name = if volume { "Pendrive" } else { "Dispositivo serial" };
+        let now = self.ctx.now();
+        self.ctx.island.state.activity(Activity::Device { name: name.into(), connected: arrived }, now);
+        self.island_refresh()
     }
 
     pub fn island_notifications(&mut self) -> Result<()> {

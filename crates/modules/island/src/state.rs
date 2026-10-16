@@ -18,6 +18,10 @@ pub enum Activity {
     Clipboard { text: String },
     /// Caps Lock / Num Lock: 2,5 s.
     Lock { caps: bool, on: bool },
+    /// Pendrive ou porta serial conectada/removida: 3 s.
+    Device { name: String, connected: bool },
+    /// Dispositivo Bluetooth conectou/desconectou: 4 s.
+    Bluetooth { name: String, connected: bool },
     /// Não perturbe ligado ou desligado: 3 s.
     DoNotDisturb { on: bool },
     /// 1,8 s depois da última mudança.
@@ -33,6 +37,8 @@ impl Activity {
         match self {
             Activity::Volume { .. } | Activity::Brightness { .. } => 1.8,
             Activity::Clipboard { .. } | Activity::Lock { .. } => 2.5,
+            Activity::Device { .. } => 3.0,
+            Activity::Bluetooth { .. } => 4.0,
             Activity::DoNotDisturb { .. } => 3.0,
             Activity::Notification(_) => 4.0,
         }
@@ -43,6 +49,8 @@ impl Activity {
         match self {
             Activity::Clipboard { .. } => 2,
             Activity::Lock { .. } => 3,
+            Activity::Device { .. } => 4,
+            Activity::Bluetooth { .. } => 5,
             Activity::DoNotDisturb { .. } => 6,
             Activity::Volume { .. } => 7,
             Activity::Brightness { .. } => 8,

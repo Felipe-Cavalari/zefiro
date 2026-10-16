@@ -3,6 +3,7 @@
 
 pub mod appbar;
 pub mod audio_devices;
+pub mod bluetooth;
 pub mod audio_capture;
 pub mod bar_context;
 pub mod compositor;

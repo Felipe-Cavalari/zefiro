@@ -40,6 +40,8 @@ pub const USER_PRIVACY: u32 = 10;
 pub const USER_NOTIFICATION: u32 = 11;
 /// "Não perturbe" foi ligado ou desligado.
 pub const USER_DND: u32 = 12;
+/// Um dispositivo Bluetooth conectou ou desconectou.
+pub const USER_BLUETOOTH: u32 = 13;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
@@ -465,6 +467,8 @@ impl Loop {
             WinEvent::User { code: USER_PRIVACY } => self.island_privacy_changed()?,
             WinEvent::User { code: USER_NOTIFICATION } => self.island_notifications()?,
             WinEvent::User { code: USER_DND } => self.island_dnd_changed()?,
+            WinEvent::User { code: USER_BLUETOOTH } => self.island_bluetooth()?,
+            WinEvent::DeviceChange { arrived, volume } => self.island_device(arrived, volume)?,
             WinEvent::ClipboardChanged => self.island_clipboard()?,
             WinEvent::LockKey { caps } => self.island_lock_key(caps)?,
             WinEvent::Timer { id: TIMER_GRAPHICS_TRIM } => {
