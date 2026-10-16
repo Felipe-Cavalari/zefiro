@@ -467,7 +467,7 @@ Depois dos spikes: workspace Rust, CI, logs e esqueleto de `core`/`ui`/`platform
 | Etapa | Entrega |
 |---|---|
 | **1a** | Barra AppBar por monitor no design da ilha: tema **Obsidian** + 7 temas editáveis, alturas completa/compacta, formatos faixa/pílulas, painéis pílula → painel, **Relógio e calendário**, menu do Zefiro e a ilha embutida no centro (fork, ADR-0006). [Spec](superpowers/specs/2026-10-15-fase-1a-barra-design.md), [ADR-0007](adr/0007-barra-fase-1a.md) |
-| **1b** | **Modo de edição** (seções, arrastar, galeria, opções por item, por monitor) |
+| **1b** | **Modo de edição implementado**: três seções, arrastar/teclado, galeria, opções do relógio, layouts por monitor e confirmação transacional. [Spec](superpowers/specs/2026-10-15-fase-1b-modo-de-edicao-design.md), [ADR-0008](adr/0008-modo-de-edicao-da-barra.md), [handoff e validações de ambiente pendentes](superpowers/handoff/2026-10-15-fase-1b-codex.md). A ilha continua fixa no primário até a 1c. |
 | **1c** | **Porte da ilha para Rust dentro da barra** (3 estados + visualizador), substituindo o `zefiro-island.exe` |
 | **1d** | **Áudio** (alto-falante + microfone), **Brilho** |
 | **1e** | **Itens declarativos v1** + linguagem de expressões; **Claude** e **Codex** já feitos como itens sobre seus providers |

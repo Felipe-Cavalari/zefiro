@@ -1,7 +1,7 @@
 # Zefiro — Fase 1b: Plano de implementação do modo de edição
 
 > **Data:** 2026-10-15
-> **Status:** aprovado pelo usuário em 2026-10-15; execução iniciada na branch `codex/phase-1b-bar-editor`.
+> **Status:** implementação e verificações automatizadas entregues na branch `codex/phase-1b-bar-editor`; verificações de ambiente pendentes conforme o [handoff](../handoff/2026-10-15-fase-1b-codex.md).
 > **Spec:** [Modo de edição da barra](../specs/2026-10-15-fase-1b-modo-de-edicao-design.md), aprovada pelo pedido de implementação nesta conversa.
 
 ## Objetivo e restrições

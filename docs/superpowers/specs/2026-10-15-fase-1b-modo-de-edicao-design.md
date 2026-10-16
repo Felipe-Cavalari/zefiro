@@ -1,7 +1,7 @@
 # Zefiro — Fase 1b: Modo de edição da barra (spec)
 
 > **Data:** 2026-10-15
-> **Status:** aprovada pelo usuário ao solicitar a implementação em 2026-10-15; plano de implementação aguardando aprovação.
+> **Status:** implementação entregue após aprovação da spec e do plano em 2026-10-15; resultados e validações de ambiente pendentes no [ADR-0008](../../adr/0008-modo-de-edicao-da-barra.md).
 > **Base:** [PLANNING](../../PLANNING.md) (§4.2–4.3 e §12), [spec da 1a](2026-10-15-fase-1a-barra-design.md), [passagem da 1a](../handoff/2026-10-15-fase-1a-codex.md), [ADR-0001](../../adr/0001-pipeline-de-renderizacao.md), [ADR-0006](../../adr/0006-ilha-de-midia-fork.md) e [ADR-0007](../../adr/0007-barra-fase-1a.md).
 
 ## 1. Objetivo
