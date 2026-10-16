@@ -18,6 +18,8 @@ pub struct EditorRuntime {
     conflicts: Vec<Vec<String>>,
     drag: Option<Drag>,
     format_field: Option<zefiro_platform_windows::text_input::TextInput>,
+    movement_ms: Vec<f64>,
+    suspended: bool,
 }
 
 struct Drag { id: String, origin: Point, active: bool, target: Option<(Section, usize)> }
@@ -34,8 +36,10 @@ impl Loop {
     }
 
     pub fn start_editor(&mut self, monitor: usize) -> Result<()> {
-        self.close_open_panel()?;
+        if self.editor.is_none() { self.editor_started = Some(std::time::Instant::now()); }
+        self.close_panel_for_editor()?;
         if let Some(editor) = &mut self.editor {
+            editor.suspended = false;
             editor.format_field = None;
             editor.ui.editing_format = false;
             editor.drag = None;
@@ -58,6 +62,7 @@ impl Loop {
         let selected = self.editor.as_ref().map(|editor| editor.monitor);
         for (index, bar) in self.bars.iter_mut().enumerate() { bar.show_edit_guides(&self.ctx, selected == Some(index))?; }
         let Some(editor) = self.editor.as_ref() else { return Ok(()) };
+        if editor.suspended { return Ok(()); }
         let Some(bar) = self.bars.get(editor.monitor) else { return Ok(()) };
         let names = self.editor_monitor_names();
         let scale = bar.scale();
@@ -99,6 +104,11 @@ impl Loop {
         window::release_capture();
         for bar in &mut self.bars { bar.clear_drag()?; bar.show_edit_guides(&self.ctx, false)?; }
         if let Some(mut editor) = self.editor.take() {
+            if !editor.movement_ms.is_empty() {
+                editor.movement_ms.sort_by(f64::total_cmp);
+                let p95 = editor.movement_ms[(editor.movement_ms.len() * 95).div_ceil(100) - 1];
+                tracing::info!(amostras = editor.movement_ms.len(), p95_ms = p95, "processamento de movimento do editor");
+            }
             editor.format_field = None;
             self.ctx.config = match saved {
                 Some(text) => parse_config(&text).unwrap_or(editor.session.confirmed),
@@ -151,8 +161,11 @@ impl Loop {
                             let mut session = EditorSession::new(config, text);
                             session.generation = reply.generation;
                             if let Some(bar) = self.bars.get(monitor) { session.select_monitor(bar.monitor().identity.id.clone()); }
-                            self.editor = Some(EditorRuntime { session, ui: EditorPanel::default(), monitor, choices: Vec::new(), conflicts: Vec::new(), drag: None, format_field: None });
+                            self.editor = Some(EditorRuntime { session, ui: EditorPanel::default(), monitor, choices: Vec::new(), conflicts: Vec::new(), drag: None, format_field: None, movement_ms: Vec::new(), suspended: false });
+                            let prepared = std::time::Instant::now();
+                            let preparation_ms = self.editor_started.map_or(0.0, |started| started.elapsed().as_secs_f64() * 1000.0);
                             self.apply_editor_preview()?;
+                            if let Some(started) = self.editor_started.take() { tracing::info!(ms = started.elapsed().as_secs_f64() * 1000.0, preparation_ms, desenho_ms = prepared.elapsed().as_secs_f64() * 1000.0, "editor pronto para composição"); }
                         } else if let Some(editor) = &mut self.editor {
                             if text != editor.session.latest_text {
                                 editor.session.external_change(config, text);
@@ -166,13 +179,14 @@ impl Loop {
                     Err(error) => {
                         if let Some(editor) = &mut self.editor { editor.session.external_invalid(text, error.message.clone()); editor.ui.message = format!("Arquivo inválido: {}", error.message); }
                         tracing::warn!("configuração inválida ao editar: {}", error.message);
+                        if let Some(monitor) = self.editor_pending.take() && let Some(panel) = self.panels.get(monitor) { panel.restore_focus(); }
                         self.redraw_editor()?;
                     }
                 },
                 Err(error) => {
                     if let Some(editor) = &mut self.editor { editor.session.conflict = true; editor.ui.message = format!("Não foi possível ler o arquivo: {error:?}"); }
                     tracing::warn!("não consegui ler a configuração para editar: {error:?}");
-                    self.editor_pending = None;
+                    if let Some(monitor) = self.editor_pending.take() && let Some(panel) = self.panels.get(monitor) { panel.restore_focus(); }
                     self.redraw_editor()?;
                 }
             }
@@ -197,8 +211,13 @@ impl Loop {
     }
 
     pub fn editor_action(&mut self, action: EditorAction) -> Result<()> {
+        let names = self.editor_monitor_names();
+        let (_, panel_height) = self.editor_panel_size();
+        let visible = self.editor.as_ref().map_or(8, |editor| EditorPanel::visible_count(self.bars[editor.monitor].scale(), panel_height));
+        let follow_item = matches!(action, EditorAction::MoveBefore | EditorAction::MoveAfter | EditorAction::MoveSection(_) | EditorAction::Add(_));
         let Some(mut editor) = self.editor.take() else { return Ok(()) };
         if editor.session.saving { self.editor = Some(editor); return Ok(()); }
+        editor.ui.focus_action(&editor.session, &names, &action, visible);
         let connected = self.bars.iter().filter_map(|bar| bar.monitor().identity.id.clone()).collect::<Vec<_>>();
         let mut error = None;
         match action {
@@ -271,6 +290,9 @@ impl Loop {
             }
         }
         if let Some(error) = error { editor.ui.message = error; }
+        if follow_item && let Some(id) = editor.ui.selected.clone() {
+            editor.ui.focus_action(&editor.session, &names, &EditorAction::SelectItem(id), visible);
+        }
         if let Err(error) = self.ctx.clock.validate_format(&editor.session.draft.clock.format) { editor.ui.message = error; }
         self.editor = Some(editor);
         self.apply_editor_preview()
@@ -291,6 +313,28 @@ impl Loop {
             }
         }
         self.redraw_editor()
+    }
+
+    pub fn prepare_editor_rebuild(&mut self) {
+        window::release_capture();
+        if let Some(editor) = &mut self.editor {
+            editor.format_field = None;
+            editor.ui.editing_format = false;
+            editor.drag = None;
+            editor.session.cancel_move();
+            self.ctx.config = editor.session.draft.clone();
+        }
+    }
+
+    pub fn suspend_editor(&mut self, suspended: bool) -> Result<()> {
+        self.prepare_editor_rebuild();
+        if let Some(editor) = &mut self.editor {
+            editor.suspended = suspended;
+            if suspended {
+                if let Some(panel) = self.panels.get_mut(editor.monitor) { panel.close(&self.ctx, false)?; }
+            } else { self.redraw_editor()?; }
+        }
+        Ok(())
     }
 
     pub fn editor_event(&mut self, event: WinEvent) -> Result<bool> {
@@ -327,6 +371,7 @@ impl Loop {
                 }
             }
             WinEvent::MouseMove { hwnd, x, y } => {
+                let started = std::time::Instant::now();
                 if let Some(index) = self.bar_index(hwnd) {
                     let Some(mut editor) = self.editor.take() else { return Ok(true) };
                     let mut changed = false;
@@ -362,6 +407,9 @@ impl Loop {
                     }
                     self.editor = Some(editor);
                     if changed { self.apply_editor_preview()?; }
+                    if let Some(editor) = &mut self.editor && editor.drag.as_ref().is_some_and(|drag| drag.active) && editor.movement_ms.len() < 4096 {
+                        editor.movement_ms.push(started.elapsed().as_secs_f64() * 1000.0);
+                    }
                 }
             }
             WinEvent::LeftUp { hwnd, x, y } => {

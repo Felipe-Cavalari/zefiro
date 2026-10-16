@@ -10,6 +10,10 @@ impl From<std::io::Error> for SaveError { fn from(error: std::io::Error) -> Self
 /// Conferência otimista seguida de substituição atômica. A janela de corrida com escritores
 /// externos não cooperantes foi aceita pelo usuário e fica documentada no ADR da fase.
 pub fn save_snapshot(path: &Path, expected: &str, output: &str) -> Result<(), SaveError> {
+    save_snapshot_before_commit(path, expected, output, || {})
+}
+
+fn save_snapshot_before_commit(path: &Path, expected: &str, output: &str, before_commit: impl FnOnce()) -> Result<(), SaveError> {
     zefiro_core::config::parse_config(output).map_err(|e| SaveError::Io(e.message))?;
     let current = std::fs::read_to_string(path)?;
     if current != expected { return Err(SaveError::Conflict(current)); }
@@ -20,6 +24,7 @@ pub fn save_snapshot(path: &Path, expected: &str, output: &str) -> Result<(), Sa
         file.write_all(output.as_bytes())?;
         file.sync_all()?;
         drop(file);
+        before_commit();
         let latest = std::fs::read_to_string(path)?;
         if latest != expected { return Err(SaveError::Conflict(latest)); }
         std::fs::rename(&temporary, path)?;
@@ -89,5 +94,34 @@ mod tests {
         assert!(save_snapshot(&path, "theme = 'nord'\n", "[broken").is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "theme = 'nord'\n");
         assert!(save_snapshot(&dir.path().join("missing.toml"), "", "").is_err());
+    }
+
+    #[test]
+    fn external_save_during_temporary_preparation_is_preserved_and_temporary_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let base = "theme = 'obsidian'\n";
+        std::fs::write(&path, base).unwrap();
+        let result = save_snapshot_before_commit(&path, base, "theme = 'nord'\n", || {
+            std::fs::write(&path, "theme = 'plum' # outro editor\n").unwrap();
+        });
+        assert!(matches!(result, Err(SaveError::Conflict(_))));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "theme = 'plum' # outro editor\n");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn failed_replacement_keeps_original_file_and_removes_own_temporary() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let base = "theme = 'obsidian'\n";
+        std::fs::write(&path, base).unwrap();
+        // Permite ler/escrever, mas não substituir: simula outro processo mantendo o arquivo aberto.
+        let held = std::fs::OpenOptions::new().read(true).share_mode(3).open(&path).unwrap();
+        assert!(matches!(save_snapshot(&path, base, "theme = 'nord'\n"), Err(SaveError::Io(_))));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), base);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+        drop(held);
     }
 }

@@ -33,6 +33,7 @@ pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
 /// Modo de medição (`ZEFIRO_CYCLES=N`): abre e fecha o calendário N vezes e sai.
 pub const TIMER_CYCLE: usize = 4;
+pub const TIMER_GRAPHICS_TRIM: usize = 5;
 const CYCLE_HALF_MS: u32 = 450;
 
 const VK_ESCAPE: u32 = 0x1B;
@@ -51,6 +52,7 @@ pub struct Loop {
     pub editor_worker: Option<crate::config_worker::ConfigWorker>,
     pub editor_pending: Option<usize>,
     pub editor_generation: u64,
+    pub editor_started: Option<std::time::Instant>,
     overflow_ids: Vec<String>,
     overflow_focus: usize,
     overflow_scroll: usize,
@@ -77,7 +79,7 @@ impl Loop {
             panels.push(PanelView::create(&ctx, b.monitor())?);
         }
         let today = now_local().date;
-        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), cycles: None })
+        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), cycles: None })
     }
 
     pub(crate) fn bar_index(&self, hwnd: isize) -> Option<usize> { self.bars.iter().position(|b| b.hwnd().0 as isize == hwnd) }
@@ -111,12 +113,16 @@ impl Loop {
     }
 
     fn run_effects(&mut self, fx: Vec<PanelEffect>) -> Result<()> {
+        self.run_effects_with_focus(fx, true)
+    }
+
+    fn run_effects_with_focus(&mut self, fx: Vec<PanelEffect>, restore_focus: bool) -> Result<()> {
         let opens_another = fx.iter().any(|e| matches!(e, PanelEffect::Open(_)));
         for e in fx {
             match e {
                 PanelEffect::Close { monitor } => {
                     tracing::info!(monitor, "painel fechando");
-                    self.panels[monitor].close(&self.ctx, !opens_another)?;
+                    self.panels[monitor].close(&self.ctx, !opens_another && restore_focus)?;
                     for b in &mut self.bars {
                         b.set_active(&self.ctx, None)?;
                     }
@@ -171,6 +177,11 @@ impl Loop {
     pub fn close_open_panel(&mut self) -> Result<()> {
         let fx = self.controller.handle(PanelInput::Escape);
         self.run_effects(fx)
+    }
+
+    pub fn close_panel_for_editor(&mut self) -> Result<()> {
+        let effects = self.controller.handle(PanelInput::Escape);
+        self.run_effects_with_focus(effects, false)
     }
 
     fn redraw_open_panel(&mut self) -> Result<()> {
@@ -406,6 +417,10 @@ impl Loop {
                 self.schedule_clock();
             }
             WinEvent::Timer { id: TIMER_CYCLE } => self.cycle_tick()?,
+            WinEvent::Timer { id: TIMER_GRAPHICS_TRIM } => {
+                window::kill_timer(TIMER_GRAPHICS_TRIM);
+                if self.controller.open().is_none() && self.editor.is_none() { self.ctx.gfx.trim_idle_resources(); }
+            }
             WinEvent::PanelSettled { hwnd, ticket } => {
                 if let Some(index) = self.panel_index(hwnd) { self.panels[index].hide_if_closed(&self.ctx, ticket)?; }
             }

@@ -11,7 +11,6 @@ use crate::theme_state::ThemeState;
 
 pub struct AppCtx {
     /// Dono do dispositivo D3D/D2D em que o compositor desenha; precisa viver tanto quanto ele.
-    #[allow(dead_code)]
     pub gfx: Gfx,
     pub comp: Comp,
     pub text: DWriteText,

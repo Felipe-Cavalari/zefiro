@@ -23,7 +23,7 @@ pub fn handle(l: &mut Loop, e: WinEvent) -> Result<bool> {
         }
         WinEvent::DisplayChanged | WinEvent::DpiChanged { .. } => window::set_timer(TIMER_DISPLAY, 400),
         WinEvent::Timer { id: TIMER_DISPLAY } => {
-            window::release_capture();
+            l.prepare_editor_rebuild();
             window::kill_timer(TIMER_DISPLAY);
             tracing::info!("monitores mudaram: recriando as barras");
             // Os painéis são recriados abaixo; o controlador só precisa saber que nada está aberto.
@@ -58,10 +58,12 @@ pub fn handle(l: &mut Loop, e: WinEvent) -> Result<bool> {
                 if fullscreen && l.controller.open().is_some_and(|o| o.monitor == i) {
                     l.close_open_panel()?;
                 }
+                if fullscreen && l.editor.as_ref().is_some_and(|editor| editor.monitor == i) { l.suspend_editor(true)?; }
                 l.bars[i].set_hidden(fullscreen);
             }
             if param == 0 {
                 island_zorder::raise_island();
+                l.suspend_editor(false)?;
             }
         }
         WinEvent::AppBar { notification: ABN_POSCHANGED, .. } => {

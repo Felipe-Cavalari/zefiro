@@ -192,13 +192,17 @@ impl PanelView {
         let surface = ctx.comp.surface(1.0, 1.0)?;
         self.content.SetBrush(&ctx.comp.compositor.CreateSurfaceBrushWithSurface(&surface)?)?;
         self.surface = surface;
-        self.content.SetSize(Vector2 { X: 1.0, Y: 1.0 })
+        self.content.SetSize(Vector2 { X: 1.0, Y: 1.0 })?;
+        window::set_timer(crate::event_loop::TIMER_GRAPHICS_TRIM, 1000);
+        Ok(())
     }
 
     /// O teclado está neste painel agora.
     pub fn has_focus(&self) -> bool {
         window::input_window(self.hwnd).is_some_and(|h| h.0 as isize == window::foreground())
     }
+
+    pub fn restore_focus(&self) { window::restore_foreground(self.previous_foreground, self.hwnd); }
 
     pub fn destroy(self) {
         window::destroy(self.hwnd);

@@ -74,12 +74,7 @@ impl BarView {
         let strip = MorphShape::new(&ctx.comp, &root, &ctx.theme.morph_style(scale, SurfaceKind::Strip))?;
         let divider = ctx.comp.compositor.CreateSpriteVisual()?;
         root.Children()?.InsertAtTop(&divider)?;
-        let mut groups = Vec::new();
-        for _ in 0..3 {
-            let g = MorphShape::new(&ctx.comp, &root, &ctx.theme.morph_style(scale, SurfaceKind::Pill))?;
-            g.set_opacity(0.0)?;
-            groups.push(g);
-        }
+        let groups = Vec::new();
         let mut view = BarView { hwnd, monitor: monitor.clone(), scale, _target: target, root, strip, divider, groups, chips: Vec::new(), layout: None, appbar: false, hover: None, active: None, guides: None, drag_ghost: None, drag_marker: None };
         view.apply(ctx, false)?;
         window::set_bounds(hwnd, bounds, true);
@@ -123,6 +118,12 @@ impl BarView {
         let specs = [spec(&sections.start), spec(&sections.center), spec(&sections.end)];
         let reservation = (self.monitor.primary && ctx.config.island.enabled).then(|| window::island_reservation().unwrap_or(self.monitor.rect.w));
         let layout = layout_sections(self.monitor.rect.w, self.scale, cfg.height, cfg.format, [&specs[0], &specs[1], &specs[2]], reservation);
+        while self.groups.len() < layout.groups.len() {
+            let group = MorphShape::new(&ctx.comp, &self.root, &ctx.theme.morph_style(self.scale, SurfaceKind::Pill))?;
+            ctx.comp.place_background(&self.root, &group.root().cast()?, &self.divider.cast()?)?;
+            group.set_opacity(0.0)?;
+            self.groups.push(group);
+        }
         for group in &layout.overflow {
             contents.push((group.id.clone(), chip_content(ctx, &group.id, cfg.height, chip_h, font_px, self.scale)));
         }
