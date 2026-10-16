@@ -142,7 +142,9 @@ impl IslandView {
         let min_h = (3.0 * self.k).max(2.0);
         for (i, s) in self.bar_sprites.iter().enumerate() {
             let level = levels.get(i).copied().unwrap_or(0.0).clamp(0.0, 1.0);
-            let h = (level * v.h * 0.86).max(min_h).round();
+            // Raiz quadrada (desvio consciente da ilha C++, que é linear): fala baixa (0,1–0,3) ainda
+            // mexe as barras, e música alta continua chegando ao topo.
+            let h = (level.sqrt() * v.h * 0.86).max(min_h).round();
             s.SetSize(Vector2 { X: width, Y: h })?;
             s.SetOffset(Vector3 { X: (i as f32 * pitch + (pitch - width) / 2.0).round(), Y: ((v.h - h) / 2.0).round(), Z: 0.0 })?;
             s.SetOpacity(0.45 + 0.5 * level)?;

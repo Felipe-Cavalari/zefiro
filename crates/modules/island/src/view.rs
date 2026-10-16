@@ -265,7 +265,8 @@ pub fn media_pill(s: &MediaSession, peek: bool, pill_h: f32, font_scale: f32, to
         }
     }
     let vis_w = 46.0 * k;
-    let vis = Rect::new(w - 14.0 * k - vis_w, pill_h * 0.25, vis_w, pill_h * 0.5);
+    // 64 % da altura: com fala (nível 0,1–0,3) as barras ainda se mexem.
+    let vis = Rect::new(w - 14.0 * k - vis_w, pill_h * 0.18, vis_w, pill_h * 0.64);
     if peek {
         let x = art_rect.right() + 10.0 * k;
         let text_w = (vis.x - 10.0 * k - x).max(0.0);

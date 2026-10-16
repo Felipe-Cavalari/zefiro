@@ -171,7 +171,10 @@ impl Loop {
                         self.overflow_scroll = 0;
                     }
                     tracing::info!(monitor = p.monitor, chip = %p.chip, "painel abrindo");
-                    if matches!(p.kind, PanelKind::Calendar | PanelKind::Island) {
+                    if p.kind == PanelKind::Island {
+                        self.island_panel_opening();
+                    }
+                    if p.kind == PanelKind::Calendar {
                         let today = now_local().date;
                         self.shown_month = (today.year, today.month);
                     }

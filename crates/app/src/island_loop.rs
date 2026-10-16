@@ -561,6 +561,11 @@ impl Loop {
         Ok(())
     }
 
+    /// Ao abrir, o painel começa na primeira aba (a mídia, quando há).
+    pub fn island_panel_opening(&mut self) {
+        self.island.tab = self.island_tabs()[0];
+    }
+
     /// Ao fechar: o painel da ilha não guarda áreas de clique de um desenho antigo.
     pub fn island_panel_closed(&mut self) {
         self.island.expanded = None;
