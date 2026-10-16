@@ -38,6 +38,8 @@ pub const USER_VOLUME: u32 = 9;
 pub const USER_PRIVACY: u32 = 10;
 /// Chegou uma notificação do Windows.
 pub const USER_NOTIFICATION: u32 = 11;
+/// "Não perturbe" foi ligado ou desligado.
+pub const USER_DND: u32 = 12;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
@@ -459,6 +461,7 @@ impl Loop {
             WinEvent::User { code: USER_VOLUME } => self.island_volume_changed()?,
             WinEvent::User { code: USER_PRIVACY } => self.island_privacy_changed()?,
             WinEvent::User { code: USER_NOTIFICATION } => self.island_notifications()?,
+            WinEvent::User { code: USER_DND } => self.island_dnd_changed()?,
             WinEvent::ClipboardChanged => self.island_clipboard()?,
             WinEvent::LockKey { caps } => self.island_lock_key(caps)?,
             WinEvent::Timer { id: TIMER_GRAPHICS_TRIM } => {

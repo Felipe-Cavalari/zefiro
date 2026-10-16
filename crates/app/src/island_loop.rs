@@ -21,6 +21,7 @@ use zefiro_platform_windows::popup_menu;
 use zefiro_platform_windows::privacy::PrivacyWatcher;
 use zefiro_platform_windows::notifications::NotificationWatcher;
 use zefiro_platform_windows::system_events;
+use zefiro_platform_windows::dnd;
 use zefiro_island::view::Privacy;
 use zefiro_island::menu::{self, AppOutput, MenuCommand, MenuInput};
 use zefiro_island::state::{Activity, Notice};
@@ -28,7 +29,7 @@ use zefiro_platform_windows::window;
 use zefiro_ui::paint::DisplayList;
 
 use crate::bar_view::ISLAND_CHIP;
-use crate::event_loop::{Loop, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_MEDIA, USER_NOTIFICATION, USER_PRIVACY, USER_VISUALIZER, USER_VOLUME};
+use crate::event_loop::{Loop, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_DND, USER_MEDIA, USER_NOTIFICATION, USER_PRIVACY, USER_VISUALIZER, USER_VOLUME};
 
 /// Destaque quando a capa não tem cor viva (o mesmo padrão da ilha C++).
 const DEFAULT_ACCENT: Rgba = Rgba { r: 0x4C as f32 / 255.0, g: 0xC9 as f32 / 255.0, b: 0xF0 as f32 / 255.0, a: 1.0 };
@@ -93,6 +94,7 @@ impl Loop {
         }
         if embedded != self.island.listening {
             if embedded {
+                dnd::watch(Arc::new(|| window::post_user(USER_DND)));
                 if let Err(e) = system_events::listen(window::message_window()) {
                     tracing::warn!("avisos de área de transferência e Caps Lock indisponíveis: {e}");
                 }
@@ -106,13 +108,22 @@ impl Loop {
 
     pub fn island_notifications(&mut self) -> Result<()> {
         let Some(w) = &self.island.notifications else { return Ok(()) };
-        // Várias de uma vez: a mais recente fica na pílula.
-        if let Some(n) = w.take().pop() {
+        // Várias de uma vez: a mais recente fica na pílula. Com "Não perturbe", nenhuma aparece.
+        if let Some(n) = w.take().pop().filter(|_| !dnd::active()) {
             let now = self.ctx.now();
             self.ctx.island.state.activity(Activity::Notification(Notice { app: n.app, text: n.text, icon: n.icon }), now);
             self.island_refresh()?;
         }
         Ok(())
+    }
+
+    pub fn island_dnd_changed(&mut self) -> Result<()> {
+        if !self.ctx.config.island.embedded() {
+            return Ok(());
+        }
+        let now = self.ctx.now();
+        self.ctx.island.state.activity(Activity::DoNotDisturb { on: dnd::active() }, now);
+        self.island_refresh()
     }
 
     pub fn island_clipboard(&mut self) -> Result<()> {
