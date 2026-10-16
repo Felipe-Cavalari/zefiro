@@ -38,3 +38,21 @@ fn native_format_field_preserves_unicode_and_notifies_its_owner() {
     drop(field);
     window::destroy(hwnd);
 }
+
+#[test]
+fn closing_the_native_field_requests_editor_close_instead_of_destroying_only_the_field() {
+    use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT, WM_CLOSE};
+    window::register_classes().unwrap();
+    let hwnd = window::create(window::WindowKind::Panel, Rect::new(-4000.0, -4000.0, 300.0, 100.0)).unwrap();
+    let field = zefiro_platform_windows::text_input::TextInput::new(hwnd, Rect::new(10.0, 10.0, 220.0, 32.0), "ddd", zefiro_platform::color::Rgba::BLACK, zefiro_platform::color::Rgba::WHITE).unwrap();
+    window::take_events();
+    // SAFETY: mensagem de fechamento para a raiz da nossa janela de teste, sem enviar Alt+F4.
+    unsafe {
+        let host = GetAncestor(windows::Win32::Foundation::HWND(field.handle() as *mut _), GA_ROOT);
+        SendMessageW(host, WM_CLOSE, None, None);
+    }
+    assert!(window::take_events().contains(&window::WinEvent::Close { hwnd: hwnd.0 as isize }));
+    assert_eq!(field.text(), "ddd");
+    drop(field);
+    window::destroy(hwnd);
+}

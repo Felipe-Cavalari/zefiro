@@ -100,6 +100,11 @@ impl Drop for TextInput {
 }
 
 extern "system" fn host_procedure(hwnd: HWND, message: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    if message == WM_CLOSE {
+        let owner = FIELDS.with(|fields| fields.borrow().values().find(|field| field.host == hwnd).map(|field| field.owner));
+        if let Some(owner) = owner { crate::window::push(crate::window::WinEvent::Close { hwnd: owner }); }
+        return LRESULT(0);
+    }
     if message == WM_CTLCOLOREDIT && let Some(color) = control_color(wp, lp) { return color; }
     if message == WM_COMMAND && ((wp.0 >> 16) & 0xffff) as u32 == EN_CHANGE {
         let owner = FIELDS.with(|fields| fields.borrow().get(&lp.0).map(|field| field.owner));

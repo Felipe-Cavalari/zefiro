@@ -5,7 +5,7 @@ use windows::Win32::Graphics::Direct2D::*;
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_WARP;
 use windows::Win32::Graphics::Direct3D11::*;
 use windows::Win32::Graphics::DirectWrite::*;
-use windows::Win32::Graphics::Dxgi::IDXGIDevice;
+use windows::Win32::Graphics::Dxgi::{IDXGIDevice, IDXGIDevice3};
 use windows::core::{Interface, Result};
 
 pub struct Gfx {
@@ -16,6 +16,16 @@ pub struct Gfx {
 }
 
 impl Gfx {
+    /// Ao dispensar superfícies grandes do editor, devolve caches que já não estão em uso.
+    pub fn trim_idle_resources(&self) {
+        // SAFETY: dispositivo pertence à thread de UI; ClearResources só descarta caches inativos.
+        unsafe { self.d2d_device.ClearResources(0) };
+        if let Ok(device) = self.d3d.cast::<IDXGIDevice3>() {
+            // SAFETY: Trim preserva recursos em uso e dispensa alocações internas do driver.
+            unsafe { device.Trim() };
+        }
+    }
+
     pub fn new() -> Result<Gfx> {
         // SAFETY: criação padrão de dispositivos; ponteiros de saída locais.
         unsafe {

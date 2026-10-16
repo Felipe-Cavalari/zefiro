@@ -104,6 +104,12 @@ impl Comp {
         Ok(v)
     }
 
+    /// Um fundo criado depois dos chips continua abaixo do conteúdo já existente.
+    pub fn place_background(&self, parent: &ContainerVisual, background: &Visual, anchor: &Visual) -> Result<()> {
+        parent.Children()?.Remove(background)?;
+        parent.Children()?.InsertAbove(background, anchor)
+    }
+
     pub fn scalar_spring(&self, value: f32, p: SpringParams) -> Result<SpringScalarNaturalMotionAnimation> {
         let c = p.compositor();
         let a = self.compositor.CreateSpringScalarAnimation()?;
