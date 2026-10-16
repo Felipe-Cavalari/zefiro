@@ -1,6 +1,7 @@
 //! Implementação Windows: Direct2D (WARP), Windows.UI.Composition, janelas e AppBar.
 #![cfg(windows)]
 
+pub mod app_icon;
 pub mod appbar;
 pub mod audio_devices;
 pub mod bluetooth;

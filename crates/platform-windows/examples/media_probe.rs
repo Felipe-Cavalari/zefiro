@@ -11,6 +11,6 @@ fn main() {
     for s in sessions {
         let cover = s.cover.as_ref().map(|c| format!("{}x{}", c.width(), c.height()));
         let accent = s.cover.as_ref().and_then(zefiro_island::accent::cover_accent);
-        println!("{} [{}] {:?} | {} | pos {:.1}/{:.1}s | capa {cover:?} | destaque {accent:?}", s.app_name, s.id, s.playback, s.headline(), s.position_at(now_unix_ms()), s.duration_s);
+        println!("{} [{}] {:?} | {} | pos {:.1}/{:.1}s | capa {cover:?} | destaque {accent:?} | ícone {:?}", s.app_name, s.id, s.playback, s.headline(), s.position_at(now_unix_ms()), s.duration_s, s.app_icon.as_ref().map(|i| i.width()));
     }
 }

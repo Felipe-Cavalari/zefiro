@@ -95,6 +95,7 @@ fn run(rx: &Receiver<Job>, tx: &Sender<Job>, shared: &Mutex<Vec<MediaSession>>, 
     }))?;
     let mut watched: Vec<Watched> = Vec::new();
     let mut covers: HashMap<(String, String, String), Option<Image>> = HashMap::new();
+    let mut icons = Icons::default();
     let mut last: Vec<MediaSession> = Vec::new();
     let mut pending = Some(true);
     loop {
@@ -110,7 +111,8 @@ fn run(rx: &Receiver<Job>, tx: &Sender<Job>, shared: &Mutex<Vec<MediaSession>>, 
                     }
                 }
             }
-            let snapshot = snapshot(&watched, full, &last, &mut covers);
+            let mut snapshot = snapshot(&watched, full, &last, &mut covers);
+            icons.fill(&mut snapshot);
             if snapshot != last {
                 last = snapshot.clone();
                 if let Ok(mut s) = shared.lock() {
@@ -205,6 +207,7 @@ fn read_session(s: &Session, full: bool, last: &[MediaSession], covers: &mut Has
         can_play_pause: controls.IsPlayPauseToggleEnabled()?,
         can_seek: controls.IsPlaybackPositionEnabled()?,
         cover: None,
+        app_icon: None,
     };
     match previous.filter(|_| !full) {
         Some(p) => {
@@ -262,5 +265,28 @@ mod tests {
         // 2026-01-01T00:00:00Z
         let universal = (1_767_225_600_000i64 + 11_644_473_600_000) * 10_000;
         assert_eq!(unix_ms(universal), 1_767_225_600_000);
+    }
+}
+
+/// Ícones dos apps por AUMID. Sem ícone (app sem janela ainda), tenta de novo a cada 8 leituras,
+/// como a ilha C++: enumerar janelas não é de graça.
+#[derive(Default)]
+struct Icons { cache: HashMap<String, (Option<Image>, u32)> }
+
+const ICON_PX: u32 = 32;
+
+impl Icons {
+    fn fill(&mut self, sessions: &mut [MediaSession]) {
+        for s in sessions.iter_mut() {
+            let entry = self.cache.entry(s.id.clone()).or_insert((None, 0));
+            if entry.0.is_none() {
+                if entry.1.is_multiple_of(8) {
+                    entry.0 = crate::app_icon::source_icon(&s.id, &s.app_name, ICON_PX);
+                }
+                entry.1 += 1;
+            }
+            s.app_icon = entry.0.clone();
+        }
+        self.cache.retain(|id, _| sessions.iter().any(|s| &s.id == id));
     }
 }

@@ -282,13 +282,13 @@ fn add(route: &mut AppRoute, pid: u32) {
     }
 }
 
-/// Processos da fonte de mídia e a saída gravada para ela. `None` se a interface não existir.
-pub fn app_route(aumid: &str, source_name: &str) -> Option<(AppRoute, RouteState)> {
-    let policy = PolicyConfig::open()?;
+/// Processos do app da fonte de mídia, agrupados por executável (caminho em minúsculas): primeiro os
+/// que têm sessão de áudio; se nenhum casar (app pausado há tempo), todos os processos.
+pub fn source_processes(aumid: &str, source_name: &str) -> Vec<(String, Vec<u32>)> {
     let m = SourceMatcher::new(aumid, source_name);
-    let e = enumerator().ok()?;
     let mut route = AppRoute::default();
-    for pid in session_pids(&e) {
+    let pids = enumerator().map(|e| session_pids(&e)).unwrap_or_default();
+    for pid in pids {
         let exe = image_path(pid).unwrap_or_default();
         let base = exe.rsplit(['\\', '/']).next().unwrap_or(&exe).to_string();
         if matches(&m, pid, &base) {
@@ -314,6 +314,13 @@ pub fn app_route(aumid: &str, source_name: &str) -> Option<(AppRoute, RouteState
             }
         }
     }
+    route.exes
+}
+
+/// Processos da fonte de mídia e a saída gravada para ela. `None` se a interface não existir.
+pub fn app_route(aumid: &str, source_name: &str) -> Option<(AppRoute, RouteState)> {
+    let policy = PolicyConfig::open()?;
+    let route = AppRoute { exes: source_processes(aumid, source_name) };
     if route.exes.is_empty() {
         return Some((route, RouteState::NotRunning));
     }

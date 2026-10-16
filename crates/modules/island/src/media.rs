@@ -24,6 +24,8 @@ pub struct MediaSession {
     pub can_play_pause: bool,
     pub can_seek: bool,
     pub cover: Option<Image>,
+    /// Ícone do app (janela, executável ou logo do pacote), para a barra de fontes e o selo da capa.
+    pub app_icon: Option<Image>,
 }
 
 impl MediaSession {
@@ -129,6 +131,7 @@ pub(crate) fn session(id: &str, playback: Playback) -> MediaSession {
         can_play_pause: true,
         can_seek: true,
         cover: None,
+        app_icon: None,
     }
 }
 

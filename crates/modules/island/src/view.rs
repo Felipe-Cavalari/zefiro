@@ -6,6 +6,7 @@
 
 use zefiro_platform::color::Rgba;
 use zefiro_platform::geometry::{Point, Rect, Size};
+use zefiro_platform::image::Image;
 use zefiro_platform::text::{Align, Family, FontWeight, TextMeasurer, TextStyle};
 use zefiro_resources::tokens::Tokens;
 use zefiro_ui::paint::{DisplayList, DrawOp};
@@ -287,52 +288,132 @@ fn time_text(s: f64) -> String {
     if s >= 3600 { format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60) } else { format!("{}:{:02}", s / 60, s % 60) }
 }
 
-/// `sources`: (id, nome) de todas as sessões, na ordem estável do SMTC.
-pub fn expanded(s: &MediaSession, sources: &[(String, String)], now_ms: i64, scale: f32, font_scale: f32, tokens: &Tokens) -> ExpandedView {
+/// Uma fonte na barra de fontes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SourceSlot { pub id: String, pub name: String, pub icon: Option<Image>, pub playing: bool }
+
+/// Estado das animações do painel num instante (o app avança o tempo e redesenha).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ExpandedAnim {
+    /// Posição do indicador da barra de fontes, em posições (fracionária durante o deslize de 0,30 s).
+    pub dock_pos: Option<f32>,
+    /// Troca de fonte: opacidade e deslocamento horizontal (px de conteúdo) do bloco capa + textos + tempo.
+    pub swap_alpha: f32,
+    pub swap_dx: f32,
+}
+
+impl Default for ExpandedAnim {
+    fn default() -> Self {
+        ExpandedAnim { dock_pos: None, swap_alpha: 1.0, swap_dx: 0.0 }
+    }
+}
+
+/// Medidas da barra de fontes (§6.2): x = 20, altura 30, posições de 26 com 2 de espaço e 2 de borda.
+pub const DOCK_LEFT: f32 = 20.0;
+const DOCK_HEIGHT: f32 = 30.0;
+const DOCK_SLOT: f32 = 26.0;
+const DOCK_GAP: f32 = 2.0;
+const DOCK_PAD: f32 = 2.0;
+const DOCK_ICON: f32 = 16.0;
+
+/// Posições da barra: até 3 fontes; com mais, a primeira, a atual e "+N" (`None`).
+pub fn dock_slots(count: usize, active: usize) -> Vec<Option<usize>> {
+    if count < 2 {
+        Vec::new()
+    } else if count <= 3 {
+        (0..count).map(Some).collect()
+    } else {
+        vec![Some(0), Some(if active >= 2 { active } else { 1 }), None]
+    }
+}
+
+fn dock_slot_center(i: f32, scale: f32) -> f32 {
+    (DOCK_LEFT + DOCK_PAD + i * (DOCK_SLOT + DOCK_GAP) + DOCK_SLOT / 2.0) * scale
+}
+
+/// Ops com opacidade multiplicada e deslocadas na horizontal (grupo da troca de fonte).
+fn faded(ops: Vec<DrawOp>, alpha: f32, dx: f32) -> Vec<DrawOp> {
+    if alpha >= 0.999 && dx.abs() < 0.01 {
+        return ops;
+    }
+    let mv = |r: Rect| Rect::new(r.x + dx, r.y, r.w, r.h);
+    let a = |c: Rgba| c.with_alpha(c.a * alpha);
+    ops.into_iter()
+        .map(|op| match op {
+            DrawOp::RoundRect { rect, radius, color } => DrawOp::RoundRect { rect: mv(rect), radius, color: a(color) },
+            DrawOp::RoundRectStroke { rect, radius, color, width } => DrawOp::RoundRectStroke { rect: mv(rect), radius, color: a(color), width },
+            DrawOp::Circle { center, radius, color } => DrawOp::Circle { center: Point { x: center.x + dx, y: center.y }, radius, color: a(color) },
+            DrawOp::Text { rect, text, style, color, align } => DrawOp::Text { rect: mv(rect), text, style, color: a(color), align },
+            DrawOp::Image { rect, image, radius, opacity } => DrawOp::Image { rect: mv(rect), image, radius, opacity: opacity * alpha },
+            DrawOp::PushClip(rect) => DrawOp::PushClip(mv(rect)),
+            DrawOp::PopClip => DrawOp::PopClip,
+        })
+        .collect()
+}
+
+/// `sources`: todas as sessões, na ordem estável do SMTC.
+pub fn expanded(s: &MediaSession, sources: &[SourceSlot], now_ms: i64, scale: f32, font_scale: f32, tokens: &Tokens, anim: ExpandedAnim) -> ExpandedView {
     let px = |v: f32| v * scale;
     let fs = |v: f32| v * scale * font_scale;
     let size = Size { w: px(EXPANDED_DESIGN.w), h: px(EXPANDED_DESIGN.h) };
     let mut list = DisplayList::new(size);
     let mut hits = Vec::new();
+    let playing = s.playback == Playback::Playing;
 
-    // Capa 64 × 64 em (24, 20).
+    // ── Grupo da troca de fonte: capa, textos e linha do tempo ──────────────
+    let mut group = DisplayList::new(size);
     let art = Rect::new(px(24.0), px(20.0), px(64.0), px(64.0));
     match &s.cover {
-        Some(image) => list.push(DrawOp::Image { rect: art, image: image.clone(), radius: px(16.0), opacity: 1.0 }),
+        Some(image) => group.push(DrawOp::Image { rect: art, image: image.clone(), radius: px(16.0), opacity: 1.0 }),
         None => {
-            list.push(DrawOp::RoundRect { rect: art, radius: px(16.0), color: tokens.raised_strong });
-            list.push(DrawOp::Text { rect: art, text: "\u{E8D6}".into(), style: icon(px(26.0)), color: tokens.text_secondary, align: Align::Center });
+            group.push(DrawOp::RoundRect { rect: art, radius: px(16.0), color: tokens.accent.with_alpha(0.24) });
+            match &s.app_icon {
+                Some(icon) => group.push(DrawOp::Image { rect: art.inset(px(11.0), px(11.0)), image: icon.clone(), radius: px(6.0), opacity: 0.95 }),
+                None => group.push(DrawOp::Text { rect: art, text: "\u{E8D6}".into(), style: icon(px(26.0)), color: tokens.text_secondary, align: Align::Center }),
+            }
         }
+    }
+    // Selo do app no canto da capa (raio 9,5, como a ilha C++).
+    if s.cover.is_some()
+        && let Some(icon) = &s.app_icon
+    {
+        let c = Point { x: art.right() - px(13.5), y: art.bottom() - px(12.5) };
+        group.push(DrawOp::Circle { center: c, radius: px(11.0), color: tokens.fill.with_alpha(1.0) });
+        group.push(DrawOp::Image { rect: Rect::new(c.x - px(9.5), c.y - px(9.5), px(19.0), px(19.0)), image: icon.clone(), radius: px(9.5), opacity: 0.98 });
     }
     let tx = art.right() + px(14.0);
     let tw = size.w - tx - px(24.0);
     let title = if s.title.is_empty() { s.app_name.clone() } else { s.title.clone() };
-    list.push(DrawOp::Text { rect: Rect::new(tx, px(22.0), tw, px(22.0)), text: title, style: style(fs(15.0), FontWeight::SemiBold), color: tokens.text, align: Align::Leading });
+    group.push(DrawOp::Text { rect: Rect::new(tx, px(22.0), tw, px(22.0)), text: title, style: style(fs(15.0), FontWeight::SemiBold), color: tokens.text, align: Align::Leading });
     let sub = [s.artist.as_str(), s.album.as_str()].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join(" · ");
-    list.push(DrawOp::Text { rect: Rect::new(tx, px(44.0), tw, px(18.0)), text: sub, style: style(fs(12.5), FontWeight::Regular), color: tokens.text_secondary, align: Align::Leading });
-    list.push(DrawOp::Text { rect: Rect::new(tx, px(62.0), tw, px(16.0)), text: s.app_name.clone(), style: style(fs(11.0), FontWeight::Regular), color: tokens.text_tertiary, align: Align::Leading });
+    group.push(DrawOp::Text { rect: Rect::new(tx, px(44.0), tw, px(18.0)), text: sub, style: style(fs(12.5), FontWeight::Regular), color: tokens.text_secondary, align: Align::Leading });
+    let source_line = if playing { format!("Tocando no {}", s.app_name) } else { format!("Pausado no {}", s.app_name) };
+    group.push(DrawOp::Text { rect: Rect::new(tx, px(62.0), tw, px(16.0)), text: source_line, style: style(fs(11.0), FontWeight::Regular), color: tokens.text_tertiary, align: Align::Leading });
 
-    // Linha do tempo (estilo fino) em y = 114, margens 24 + 48.
+    // Linha do tempo (estilo fino) em y = 114, margens 24 + 48; marcador branco com aro de destaque.
     if s.duration_s > 0.0 {
         let pos = s.position_at(now_ms);
         let track = Rect::new(px(72.0), px(114.0) - px(2.0), size.w - px(144.0), px(4.0));
         let frac = (pos / s.duration_s).clamp(0.0, 1.0) as f32;
-        list.push(DrawOp::RoundRect { rect: track, radius: px(2.0), color: tokens.raised_strong });
-        list.push(DrawOp::RoundRect { rect: Rect::new(track.x, track.y, track.w * frac, track.h), radius: px(2.0), color: tokens.accent });
-        list.push(DrawOp::Circle { center: Point { x: track.x + track.w * frac, y: track.y + track.h / 2.0 }, radius: px(5.0), color: tokens.text });
+        group.push(DrawOp::RoundRect { rect: track, radius: px(2.0), color: tokens.raised_strong });
+        group.push(DrawOp::RoundRect { rect: Rect::new(track.x, track.y, track.w * frac, track.h), radius: px(2.0), color: tokens.accent });
+        let thumb = Point { x: track.x + track.w * frac, y: track.y + track.h / 2.0 };
+        let r = px(4.5);
+        group.push(DrawOp::Circle { center: thumb, radius: r, color: Rgba::WHITE.with_alpha(0.98) });
+        group.push(DrawOp::RoundRectStroke { rect: Rect::new(thumb.x - r - px(0.8), thumb.y - r - px(0.8), 2.0 * r + px(1.6), 2.0 * r + px(1.6)), radius: r + px(0.8), color: tokens.accent.with_alpha(0.85), width: px(1.6) });
         let label = style(fs(11.0), FontWeight::Regular);
-        list.push(DrawOp::Text { rect: Rect::new(px(20.0), px(104.0), px(46.0), px(20.0)), text: time_text(pos), style: label, color: tokens.text_secondary, align: Align::Trailing });
-        list.push(DrawOp::Text { rect: Rect::new(size.w - px(66.0), px(104.0), px(46.0), px(20.0)), text: time_text(s.duration_s), style: label, color: tokens.text_secondary, align: Align::Leading });
-        if s.can_seek {
+        group.push(DrawOp::Text { rect: Rect::new(px(20.0), px(104.0), px(46.0), px(20.0)), text: time_text(pos), style: label, color: tokens.text_secondary, align: Align::Trailing });
+        group.push(DrawOp::Text { rect: Rect::new(size.w - px(66.0), px(104.0), px(46.0), px(20.0)), text: time_text(s.duration_s), style: label, color: tokens.text_secondary, align: Align::Leading });
+        if s.can_seek && anim.swap_alpha >= 0.999 {
             // Clique ±14 px na vertical; a fração é calculada por quem trata o clique.
             hits.push((Rect::new(track.x, px(100.0), track.w, px(28.0)), IslandAction::Seek(-1.0)));
         }
     }
+    list.ops.extend(faded(group.ops, anim.swap_alpha, px(anim.swap_dx)));
 
-    // Controles em y = 148, espaçamento 64; raios 16 e 22 (+6 de folga no clique).
+    // ── Controles em y = 148, espaçamento 64; raios 16 e 22 (+6 de folga no clique) ──
     let cy = px(148.0);
     let cx = size.w / 2.0;
-    let playing = s.playback == Playback::Playing;
     let buttons = [
         (cx - px(64.0), 16.0, ICON_PREVIOUS, IslandAction::Previous, s.can_previous),
         (cx, 22.0, if playing { ICON_PAUSE } else { ICON_PLAY }, IslandAction::PlayPause, s.can_play_pause),
@@ -351,19 +432,64 @@ pub fn expanded(s: &MediaSession, sources: &[(String, String)], now_ms: i64, sca
         }
     }
 
-    // Barra de fontes (2 ou mais): x = 20, altura 30, posições de 26 px, até 3.
-    if sources.len() >= 2 {
-        for (i, (id, name)) in sources.iter().take(3).enumerate() {
-            let rect = Rect::new(px(20.0) + i as f32 * px(28.0), cy - px(13.0), px(26.0), px(26.0));
-            let current = *id == s.id;
-            list.push(DrawOp::Circle { center: Point { x: rect.x + rect.w / 2.0, y: cy }, radius: px(13.0), color: if current { tokens.accent_soft } else { tokens.raised } });
-            let initial = name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
-            list.push(DrawOp::Text { rect, text: initial, style: style(fs(11.0), FontWeight::SemiBold), color: if current { tokens.accent } else { tokens.text_secondary }, align: Align::Center });
-            hits.push((rect, IslandAction::Source(id.clone())));
+    // ── Barra de fontes (2 ou mais), parada durante a troca ──────────────────
+    let active = sources.iter().position(|x| x.id == s.id).unwrap_or(0);
+    let slots = dock_slots(sources.len(), active);
+    if !slots.is_empty() {
+        let n = slots.len() as f32;
+        let card = Rect::new(px(DOCK_LEFT), cy - px(DOCK_HEIGHT / 2.0), px(DOCK_PAD * 2.0 + n * DOCK_SLOT + (n - 1.0) * DOCK_GAP), px(DOCK_HEIGHT));
+        list.push(DrawOp::RoundRect { rect: card, radius: card.h / 2.0, color: tokens.raised });
+        let target = slots.iter().position(|x| *x == Some(active)).unwrap_or(0) as f32;
+        let pos = anim.dock_pos.unwrap_or(target).clamp(0.0, n - 1.0);
+        // Indicador: círculo cheio com aro de destaque, deslizando entre as posições.
+        let ic = dock_slot_center(pos, scale);
+        let ir = px(DOCK_SLOT / 2.0);
+        list.push(DrawOp::Circle { center: Point { x: ic, y: cy }, radius: ir, color: tokens.raised_strong });
+        list.push(DrawOp::RoundRectStroke { rect: Rect::new(ic - ir, cy - ir, 2.0 * ir, 2.0 * ir), radius: ir, color: tokens.accent, width: px(1.5) });
+        for (i, slot) in slots.iter().enumerate() {
+            let c = Point { x: dock_slot_center(i as f32, scale), y: cy };
+            let slot_rect = Rect::new(c.x - px(13.0), cy - px(13.0), px(26.0), px(26.0));
+            let lit = (1.0 - (pos - i as f32).abs()).clamp(0.0, 1.0);
+            let opacity = 0.5 + 0.5 * lit;
+            match slot.and_then(|k| sources.get(k)) {
+                Some(src) => {
+                    match &src.icon {
+                        Some(icon) => list.push(DrawOp::Image { rect: Rect::new(c.x - px(DOCK_ICON / 2.0), c.y - px(DOCK_ICON / 2.0), px(DOCK_ICON), px(DOCK_ICON)), image: icon.clone(), radius: px(DOCK_ICON / 2.0), opacity }),
+                        None => {
+                            let initial = src.name.chars().next().map(|ch| ch.to_uppercase().to_string()).unwrap_or_default();
+                            list.push(DrawOp::Text { rect: slot_rect, text: initial, style: style(fs(11.0), FontWeight::Bold), color: tokens.text.with_alpha(tokens.text.a * opacity), align: Align::Center });
+                        }
+                    }
+                    if src.playing {
+                        // Ponto verde de 7 px no canto, com aro da cor da barra.
+                        let d = Point { x: c.x + px(9.5), y: c.y + px(9.5) };
+                        list.push(DrawOp::Circle { center: d, radius: px(5.0), color: tokens.fill.with_alpha(1.0) });
+                        list.push(DrawOp::Circle { center: d, radius: px(3.5), color: Rgba { r: 0.19, g: 0.83, b: 0.38, a: 1.0 } });
+                    }
+                    hits.push((slot_rect.inset(-px(1.0), -px(2.0)), IslandAction::Source(src.id.clone())));
+                }
+                None => {
+                    let more = sources.len().saturating_sub(2);
+                    list.push(DrawOp::Text { rect: slot_rect, text: format!("+{more}"), style: style(fs(11.0), FontWeight::Bold), color: tokens.text_secondary, align: Align::Center });
+                    // "+N" mostra a próxima fonte fora da barra.
+                    if let Some(next) = (2..sources.len()).map(|k| (active + k - 1) % sources.len()).find(|k| *k != 0 && *k != active) {
+                        hits.push((slot_rect.inset(-px(1.0), -px(2.0)), IslandAction::Source(sources[next].id.clone())));
+                    }
+                }
+            }
         }
     }
     ExpandedView { list, hits }
 }
+
+/// Posição (índice) da fonte `id` na barra de fontes, para animar o indicador.
+pub fn dock_index(sources: &[SourceSlot], active: &str, id: &str) -> Option<usize> {
+    let a = sources.iter().position(|s| s.id == active).unwrap_or(0);
+    let k = sources.iter().position(|s| s.id == id)?;
+    let slots = dock_slots(sources.len(), a);
+    slots.iter().position(|x| *x == Some(k)).or(Some(slots.len().saturating_sub(1)))
+}
+
 
 /// Ação no ponto `p` do painel. O clique na linha do tempo vira `Seek(segundos)`.
 pub fn hit(view: &ExpandedView, s: &MediaSession, p: Point) -> Option<IslandAction> {
@@ -431,7 +557,7 @@ mod tests {
     #[test]
     fn expanded_controls_and_timeline_are_clickable() {
         let s = session("a", Playback::Playing);
-        let v = expanded(&s, &[], 1_000, 1.0, 1.0, &tokens());
+        let v = expanded(&s, &[], 1_000, 1.0, 1.0, &tokens(), ExpandedAnim::default());
         assert_eq!(v.list.size, Size { w: 380.0, h: 184.0 });
         assert_eq!(hit(&v, &s, Point { x: 190.0, y: 148.0 }), Some(IslandAction::PlayPause));
         assert_eq!(hit(&v, &s, Point { x: 126.0, y: 148.0 }), Some(IslandAction::Previous));
@@ -441,12 +567,59 @@ mod tests {
         assert_eq!(hit(&v, &s, Point { x: 5.0, y: 5.0 }), None);
     }
 
+    fn slot(id: &str, name: &str) -> SourceSlot {
+        SourceSlot { id: id.into(), name: name.into(), icon: None, playing: false }
+    }
+
+    #[test]
+    fn dock_uses_app_icons_indicator_and_playing_dot() {
+        let s = session("a", Playback::Playing);
+        let icon = Image::new(1, 1, vec![0, 0, 255, 255]).unwrap();
+        let sources = [SourceSlot { icon: Some(icon.clone()), playing: true, ..slot("a", "Spotify") }, slot("b", "Brave")];
+        let v = expanded(&s, &sources, 0, 1.0, 1.0, &tokens(), ExpandedAnim::default());
+        // Ícone do app no lugar da letra, opaco na atual; a outra fonte sem ícone mostra a inicial a 50 %.
+        assert!(v.list.ops.iter().any(|o| matches!(o, DrawOp::Image { image, opacity, .. } if *image == icon && (*opacity - 1.0).abs() < 1e-6)));
+        assert!(v.list.ops.iter().any(|o| matches!(o, DrawOp::Text { text, color, .. } if text == "B" && (color.a - tokens().text.a * 0.5).abs() < 1e-3)));
+        // Ponto verde de quem está tocando e o aro de destaque do indicador na posição 0.
+        assert!(v.list.ops.iter().any(|o| matches!(o, DrawOp::Circle { center, .. } if (center.x - 44.5).abs() < 0.01 && (center.y - 157.5).abs() < 0.01)));
+        assert!(v.list.ops.iter().any(|o| matches!(o, DrawOp::RoundRectStroke { rect, color, .. } if (rect.x - 22.0).abs() < 0.01 && *color == tokens().accent)));
+        // Indicador no meio do deslize.
+        let mid = expanded(&s, &sources, 0, 1.0, 1.0, &tokens(), ExpandedAnim { dock_pos: Some(0.5), ..Default::default() });
+        assert!(mid.list.ops.iter().any(|o| matches!(o, DrawOp::RoundRectStroke { rect, .. } if (rect.x - 36.0).abs() < 0.01)));
+    }
+
+    #[test]
+    fn more_than_three_sources_show_first_active_and_more() {
+        assert_eq!(dock_slots(5, 3), vec![Some(0), Some(3), None]);
+        assert_eq!(dock_slots(5, 1), vec![Some(0), Some(1), None]);
+        assert_eq!(dock_slots(3, 2), vec![Some(0), Some(1), Some(2)]);
+        assert!(dock_slots(1, 0).is_empty());
+        let sources: Vec<_> = ["a", "b", "c", "d"].iter().map(|x| slot(x, x)).collect();
+        let s = session("a", Playback::Playing);
+        let v = expanded(&s, &sources, 0, 1.0, 1.0, &tokens(), ExpandedAnim::default());
+        assert!(v.list.ops.iter().any(|o| matches!(o, DrawOp::Text { text, .. } if text == "+2")));
+        assert_eq!(dock_index(&sources, "a", "d"), Some(2), "fora da barra: vai para o +N");
+        assert_eq!(dock_index(&sources, "a", "b"), Some(1));
+    }
+
+    #[test]
+    fn swap_fades_and_shifts_cover_texts_and_timeline_but_not_controls() {
+        let s = session("a", Playback::Paused);
+        let v = expanded(&s, &[], 0, 1.0, 1.0, &tokens(), ExpandedAnim { swap_alpha: 0.5, swap_dx: -7.0, ..Default::default() });
+        let title = v.list.ops.iter().find_map(|o| if let DrawOp::Text { text, rect, color, .. } = o { (text == "a música").then_some((*rect, *color)) } else { None }).unwrap();
+        assert_eq!(title.0.x, 102.0 - 7.0);
+        assert!((title.1.a - tokens().text.a * 0.5).abs() < 1e-3);
+        assert!(v.list.ops.iter().any(|o| matches!(o, DrawOp::Text { text, .. } if text == "Pausado no a")));
+        assert!(!v.hits.iter().any(|(_, a)| matches!(a, IslandAction::Seek(_))), "sem busca no meio da troca");
+        assert!(v.hits.iter().any(|(_, a)| *a == IslandAction::PlayPause), "controles ficam");
+    }
+
     #[test]
     fn sources_bar_appears_with_two_or_more_sessions() {
         let s = session("a", Playback::Playing);
-        let one = expanded(&s, &[("a".into(), "Spotify".into())], 0, 1.0, 1.0, &tokens());
+        let one = expanded(&s, &[slot("a", "Spotify")], 0, 1.0, 1.0, &tokens(), ExpandedAnim::default());
         assert!(!one.hits.iter().any(|(_, a)| matches!(a, IslandAction::Source(_))));
-        let two = expanded(&s, &[("a".into(), "Spotify".into()), ("b".into(), "Brave".into())], 0, 1.0, 1.0, &tokens());
+        let two = expanded(&s, &[slot("a", "Spotify"), slot("b", "Brave")], 0, 1.0, 1.0, &tokens(), ExpandedAnim::default());
         assert_eq!(hit(&two, &s, Point { x: 61.0, y: 148.0 }), Some(IslandAction::Source("b".into())));
     }
 
@@ -454,7 +627,7 @@ mod tests {
     fn disabled_buttons_are_not_clickable_and_time_formats() {
         let mut s = session("a", Playback::Paused);
         s.can_next = false;
-        let v = expanded(&s, &[], 0, 1.0, 1.0, &tokens());
+        let v = expanded(&s, &[], 0, 1.0, 1.0, &tokens(), ExpandedAnim::default());
         assert_eq!(hit(&v, &s, Point { x: 254.0, y: 148.0 }), None);
         assert_eq!(time_text(65.4), "1:05");
         assert_eq!(time_text(3725.0), "1:02:05");

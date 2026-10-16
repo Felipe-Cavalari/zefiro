@@ -62,6 +62,8 @@ pub const TIMER_ISLAND_TICK: usize = 7;
 pub const TIMER_FOCUS: usize = 8;
 /// Karaokê da aba de letras (15 Hz, só com a aba na tela e tocando).
 pub const TIMER_LYRICS: usize = 9;
+/// Animação de troca de fonte no painel da ilha (60 Hz por menos de meio segundo).
+pub const TIMER_ISLAND_ANIM: usize = 10;
 const CYCLE_HALF_MS: u32 = 450;
 
 const VK_ESCAPE: u32 = 0x1B;
@@ -486,6 +488,7 @@ impl Loop {
             WinEvent::User { code: USER_HARDWARE } => self.island_hardware()?,
             WinEvent::User { code: USER_LYRICS } => self.island_lyrics()?,
             WinEvent::Timer { id: TIMER_LYRICS } => self.island_lyrics_tick()?,
+            WinEvent::Timer { id: TIMER_ISLAND_ANIM } => self.island_anim_tick()?,
             WinEvent::DeviceChange { arrived, volume } => self.island_device(arrived, volume)?,
             WinEvent::ClipboardChanged => self.island_clipboard()?,
             WinEvent::LockKey { caps } => self.island_lock_key(caps)?,

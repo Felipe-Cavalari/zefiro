@@ -64,6 +64,14 @@ impl IslandModel {
         self.sessions.iter().map(|s| (s.id.clone(), s.app_name.clone())).collect()
     }
 
+    /// Fontes para a barra de fontes do painel (com ícone e se está tocando).
+    pub fn source_slots(&self) -> Vec<crate::view::SourceSlot> {
+        self.sessions
+            .iter()
+            .map(|s| crate::view::SourceSlot { id: s.id.clone(), name: s.app_name.clone(), icon: s.app_icon.clone(), playing: s.playback == Playback::Playing })
+            .collect()
+    }
+
     pub fn collapsed(&self, now: f64) -> Collapsed {
         self.state.collapsed(self.media().is_some(), now)
     }

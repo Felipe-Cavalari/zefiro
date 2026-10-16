@@ -6,7 +6,7 @@ use windows::core::Result;
 use zefiro_bar::controller::PanelKind;
 use zefiro_integration_clock::windows::now_local;
 use zefiro_island::accent::cover_accent;
-use zefiro_island::view::{ExpandedView, IslandAction, expanded, hit};
+use zefiro_island::view::{ExpandedAnim, ExpandedView, IslandAction, dock_index, expanded, hit};
 use zefiro_island::waveform::Waveform;
 use zefiro_platform::color::Rgba;
 use zefiro_platform::geometry::Point;
@@ -32,7 +32,7 @@ use zefiro_platform_windows::window;
 use zefiro_ui::paint::DisplayList;
 
 use crate::bar_view::ISLAND_CHIP;
-use crate::event_loop::{Loop, TIMER_FOCUS, TIMER_LYRICS, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_BLUETOOTH, USER_DND, USER_HARDWARE, USER_LYRICS, USER_MEDIA, USER_NOTIFICATION, USER_PRIVACY, USER_VISUALIZER, USER_VOLUME, USER_WEATHER};
+use crate::event_loop::{Loop, TIMER_FOCUS, TIMER_ISLAND_ANIM, TIMER_LYRICS, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_BLUETOOTH, USER_DND, USER_HARDWARE, USER_LYRICS, USER_MEDIA, USER_NOTIFICATION, USER_PRIVACY, USER_VISUALIZER, USER_VOLUME, USER_WEATHER};
 
 /// Destaque quando a capa não tem cor viva (o mesmo padrão da ilha C++).
 const DEFAULT_ACCENT: Rgba = Rgba { r: 0x4C as f32 / 255.0, g: 0xC9 as f32 / 255.0, b: 0xF0 as f32 / 255.0, a: 1.0 };
@@ -52,6 +52,7 @@ pub struct IslandRuntime {
     lyrics: Option<LyricsService>,
     /// Faixa cuja letra foi pedida por último.
     lyrics_for: Option<LyricsRequest>,
+    swap: Option<Swap>,
     /// Área de transferência e Caps Lock ligados na janela de mensagens.
     listening: bool,
     capture: Option<AudioCapture>,
@@ -380,11 +381,12 @@ impl Loop {
         } else if tab != Tab::Hardware {
             self.island.hardware = None;
         }
+        let anim = self.island_expanded_anim();
         let font_scale = self.ctx.theme.theme.font.scale;
         let tokens = &self.ctx.theme.tokens;
         let mut list = match (tab, self.ctx.island.media(), &self.ctx.island.weather) {
             (Tab::Media, Some(s), _) => {
-                let view = expanded(s, &self.ctx.island.sources(), now_unix_ms(), scale, font_scale, tokens);
+                let view = expanded(s, &self.ctx.island.source_slots(), now_unix_ms(), scale, font_scale, tokens, anim);
                 let list = view.list.clone();
                 self.island.expanded = Some(view);
                 window::set_timer(TIMER_ISLAND_TICK, 1000);
@@ -483,10 +485,7 @@ impl Loop {
             IslandAction::PlayPause => MediaCommand::PlayPause(id),
             IslandAction::Seek(seconds) => MediaCommand::Seek(id, seconds),
             IslandAction::Source(source) => {
-                let now = self.ctx.now();
-                self.ctx.island.pick(&source, now);
-                self.island_refresh()?;
-                self.redraw_island_panel()?;
+                self.island_switch_source(source)?;
                 return Ok(true);
             }
         };
@@ -561,6 +560,78 @@ impl Loop {
         Ok(())
     }
 
+    /// Troca de fonte pela barra de fontes, animada como a ilha C++: o conteúdo antigo sai
+    /// deslizando 14 px e some (0,17 s), a fonte troca, o novo entra do outro lado (0,24 s); o
+    /// indicador desliza até a fonte nova em 0,30 s.
+    fn island_switch_source(&mut self, target: String) -> Result<()> {
+        let current = self.ctx.island.current().map(|s| s.id.clone()).unwrap_or_default();
+        if target == current {
+            return Ok(());
+        }
+        if !self.ctx.theme.animations {
+            let now = self.ctx.now();
+            self.ctx.island.pick(&target, now);
+            self.island_refresh()?;
+            return self.redraw_island_panel();
+        }
+        let slots = self.ctx.island.source_slots();
+        let from = dock_index(&slots, &current, &current).unwrap_or(0) as f32;
+        let to = dock_index(&slots, &current, &target).unwrap_or(0) as f32;
+        let now = Instant::now();
+        self.island.swap = Some(Swap { target, dir: if to >= from { 1.0 } else { -1.0 }, phase: SwapPhase::Out, start: now, dock: (self.island.swap.as_ref().map_or(from, |s| s.dock_at(now)), to, now) });
+        window::set_timer(TIMER_ISLAND_ANIM, 16);
+        self.redraw_island_panel()
+    }
+
+    /// Quadro da animação de troca (60 Hz só enquanto ela dura).
+    pub fn island_anim_tick(&mut self) -> Result<()> {
+        let now = Instant::now();
+        let Some(swap) = &mut self.island.swap else {
+            window::kill_timer(TIMER_ISLAND_ANIM);
+            return Ok(());
+        };
+        let elapsed = now.duration_since(swap.start).as_secs_f32();
+        match swap.phase {
+            SwapPhase::Out if elapsed >= SWITCH_OUT_S => {
+                let target = swap.target.clone();
+                swap.phase = SwapPhase::In;
+                swap.start = now;
+                let t = self.ctx.now();
+                self.ctx.island.pick(&target, t);
+                self.island_refresh()?;
+            }
+            SwapPhase::In if elapsed >= SWITCH_IN_S && now.duration_since(swap.dock.2).as_secs_f32() >= DOCK_SLIDE_S => {
+                self.island.swap = None;
+                window::kill_timer(TIMER_ISLAND_ANIM);
+            }
+            _ => {}
+        }
+        if self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) {
+            self.redraw_island_panel()
+        } else {
+            self.island.swap = None;
+            window::kill_timer(TIMER_ISLAND_ANIM);
+            Ok(())
+        }
+    }
+
+    fn island_expanded_anim(&self) -> ExpandedAnim {
+        let Some(swap) = &self.island.swap else { return ExpandedAnim::default() };
+        let now = Instant::now();
+        let t = |d: f32| (now.duration_since(swap.start).as_secs_f32() / d).clamp(0.0, 1.0);
+        let (alpha, dx) = match swap.phase {
+            SwapPhase::Out => {
+                let e = t(SWITCH_OUT_S).powi(2);
+                (1.0 - e, -swap.dir * SWITCH_SHIFT * e)
+            }
+            SwapPhase::In => {
+                let e = 1.0 - (1.0 - t(SWITCH_IN_S)).powi(3);
+                (e, swap.dir * SWITCH_SHIFT * (1.0 - e))
+            }
+        };
+        ExpandedAnim { dock_pos: Some(swap.dock_at(now)), swap_alpha: alpha, swap_dx: dx }
+    }
+
     /// Ao abrir, o painel começa na primeira aba (a mídia, quando há).
     pub fn island_panel_opening(&mut self) {
         self.island.tab = self.island_tabs()[0];
@@ -579,4 +650,33 @@ fn forecast_names() -> [String; 3] {
     const SHORT: [&str; 7] = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
     let after = (zefiro_integration_clock::grid::weekday(now_local().date) + 2) % 7;
     ["Hoje".into(), "Amanhã".into(), SHORT[after as usize].into()]
+}
+
+const SWITCH_OUT_S: f32 = 0.17;
+const SWITCH_IN_S: f32 = 0.24;
+const SWITCH_SHIFT: f32 = 14.0;
+const DOCK_SLIDE_S: f32 = 0.30;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SwapPhase { Out, In }
+
+/// Troca de fonte em andamento.
+struct Swap {
+    target: String,
+    /// +1 = a fonte nova está à direita na barra.
+    dir: f32,
+    phase: SwapPhase,
+    start: Instant,
+    /// Indicador: de, até e início do deslize.
+    dock: (f32, f32, Instant),
+}
+
+impl Swap {
+    fn dock_at(&self, now: Instant) -> f32 {
+        let (from, to, start) = self.dock;
+        let t = (now.duration_since(start).as_secs_f32() / DOCK_SLIDE_S).clamp(0.0, 1.0);
+        // Entrada e saída suaves (cúbica), como o SkipEaseInOut da ilha.
+        let e = if t < 0.5 { 4.0 * t * t * t } else { 1.0 - (-2.0 * t + 2.0).powi(3) / 2.0 };
+        from + (to - from) * e
+    }
 }
