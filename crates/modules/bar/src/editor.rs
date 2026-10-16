@@ -114,6 +114,16 @@ impl EditorSession {
         self.moving = None;
     }
 
+    /// Adota o resultado da reaplicação como rascunho e passa a usar a versão atual do arquivo
+    /// como base; assim as mudanças externas já mescladas deixam de contar como edição do usuário.
+    pub fn rebase_onto_latest(&mut self, merged: Config) {
+        self.draft = merged;
+        self.original = self.confirmed.clone();
+        self.original_text = self.latest_text.clone();
+        self.conflict = false;
+        self.moving = None;
+    }
+
     pub fn external_invalid(&mut self, text: String, message: String) {
         self.latest_text = text;
         self.file_error = Some(message);

@@ -92,3 +92,41 @@ fn gallery_rejects_capacity_overflow_without_mutating_existing_unknown_items() {
     assert!(editor.add("clock", Section::End).is_err());
     assert_eq!(editor.draft, config);
 }
+
+/// Reaplica como o app faz (`reapply_editor`) e depois conclui como `EditorAction::Save`.
+fn reapply_then_save(editor: &mut EditorSession) -> String {
+    let merged = editor.patch().apply(&editor.original_text, &editor.latest_text, &[]).unwrap();
+    editor.rebase_onto_latest(zefiro_core::config::parse_config(&merged).unwrap());
+    assert!(!editor.conflict);
+    editor.patch().apply(&editor.original_text, &editor.latest_text, &[]).unwrap()
+}
+
+#[test]
+fn save_after_reapply_does_not_conflict_on_fields_changed_only_outside() {
+    use zefiro_core::config::parse_config;
+    let base = zefiro_core::config::DEFAULT_CONFIG.replace("end   = [\"clock\"]", "center = []\nend   = [\"clock\"]");
+    let mut editor = EditorSession::new(parse_config(&base).unwrap(), base.clone());
+    editor.remove("zefiro").unwrap();
+    let latest = base.replace("end   = [\"clock\"]", "end   = []");
+    editor.external_change(parse_config(&latest).unwrap(), latest.clone());
+    assert!(editor.conflict);
+    let saved = parse_config(&reapply_then_save(&mut editor)).unwrap();
+    assert!(saved.bar.sections.start.is_empty());
+    assert!(saved.bar.sections.end.is_empty());
+    assert_eq!(editor.original_text, latest);
+}
+
+#[test]
+fn save_after_reapply_keeps_clock_seconds_changed_outside() {
+    use zefiro_core::config::parse_config;
+    let base = zefiro_core::config::DEFAULT_CONFIG;
+    let mut editor = EditorSession::new(parse_config(base).unwrap(), base.into());
+    editor.remove("zefiro").unwrap();
+    let latest = base.replace("seconds = false", "seconds = true");
+    editor.external_change(parse_config(&latest).unwrap(), latest.clone());
+    let saved = reapply_then_save(&mut editor);
+    let config = parse_config(&saved).unwrap();
+    assert!(config.clock.seconds);
+    assert!(config.bar.sections.start.is_empty());
+    assert!(saved.contains("# vazio = formato do Windows"));
+}

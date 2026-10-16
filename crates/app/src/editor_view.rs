@@ -4,7 +4,7 @@ use windows::core::Result;
 use zefiro_bar::editor::{EditorSession, Section};
 use zefiro_bar::editor_panel::{EditorAction, EditorPage, EditorPanel};
 use zefiro_core::config::{LayoutMode, parse_config};
-use zefiro_core::config_edit::PatchChoice;
+use zefiro_core::config_edit::{PatchChoice, PatchError};
 use zefiro_integration_clock::format::ClockText;
 use zefiro_platform::geometry::{Point, Rect, Size};
 use zefiro_platform_windows::window::{self, WinEvent};
@@ -20,6 +20,14 @@ pub struct EditorRuntime {
     format_field: Option<zefiro_platform_windows::text_input::TextInput>,
     movement_ms: Vec<f64>,
     suspended: bool,
+}
+
+impl EditorRuntime {
+    /// Guarda os campos em conflito e anuncia o primeiro; a mensagem "Conflito:" habilita os botões de resolver.
+    fn record_conflict(&mut self, error: PatchError) {
+        self.conflicts = error.fields;
+        self.ui.message = if let Some(field) = self.conflicts.first() { format!("Conflito: {}", field.join(".")) } else { error.message };
+    }
 }
 
 struct Drag { id: String, origin: Point, active: bool, target: Option<(Section, usize)> }
@@ -198,15 +206,13 @@ impl Loop {
         if editor.session.file_error.is_some() { return; }
         match editor.session.patch().apply(&editor.session.original_text, &editor.session.latest_text, &editor.choices) {
             Ok(text) => if let Ok(config) = parse_config(&text) {
-                editor.session.draft = config;
-                editor.session.conflict = false;
+                editor.session.rebase_onto_latest(config);
+                // As escolhas valiam para a base antiga; depois do rebase já estão no rascunho.
+                editor.choices.clear();
                 editor.conflicts.clear();
                 editor.ui.message = "Alterações reaplicadas; confira e conclua".into();
             },
-            Err(error) => {
-                editor.conflicts = error.fields;
-                editor.ui.message = if let Some(field) = editor.conflicts.first() { format!("Conflito: {}", field.join(".")) } else { error.message };
-            }
+            Err(error) => editor.record_conflict(error),
         }
     }
 
@@ -231,7 +237,11 @@ impl Loop {
                             editor.session.saving = true;
                             if let Some(worker) = &self.editor_worker { worker.save(self.editor_generation, self.ctx.config_path.clone(), editor.session.latest_text.clone(), output); }
                         }
-                        Err(failure) => error = Some(failure.message),
+                        Err(failure) => {
+                            // Com campos em conflito, mostra os botões de resolver em vez de só a mensagem.
+                            if !failure.fields.is_empty() { editor.session.conflict = true; }
+                            editor.record_conflict(failure);
+                        }
                     }
                 }
             }
