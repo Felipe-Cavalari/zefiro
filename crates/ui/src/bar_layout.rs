@@ -33,6 +33,9 @@ pub struct ChipSpec { pub id: String, pub content_w: f32 }
 pub struct ChipBox { pub id: String, pub rect: Rect }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct OverflowGroup { pub id: String, pub ids: Vec<String> }
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct BarLayout {
     pub scale: f32,
     pub band: Rect,
@@ -42,6 +45,8 @@ pub struct BarLayout {
     pub island_pill_h: f32,
     pub font_px: f32,
     pub chip_h_px: f32,
+    pub overflow: Vec<OverflowGroup>,
+    pub regions: [Rect; 3],
 }
 
 fn rounded(r: Rect) -> Rect {
@@ -94,7 +99,69 @@ pub fn layout_bar(monitor_w: f32, scale: f32, height: BarHeight, format: BarForm
         island_pill_h: px(m.island_pill),
         font_px: m.font * scale,
         chip_h_px: chip_h,
+        overflow: Vec::new(),
+        regions: [Rect::default(); 3],
     }
+}
+
+/// Layout das três seções; reserva da ilha e medições já estão em pixels físicos.
+pub fn layout_sections(monitor_w: f32, scale: f32, height: BarHeight, format: BarFormat, sections: [&[ChipSpec]; 3], island_width: Option<f32>) -> BarLayout {
+    let mut layout = layout_bar(monitor_w, scale, height, format, &[], &[]);
+    let m = metrics(height, format);
+    let edge = (m.edge * scale).round().min(monitor_w.max(0.0) / 2.0);
+    let available = (monitor_w - 2.0 * edge).max(0.0);
+    let gap = (m.chip_gap * scale).round();
+    let pad = if format == BarFormat::Pilulas { (m.group_pad * scale).round() } else { 0.0 };
+    let width = |chip: &ChipSpec| (chip.content_w.min(160.0 * scale).max(0.0) + 2.0 * (m.chip_pad_x * scale).round()).ceil();
+    let total = |items: &[ChipSpec]| items.iter().map(&width).sum::<f32>() + gap * items.len().saturating_sub(1) as f32 + if items.is_empty() { 0.0 } else { 2.0 * pad };
+    let center = island_width.unwrap_or_else(|| total(sections[1]).min(available / 2.0)).max(0.0).min(available);
+    let separation = if center > 0.0 { (8.0 * scale).round() } else { 0.0 };
+    let side = ((available - center - 2.0 * separation) / 2.0).max(0.0);
+    let more_width = (28.0 * scale).round();
+    layout.regions = [
+        Rect::new(edge, 0.0, side, layout.band.h),
+        Rect::new((monitor_w - center) / 2.0, 0.0, center, layout.band.h),
+        Rect::new(monitor_w - edge - side, 0.0, side, layout.band.h),
+    ];
+    let needs_recovery = sections.iter().enumerate().any(|(i, items)| {
+        !(items.is_empty() || (i == 1 && island_width.is_some())) && total(items) > layout.regions[i].w && layout.regions[i].w < more_width + 2.0 * pad
+    });
+    if needs_recovery {
+        let ids = sections.iter().enumerate().filter(|(i, _)| *i != 1 || island_width.is_none()).flat_map(|(_, items)| items.iter().map(|c| c.id.clone())).collect();
+        layout.overflow.push(OverflowGroup { id: "__more_all".into(), ids });
+        if available > 0.0 {
+            layout.chips.push(ChipBox { id: "__more_all".into(), rect: Rect::new(edge, (layout.band.h - layout.chip_h_px) / 2.0, available.min(more_width), layout.chip_h_px) });
+        }
+        return layout;
+    }
+    for (index, items) in sections.into_iter().enumerate() {
+        if items.is_empty() || (index == 1 && island_width.is_some()) { continue; }
+        let region = layout.regions[index];
+        let mut count = items.len();
+        let mut used = total(items);
+        while count > 0 && used > region.w {
+            count -= 1;
+            used = total(&items[..count]) + more_width + if count > 0 { gap } else { 2.0 * pad };
+        }
+        let has_more = count < items.len();
+        let x = match index { 0 => region.x, 1 => region.x + (region.w - used) / 2.0, _ => region.right() - used };
+        if format == BarFormat::Pilulas {
+            layout.groups.push(rounded(Rect::new(x, (layout.band.h - m.pill * scale) / 2.0, used, m.pill * scale)));
+        }
+        let mut cursor = x + pad;
+        let y = ((layout.band.h - layout.chip_h_px) / 2.0).round();
+        for item in &items[..count] {
+            let w = width(item);
+            layout.chips.push(ChipBox { id: item.id.clone(), rect: rounded(Rect::new(cursor, y, w, layout.chip_h_px)) });
+            cursor += w + gap;
+        }
+        if has_more {
+            let id = format!("__more_{index}");
+            layout.chips.push(ChipBox { id: id.clone(), rect: rounded(Rect::new(cursor, y, more_width, layout.chip_h_px)) });
+            layout.overflow.push(OverflowGroup { id, ids: items[count..].iter().map(|item| item.id.clone()).collect() });
+        }
+    }
+    layout
 }
 
 pub fn chip_at(layout: &BarLayout, p: Point) -> Option<&ChipBox> {
