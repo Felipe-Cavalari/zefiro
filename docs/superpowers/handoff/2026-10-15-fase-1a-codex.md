@@ -166,12 +166,17 @@ Corrigido e commitado em `20457e7`, `17f30c1` e `8a61c2a`:
 4. **Clique na faixa vazia:** fecha o painel aberto (`ClickOutside`).
 5. **Ilha:** fica click-through fora da pílula em qualquer estado (`// ZEFIRO:` no fork).
 
-**Falta verificar na tela, com a barra reiniciada:**
+**Verificado na tela.** Tudo funcionou. A verificação ainda achou uma regressão da própria correção 3, que foi corrigida no `77d87bf`: a janela de entrada do painel aberto cobre o monitor, o shell achava que era um app em tela cheia, e o painel fechava 21 ms depois de abrir.
 
-- Alt+F4 com o calendário aberto;
-- a barra some com uma janela em tela cheia;
-- o clique na faixa fecha o painel;
-- a sonda `WindowFromPoint(1000,40)` cai na janela de baixo, e não na ilha.
+**Estado final:** as 25 tarefas e a revisão estão concluídas. Nada está pendente no código.
+
+**Ainda com o usuário, na máquina dele:**
+
+- reiniciar o Explorer de verdade;
+- Win+P;
+- desligar os efeitos de animação;
+- o PresentMon elevado;
+- de preferência, um monitor a 125%, agora que o DPI por monitor está ligado.
 
 Os Minor adiados estão no ledger, nas linhas `Final: minor (deferred)`.
 
