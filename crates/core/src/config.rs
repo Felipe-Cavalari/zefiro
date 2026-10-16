@@ -18,7 +18,7 @@ end   = ["clock"]
 
 [island]
 enabled = true
-engine  = "externa"   # externa (zefiro-island.exe) | embutida (desenhada pela barra)
+engine  = "embutida"  # embutida (desenhada pela barra) | externa (zefiro-island.exe, C++)
 exe     = ""          # vazio = ao lado do zefiro.exe
 
 [clock]
@@ -137,11 +137,11 @@ impl Config {
 #[serde(default)]
 pub struct IslandConfig { pub enabled: bool, pub exe: String, pub engine: IslandEngine }
 
-/// `embutida` = a ilha desenhada pela própria barra (Rust); `externa` = o `zefiro-island.exe` (C++),
-/// que continua disponível até a embutida ter todos os recursos.
+/// `embutida` (padrão desde a 1c) = a ilha desenhada pela própria barra (Rust); `externa` = o
+/// `zefiro-island.exe` (C++), que continua disponível para quem precisar de algo que só ele tem.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum IslandEngine { #[default] Externa, Embutida }
+pub enum IslandEngine { Externa, #[default] Embutida }
 
 impl IslandConfig {
     pub fn embedded(&self) -> bool {
@@ -177,7 +177,7 @@ impl Default for Sections {
 
 impl Default for IslandConfig {
     fn default() -> Self {
-        IslandConfig { enabled: true, exe: String::new(), engine: IslandEngine::Externa }
+        IslandConfig { enabled: true, exe: String::new(), engine: IslandEngine::Embutida }
     }
 }
 

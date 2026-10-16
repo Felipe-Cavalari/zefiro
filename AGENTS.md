@@ -41,10 +41,11 @@ Leia antes de mudar qualquer coisa:
 | `crates/ui` | Molas (constantes da ilha), `DisplayList`, layout da barra e regras do painel (pílula → painel) |
 | `crates/integrations/clock` | Grade do mês e formatação de data (pt-BR e Windows) |
 | `crates/modules/bar` | Chips, menu do Zefiro, calendário e o controlador de painéis |
-| `crates/modules/island-host` | Gravação do `island.ini`/`island-state.ini`, política de reinício e o processo da ilha |
+| `crates/modules/island` (`zefiro-island`) | Ilha embutida, portável: mídia e escolha da fonte, estados, avisos, visões em `DisplayList`, abas (clima, hardware, letras), menu, visualizador e cor da capa (ADR-0009) |
+| `crates/modules/island-host` | Ilha externa (`engine = "externa"`): gravação do `island.ini`/`island-state.ini`, política de reinício e o processo |
 | `crates/platform-windows` | Janelas, AppBar, compositor (Windows.UI.Composition), `MorphShape`, Direct2D/DirectWrite em WARP, monitores e preferências do sistema |
 | `crates/app` (`zefiro.exe`) | Junta tudo: barras por monitor, painéis, laço de eventos, robustez e o ciclo de vida da ilha |
-| `island/` | Fork em C++ do Dynamic Island for Windows (MIT) como `zefiro-island.exe`; ver ADR-0006 |
+| `island/` | Fork em C++ do Dynamic Island for Windows (MIT) como `zefiro-island.exe`, usado só com `engine = "externa"`; ver ADR-0006 e ADR-0009 |
 
 ## Comandos
 
@@ -84,7 +85,8 @@ Copy-Item island/build/zefiro-island.exe target/release/
 - **DPI:** o processo é Per-Monitor v2 (`system::enable_per_monitor_dpi`, chamado no início do `main`).
 - **Tela cheia:** com `ABN_FULLSCREENAPP`, a barra do monitor coberto some. As janelas do próprio Zefiro nunca contam como tela cheia.
 - **Fork da ilha:** toda mudança no `dynamic-island-for-windows.wh.cpp` vai dentro de `#ifdef ZEFIRO_ISLAND` e é marcada com `// ZEFIRO:`, para acompanhar o upstream com diffs mínimos. A camada `wh_shim.*` substitui a API do Windhawk.
-- **Barra ↔ ilha:**
+- **Ilha embutida (padrão, ADR-0009):** a barra do primário desenha a ilha no próprio compositor; o "chip" `island` abre o painel com abas. Cada fonte de dados (SMTC, volume, privacidade, notificações, Bluetooth, clima, letras, hardware) é um serviço em `platform-windows` com thread própria que avisa a UI por `post_user`; nada consulta por quadro. O hardware só amostra com a aba aberta, e a captura de áudio só roda com mídia tocando e a barra visível.
+- **Barra ↔ ilha externa (`engine = "externa"`):**
   - A barra grava `island.ini` (seção `[Zefiro]`, cores do tema, e no formato faixa sem contorno, sem sombra e sem o tom da capa) e o `ColorThemeV2` no `island-state.ini`.
   - A ilha publica `ZefiroAccent` no `island-state.ini`. A barra usa esse valor quando o tema tem `accent = "auto"`.
   - O calendário fica só na barra; a ilha embutida não tem essa aba.
