@@ -43,6 +43,8 @@ Este ADR registra as decisões tomadas durante a implementação, os números me
 
    Grava antes de iniciar a ilha e a cada mudança, só quando o texto muda. A ilha relê o `island-state.ini` sozinha.
 
+   No formato **faixa**, a ilha se funde à barra: `ContourBorderMode=borderless`, `DropShadow=0` e `AccentBloom=0` (sem o tom da capa no fundo). Foi um pedido do usuário depois da validação ("muito destoada"). No formato **pílulas**, ela continua uma pílula como as outras, com contorno, sombra e o tom da capa.
+
 6. **Ilha em processo separado, com política de reinício.** A ilha roda numa thread que verifica a saída a cada 1 s. Saindo sozinha, reinicia até 3 vezes em 60 s; depois desiste, deixa o centro vazio e registra no log. **Reiniciar a ilha**, no menu, zera a política.
 
 7. **O menu continua aberto ao trocar altura, formato ou tema.** A barra anima na hora e o menu é redesenhado com a nova marcação, acompanhando o chip (mola de ajuste) quando a barra muda de altura. Editar o `config.toml` à mão fecha o painel aberto, como manda a spec.

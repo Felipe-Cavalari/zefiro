@@ -11,7 +11,17 @@ pub enum IslandTheme {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct IslandSettings { pub bar_height: u32, pub pill_height: u32, pub theme: IslandTheme, pub spring: SpringStyle, pub speed: f32 }
+pub struct IslandSettings {
+    pub bar_height: u32,
+    pub pill_height: u32,
+    pub theme: IslandTheme,
+    pub spring: SpringStyle,
+    pub speed: f32,
+    /// Formato faixa: a ilha se funde à barra (sem contorno nem sombra). Nas pílulas ela é uma pílula como as outras.
+    pub merged: bool,
+    /// Sombra do tema (`material.shadow`), usada quando a ilha não está fundida.
+    pub shadow: bool,
+}
 
 pub fn island_pill_height(height: BarHeight, format: BarFormat) -> u32 {
     match (height, format) {
@@ -41,6 +51,8 @@ pub fn settings_for(theme: &Theme, height: BarHeight, format: BarFormat) -> Isla
         theme: island_theme,
         spring: theme.animation.spring,
         speed: theme.animation.speed,
+        merged: format == BarFormat::Faixa,
+        shadow: theme.material.shadow,
     }
 }
 
@@ -127,6 +139,12 @@ pub fn apply_ini(text: &str, s: &IslandSettings) -> String {
             }
         }
     }
+    if s.merged {
+        set(&mut l, "Themes", "ContourBorderMode", "borderless");
+    }
+    set(&mut l, "Themes", "DropShadow", if s.shadow && !s.merged { "1" } else { "0" });
+    // O tom da capa do álbum pinta o fundo da ilha e a destaca da faixa.
+    set(&mut l, "Themes", "AccentBloom", if s.merged { "0" } else { "100" });
     set(&mut l, "Animations", "AnimationStyle", spring_name(s.spring));
     set(&mut l, "Animations", "AnimationSpeed", speed_name(s.speed));
     join(l)
@@ -187,6 +205,27 @@ mod tests {
         assert!(out.contains("ThemePreset=custom"));
         assert!(out.contains("PillBgColor=#102030"));
         assert!(out.contains("ContourBorderMode=borderless"));
+    }
+
+    #[test]
+    fn strip_format_merges_the_island_into_the_bar_without_contour_or_shadow() {
+        for height in [BarHeight::Completa, BarHeight::Compacta] {
+            let out = apply_ini("", &settings_for(&theme("obsidian"), height, BarFormat::Faixa));
+            assert!(out.contains("ContourBorderMode=borderless"), "{out}");
+            assert!(out.contains("DropShadow=0"), "{out}");
+            assert!(out.contains("AccentBloom=0"), "o tom da capa destacaria a ilha da faixa: {out}");
+        }
+    }
+
+    #[test]
+    fn pill_format_keeps_the_island_as_a_pill_with_contour_and_shadow() {
+        let out = apply_ini("", &settings_for(&theme("obsidian"), BarHeight::Compacta, BarFormat::Pilulas));
+        assert!(out.contains("ContourBorderMode=default"), "{out}");
+        assert!(out.contains("DropShadow=1"), "{out}");
+        assert!(out.contains("AccentBloom=100"), "{out}");
+        // Voltando de faixa para pílulas, o arquivo antigo é corrigido.
+        let back = apply_ini(&apply_ini("", &settings_for(&theme("obsidian"), BarHeight::Compacta, BarFormat::Faixa)), &settings_for(&theme("obsidian"), BarHeight::Compacta, BarFormat::Pilulas));
+        assert!(back.contains("ContourBorderMode=default") && back.contains("DropShadow=1"), "{back}");
     }
 
     #[test]
