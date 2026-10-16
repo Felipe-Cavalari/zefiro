@@ -8,6 +8,7 @@ use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{BOOL, HSTRING, w};
 use zefiro_platform::color::Rgba;
+use zefiro_platform::geometry::Rect;
 
 fn reg_dword(key: &str, value: &str) -> Option<u32> {
     let mut data = 0u32;
@@ -47,6 +48,47 @@ pub fn exe_dir() -> PathBuf {
     std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// Liga DPI por monitor (Per-Monitor v2) no processo. Precisa vir antes de criar qualquer janela;
+/// sem isso o Windows estica a barra em bitmap nos monitores fora de 100% e não manda
+/// `WM_DPICHANGED`. Devolve `true` se o processo está (ou já estava) em Per-Monitor v2.
+pub fn enable_per_monitor_dpi() -> bool {
+    use windows::Win32::UI::HiDpi::{AreDpiAwarenessContextsEqual, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetThreadDpiAwarenessContext, SetProcessDpiAwarenessContext};
+    // SAFETY: chamadas sem ponteiros; falhar (já definido) é tratado pela conferência abaixo.
+    unsafe {
+        let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        AreDpiAwarenessContextsEqual(GetThreadDpiAwarenessContext(), DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).as_bool()
+    }
+}
+
+/// Uma janela comum (não a área de trabalho nem a barra de tarefas) cobrindo o monitor inteiro.
+pub fn is_fullscreen(class: &str, window: Rect, monitor: Rect) -> bool {
+    if matches!(class, "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
+        return false;
+    }
+    window.x <= monitor.x && window.y <= monitor.y && window.right() >= monitor.right() && window.bottom() >= monitor.bottom()
+}
+
+/// A janela em primeiro plano está em tela cheia em `monitor`?
+pub fn foreground_fullscreen_on(monitor: Rect) -> bool {
+    use windows::Win32::Foundation::RECT;
+    // SAFETY: buffers locais; a janela pode sumir entre as chamadas, e aí as funções falham.
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_invalid() {
+            return false;
+        }
+        let mut buf = [0u16; 128];
+        let n = GetClassNameW(hwnd, &mut buf);
+        let class = String::from_utf16_lossy(&buf[..n.max(0) as usize]);
+        let mut r = RECT::default();
+        if GetWindowRect(hwnd, &mut r).is_err() {
+            return false;
+        }
+        let rect = Rect::new(r.left as f32, r.top as f32, (r.right - r.left) as f32, (r.bottom - r.top) as f32);
+        is_fullscreen(&class, rect, monitor)
+    }
+}
+
 /// `true` se esta é a única instância (o mutex vive até o processo terminar).
 pub fn single_instance(name: &str) -> bool {
     // SAFETY: cria um mutex nomeado; o handle é mantido aberto de propósito.
@@ -67,5 +109,24 @@ mod tests {
         let a = system_accent();
         assert_eq!(a.a, 1.0);
         assert!(exe_dir().exists());
+    }
+
+    #[test]
+    fn fullscreen_means_a_normal_window_covering_the_whole_monitor() {
+        let mon = Rect::new(0.0, 0.0, 1920.0, 1080.0);
+        assert!(is_fullscreen("Chrome_WidgetWin_1", Rect::new(0.0, 0.0, 1920.0, 1080.0), mon));
+        assert!(is_fullscreen("UnityWndClass", Rect::new(-8.0, -8.0, 1936.0, 1096.0), mon), "maior que o monitor também cobre");
+        assert!(!is_fullscreen("Chrome_WidgetWin_1", Rect::new(0.0, 32.0, 1920.0, 1048.0), mon), "maximizada abaixo da barra não é tela cheia");
+        assert!(!is_fullscreen("Chrome_WidgetWin_1", Rect::new(1920.0, 0.0, 1920.0, 1080.0), mon), "outro monitor");
+        for shell in ["Progman", "WorkerW", "Shell_TrayWnd"] {
+            assert!(!is_fullscreen(shell, mon, mon), "{shell} é a área de trabalho, não um app");
+        }
+    }
+
+    #[test]
+    fn process_becomes_per_monitor_dpi_aware_v2() {
+        assert!(enable_per_monitor_dpi(), "a barra precisa de DPI por monitor (Per-Monitor v2)");
+        // Chamar de novo (já ligado) continua dizendo que está ligado.
+        assert!(enable_per_monitor_dpi());
     }
 }

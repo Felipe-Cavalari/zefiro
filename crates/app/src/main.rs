@@ -18,9 +18,14 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() {
     let started = Instant::now();
+    // Antes de qualquer janela: DPI por monitor (Per-Monitor v2).
+    let dpi_aware = system::enable_per_monitor_dpi();
     let log_dir = default_log_dir();
     install_panic_hook(log_dir.clone(), VERSION);
     let _guard = init_logging(&log_dir, "info").ok();
+    if !dpi_aware {
+        tracing::warn!("não consegui ligar DPI por monitor; a barra pode ficar borrada fora de 100%");
+    }
     if !system::single_instance("Local\\zefiro-bar") {
         tracing::info!("zefiro já está rodando; saindo");
         return;
