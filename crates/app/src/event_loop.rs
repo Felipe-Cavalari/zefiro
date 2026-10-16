@@ -423,6 +423,12 @@ impl Loop {
                     let fx = self.controller.handle(PanelInput::Escape);
                     return self.run_effects(fx).map(|_| true);
                 }
+                // Ilha: as abas ficam lado a lado (os pontos no rodapé), então ← / → trocam de aba.
+                // ↑ / ↓ fazem o mesmo, como na ilha C++, onde as telas eram empilhadas.
+                if self.effective_open_kind() == Some(PanelKind::Island) && matches!(vk, VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN) {
+                    let delta = if vk == VK_LEFT || vk == VK_UP { 120 } else { -120 };
+                    return self.island_wheel(delta).map(|_| true);
+                }
                 match self.effective_open_kind() {
                     Some(PanelKind::Menu) => {
                         let key = match vk { VK_UP => Some(NavKey::Up), VK_DOWN => Some(NavKey::Down), VK_LEFT => Some(NavKey::Left), VK_RIGHT => Some(NavKey::Right), VK_RETURN => Some(NavKey::Enter), _ => None };
