@@ -180,6 +180,16 @@ Corrigido e commitado em `20457e7`, `17f30c1` e `8a61c2a`:
 
 Os Minor adiados estão no ledger, nas linhas `Final: minor (deferred)`.
 
+### Depois da revisão: pedidos do usuário (aprovados)
+
+- **Ilha fundida na faixa** (`3eb5216`): no formato faixa, a ilha vai sem contorno, sem sombra e sem o tom da capa no fundo. No formato pílulas, ela continua uma pílula como as outras.
+- **Calendário só na barra** (`47d8312`):
+  - a ilha não tem mais a aba de calendário;
+  - o calendário da barra segue o desenho do da ilha;
+  - a cor de destaque vem da ilha, que publica `ZefiroAccent` no `island-state.ini` (a cor da capa do álbum, ou o destaque dela).
+
+O usuário aprovou os dois.
+
 ## Scripts do fluxo
 
 Os scripts usados no fluxo (superpowers) são bash e rodam no Git Bash.
