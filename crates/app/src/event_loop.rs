@@ -23,6 +23,8 @@ pub const USER_PANEL_SETTLED: u32 = 1;
 pub const USER_CONFIG_CHANGED: u32 = 2;
 pub const USER_THEMES_CHANGED: u32 = 3;
 pub const USER_ISLAND: u32 = 4;
+/// O `island-state.ini` mudou: a ilha pode ter publicado outro destaque.
+pub const USER_ISLAND_ACCENT: u32 = 5;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
@@ -118,6 +120,22 @@ impl Loop {
                     self.bars[p.monitor].fade_chip(&self.ctx, &p.chip, false)?;
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// Lê o destaque que a ilha publicou (capa do álbum ou o dela) e, se mudou, redesenha a barra
+    /// e o painel aberto — o calendário usa o mesmo destaque da ilha.
+    pub fn refresh_island_accent(&mut self) -> Result<()> {
+        let accent = if self.ctx.config.island.enabled {
+            let path = self.ctx.config_path.with_file_name("island-state.ini");
+            std::fs::read_to_string(path).ok().and_then(|t| zefiro_island_host::ini::read_accent(&t))
+        } else {
+            None
+        };
+        if self.ctx.theme.set_cover_accent(accent) {
+            self.apply_bars(true)?;
+            self.redraw_open_panel()?;
         }
         Ok(())
     }
@@ -359,6 +377,7 @@ impl Loop {
                     Err(e) => tracing::warn!(line = ?e.line, "config.toml inválido: {}; mantendo a configuração anterior", e.message),
                 }
             }
+            WinEvent::User { code: USER_ISLAND_ACCENT } => self.refresh_island_accent()?,
             WinEvent::User { code: USER_THEMES_CHANGED } => {
                 let (id, dir) = (self.ctx.config.theme.clone(), self.ctx.themes_dir.clone());
                 for e in self.ctx.theme.reload(&id, &dir) {
@@ -379,6 +398,9 @@ impl Loop {
 pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
     let mut l = Loop::new(ctx, bars)?;
     l.schedule_clock();
+    if let Err(e) = l.refresh_island_accent() {
+        tracing::warn!(error = %e, "não consegui aplicar o destaque da ilha");
+    }
     if let Some(n) = std::env::var("ZEFIRO_CYCLES").ok().and_then(|v| v.parse::<u32>().ok()) {
         tracing::info!(ciclos = n, "modo de medição: abrindo e fechando o calendário");
         l.cycles = Some((n, 0));

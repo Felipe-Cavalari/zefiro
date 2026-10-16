@@ -67,6 +67,8 @@ fn run(started: Instant) -> windows::core::Result<()> {
         for p in paths {
             if p == cfg_path {
                 window::post_user(event_loop::USER_CONFIG_CHANGED);
+            } else if p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("island-state.ini")) {
+                window::post_user(event_loop::USER_ISLAND_ACCENT);
             } else if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("toml")) && p.parent().is_some_and(|d| d.ends_with("themes")) {
                 window::post_user(event_loop::USER_THEMES_CHANGED);
             }

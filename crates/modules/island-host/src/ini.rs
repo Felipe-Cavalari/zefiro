@@ -160,6 +160,21 @@ pub fn apply_state(text: &str, s: &IslandSettings) -> String {
     join(l)
 }
 
+/// Destaque que a ilha publica no `island-state.ini` (`[Values] ZefiroAccent`, 0xRRGGBB em decimal):
+/// a capa do álbum tocando, ou o destaque do tema da ilha. A barra usa no lugar do `accent = "auto"`.
+pub fn read_accent(state: &str) -> Option<Rgba> {
+    let mut in_values = false;
+    for line in state.lines().map(str::trim) {
+        if line.starts_with('[') {
+            in_values = line.eq_ignore_ascii_case("[Values]");
+        } else if in_values && let Some((k, v)) = line.split_once('=') && k.trim().eq_ignore_ascii_case("ZefiroAccent") {
+            let rgb: u32 = v.trim().parse().ok()?;
+            return Some(Rgba::rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8));
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,6 +241,26 @@ mod tests {
         // Voltando de faixa para pílulas, o arquivo antigo é corrigido.
         let back = apply_ini(&apply_ini("", &settings_for(&theme("obsidian"), BarHeight::Compacta, BarFormat::Faixa)), &settings_for(&theme("obsidian"), BarHeight::Compacta, BarFormat::Pilulas));
         assert!(back.contains("ContourBorderMode=default") && back.contains("DropShadow=1"), "{back}");
+    }
+
+    #[test]
+    fn reads_the_accent_the_island_publishes() {
+        // A ilha grava 0xRRGGBB como inteiro decimal (o shim só guarda inteiros).
+        let state = "; Estado salvo pela ilha
+[Values]
+ColorThemeV2=0
+ZefiroAccent=13930294
+";
+        assert_eq!(read_accent(state), Some(Rgba::rgb(0xD4, 0x8F, 0x36)));
+        assert_eq!(read_accent("[Values]
+ColorThemeV2=0
+"), None);
+        assert_eq!(read_accent("[Values]
+ZefiroAccent=lixo
+"), None);
+        assert_eq!(read_accent("[Outra]
+ZefiroAccent=255
+"), None, "só vale na seção [Values]");
     }
 
     #[test]

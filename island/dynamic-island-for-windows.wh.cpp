@@ -1893,8 +1893,15 @@ std::wstring FormatWithName(const wchar_t* format, const std::wstring& name) {
 // renderer, the scroll handler and the hit tests can all share this. That
 // arithmetic used to be copy-pasted in seven places, which is exactly how they
 // drifted out of sync.
+#ifdef ZEFIRO_ISLAND
+// ZEFIRO: o calendário fica no relógio da barra; a ilha embutida não tem a aba de calendário.
+constexpr int kCalendarTabs = 0;
+#else
+constexpr int kCalendarTabs = 1;
+#endif
+
 int ActiveTabCount(const Settings& settings) {
-    int count = 2;  // primary (media or clock) + calendar
+    int count = 1 + kCalendarTabs;  // primary (media or clock) + calendar // ZEFIRO: kCalendarTabs
     if (settings.weather) ++count;
     if (settings.hardwareMonitorModule) ++count;
     if (settings.fileTrayModule) ++count;
@@ -1925,14 +1932,14 @@ int HardwareMonitorTabIndex(const Settings& settings) {
     if (!settings.hardwareMonitorModule) {
         return -1;
     }
-    return 2 + (settings.weather ? 1 : 0) + MediaTabIndex(settings);
+    return 1 + kCalendarTabs + (settings.weather ? 1 : 0) + MediaTabIndex(settings);  // ZEFIRO: kCalendarTabs
 }
 
 int FileTrayTabIndex(const Settings& settings) {
     if (!settings.fileTrayModule) {
         return -1;
     }
-    return 2 + (settings.weather ? 1 : 0) + (settings.hardwareMonitorModule ? 1 : 0) +
+    return 1 + kCalendarTabs + (settings.weather ? 1 : 0) + (settings.hardwareMonitorModule ? 1 : 0) +  // ZEFIRO: kCalendarTabs
            MediaTabIndex(settings);
 }
 
@@ -12239,6 +12246,18 @@ class Renderer {
             targetAccent = EnsureContrastAgainstBackground(targetAccent, settings.pillBgColor);
         }
 
+#ifdef ZEFIRO_ISLAND
+        // ZEFIRO: publica o destaque para a barra (o calendário dela usa o mesmo), só quando muda.
+        {
+            const auto channel = [](float v) { return static_cast<int>(std::lround(Clamp(v, 0.0f, 1.0f) * 255.0f)); };
+            const int rgb = (channel(targetAccent.r) << 16) | (channel(targetAccent.g) << 8) | channel(targetAccent.b);
+            if (rgb != zefiroPublishedAccent_) {
+                zefiroPublishedAccent_ = rgb;
+                Wh_SetIntValue(L"ZefiroAccent", rgb);
+            }
+        }
+#endif
+
         // Smooth accent transition: exponential lerp toward target, ~300ms half-life.
         // On the very first frame (lastAccentTime_ < 0) snap immediately so there's
         // no fade-in from the default color on startup.
@@ -15051,7 +15070,7 @@ class Renderer {
             // Expanded Mode. Order must match ActiveTabCount()/FileTrayTabIndex().
             std::vector<int> activeTabs;
             activeTabs.push_back(3); // Time (shown first when the island expands/on hover)
-            activeTabs.push_back(0); // Calendar
+            if (kCalendarTabs > 0) activeTabs.push_back(0); // Calendar // ZEFIRO: kCalendarTabs
             if (settings.weather) activeTabs.push_back(1);
             if (settings.hardwareMonitorModule) activeTabs.push_back(2);
             if (settings.fileTrayModule) activeTabs.push_back(4);
@@ -15623,7 +15642,7 @@ class Renderer {
             const bool lyricsFirst = settings.lyricsPinnedFirst && settings.lyrics;
             if (lyricsFirst) activeTabs.push_back(5);  // Lyrics (pinned first)
             activeTabs.push_back(0); // Media
-            activeTabs.push_back(1); // Calendar
+            if (kCalendarTabs > 0) activeTabs.push_back(1); // Calendar // ZEFIRO: kCalendarTabs
             if (settings.weather) activeTabs.push_back(2);
             if (settings.hardwareMonitorModule) activeTabs.push_back(3);
             if (settings.fileTrayModule) activeTabs.push_back(4);
@@ -20471,6 +20490,9 @@ class Renderer {
     // Accent color lerp: smoothly transition between successive sampled accents
     // so track changes don't produce a jarring instant color pop.
     D2D1_COLOR_F currentAccent_ = D2D1::ColorF(0x4cc9f0);
+#ifdef ZEFIRO_ISLAND
+    int zefiroPublishedAccent_ = -1;  // ZEFIRO: último destaque gravado no island-state.ini
+#endif
     double       lastAccentTime_ = -1.0;  // -1 = not yet set (will snap on first frame)
     float        mediaBtnPress_[3] = {0.0f, 0.0f, 0.0f};
     double       lastMediaBtnTime_ = -1.0;

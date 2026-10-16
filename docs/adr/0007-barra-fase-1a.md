@@ -43,6 +43,15 @@ Este ADR registra as decisões tomadas durante a implementação, os números me
 
    Grava antes de iniciar a ilha e a cada mudança, só quando o texto muda. A ilha relê o `island-state.ini` sozinha.
 
+   **Calendário só na barra:** a ilha embutida não tem mais a aba de calendário (`kCalendarTabs = 0` no fork). O calendário da barra segue o desenho do `DrawCalendarDashboard` da ilha:
+   - tamanho fixo de 352×184;
+   - o dia em 63 px, em negrito;
+   - iniciais discretas e uma linha fina embaixo delas;
+   - fim de semana recuado;
+   - hoje como o único destaque, na cor da ilha.
+
+   Foi um pedido do usuário depois da validação.
+
    No formato **faixa**, a ilha se funde à barra: `ContourBorderMode=borderless`, `DropShadow=0` e `AccentBloom=0` (sem o tom da capa no fundo). Foi um pedido do usuário depois da validação ("muito destoada"). No formato **pílulas**, ela continua uma pílula como as outras, com contorno, sombra e o tom da capa.
 
 6. **Ilha em processo separado, com política de reinício.** A ilha roda numa thread que verifica a saída a cada 1 s. Saindo sozinha, reinicia até 3 vezes em 60 s; depois desiste, deixa o centro vazio e registra no log. **Reiniciar a ilha**, no menu, zera a política.
@@ -87,7 +96,7 @@ Arquivos: `scripts/out/zefiro-repouso.json` e `scripts/out/zefiro-paineis.json` 
 
 ## O que ficou de fora ou divergiu
 
-- **Cor de destaque `auto`:** ainda não vem da capa da ilha. A barra usa a cor de destaque do sistema até o porte da ilha para Rust (1c).
+- **Cor de destaque `auto`:** vem da ilha. A ilha publica o destaque que está usando (a cor da capa do álbum tocando ou, sem mídia, o destaque dela) em `island-state.ini` como `[Values] ZefiroAccent=0xRRGGBB` (em decimal, porque o shim só guarda inteiros), só quando muda. A barra observa o arquivo e usa esse valor quando o tema diz `accent = "auto"`. Sem a ilha, a barra usa o destaque do Windows.
 - **Ajustes de API da `windows 0.61.3`** feitos durante a implementação:
   - `LOCALE_NAME_USER_DEFAULT` não existe na crate; virou uma constante local `PCWSTR::null()`.
   - `ID2D1DeviceContext::CreateBitmap2` se chama `CreateBitmap`.

@@ -12,14 +12,21 @@ use zefiro_ui::spring::SpringParams;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SurfaceKind { Strip, Pill, Panel, Hover }
 
-pub struct ThemeState { pub registry: ThemeRegistry, pub theme: Theme, pub tokens: Tokens, pub animations: bool }
+pub struct ThemeState {
+    pub registry: ThemeRegistry,
+    pub theme: Theme,
+    pub tokens: Tokens,
+    pub animations: bool,
+    /// Destaque publicado pela ilha (capa do álbum ou o dela); vale quando o tema diz `accent = "auto"`.
+    cover_accent: Option<Rgba>,
+}
 
 impl ThemeState {
     pub fn load(id: &str, user_dir: &Path) -> (ThemeState, Vec<ThemeError>) {
         let (registry, errors) = ThemeRegistry::load(Some(user_dir));
         let theme = registry.get(id).or_else(|| registry.get("obsidian")).cloned().expect("obsidian embutido");
         let tokens = derive_tokens(&theme, system_accent(), None);
-        (ThemeState { registry, theme, tokens, animations: animations_enabled() }, errors)
+        (ThemeState { registry, theme, tokens, animations: animations_enabled(), cover_accent: None }, errors)
     }
 
     /// Relê a pasta do usuário e aplica `id`. Erros mantêm a versão anterior do tema com erro.
@@ -29,9 +36,21 @@ impl ThemeState {
             self.theme = t.clone();
         }
         self.registry = registry;
-        self.tokens = derive_tokens(&self.theme, system_accent(), None);
+        self.tokens = derive_tokens(&self.theme, system_accent(), self.cover_accent);
         self.animations = animations_enabled();
         errors
+    }
+
+    /// A ilha publicou outro destaque. `true` se os tokens mudaram (a barra precisa redesenhar).
+    pub fn set_cover_accent(&mut self, accent: Option<Rgba>) -> bool {
+        if accent == self.cover_accent {
+            return false;
+        }
+        self.cover_accent = accent;
+        let tokens = derive_tokens(&self.theme, system_accent(), accent);
+        let changed = tokens != self.tokens;
+        self.tokens = tokens;
+        changed
     }
 
     pub fn spring(&self, base: SpringParams) -> SpringParams {
@@ -53,5 +72,24 @@ impl ThemeState {
     /// Cor de fundo do chip quando o painel dele está aberto.
     pub fn active_fill(&self) -> Rgba {
         self.tokens.raised_strong
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn island_accent_replaces_auto_and_reports_only_real_changes() {
+        let dir = std::env::temp_dir().join(format!("zefiro-theme-state-{}", std::process::id()));
+        let (mut t, _) = ThemeState::load("obsidian", &dir);
+        let copper = Rgba::rgb(0xD4, 0x8F, 0x36);
+        assert!(t.set_cover_accent(Some(copper)), "mudou");
+        assert_eq!(t.tokens.accent, derive_tokens(&t.theme, system_accent(), Some(copper)).accent);
+        assert!(!t.set_cover_accent(Some(copper)), "mesmo valor não redesenha nada");
+        // Recarregar o tema mantém o destaque da ilha.
+        t.reload("obsidian", &dir);
+        assert_eq!(t.tokens.accent, derive_tokens(&t.theme, system_accent(), Some(copper)).accent);
+        assert!(t.set_cover_accent(None));
     }
 }
