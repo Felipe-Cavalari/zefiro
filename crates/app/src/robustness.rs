@@ -19,9 +19,11 @@ pub fn handle(l: &mut Loop, e: WinEvent) -> Result<bool> {
                 b.register_appbar(&l.ctx);
             }
             island_zorder::raise_island();
+            l.editor_topology_changed()?;
         }
         WinEvent::DisplayChanged | WinEvent::DpiChanged { .. } => window::set_timer(TIMER_DISPLAY, 400),
         WinEvent::Timer { id: TIMER_DISPLAY } => {
+            window::release_capture();
             window::kill_timer(TIMER_DISPLAY);
             tracing::info!("monitores mudaram: recriando as barras");
             // Os painéis são recriados abaixo; o controlador só precisa saber que nada está aberto.
@@ -39,6 +41,7 @@ pub fn handle(l: &mut Loop, e: WinEvent) -> Result<bool> {
                 l.bars.push(b);
             }
             island_zorder::raise_island();
+            l.editor_topology_changed()?;
         }
         WinEvent::SettingChanged => {
             l.ctx.theme.animations = system::animations_enabled();

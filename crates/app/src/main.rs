@@ -2,6 +2,8 @@
 
 mod app;
 mod bar_view;
+mod config_worker;
+mod editor_view;
 mod event_loop;
 mod island;
 mod panel_view;

@@ -24,3 +24,6 @@ zefiro-platform-windows.workspace = true
 windows.workspace = true
 windows-numerics.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

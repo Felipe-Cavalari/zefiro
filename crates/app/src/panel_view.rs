@@ -12,6 +12,7 @@ use zefiro_platform_windows::window;
 use zefiro_ui::paint::DisplayList;
 use zefiro_ui::panel_layout::{CHIP_FADE_S, Shape, panel_radius, panel_rect, pill_radius, to_local};
 use zefiro_ui::spring::{NUDGE_DIP, SpringParams};
+use zefiro_ui::panel_lifecycle::PanelLifecycle;
 
 use crate::app::AppCtx;
 use crate::theme_state::SurfaceKind;
@@ -39,6 +40,7 @@ pub struct PanelView {
     pub open: bool,
     /// A janela está na tela (aberta, ou ainda animando o fechamento).
     visible: bool,
+    lifecycle: PanelLifecycle,
 }
 
 impl PanelView {
@@ -54,7 +56,7 @@ impl PanelView {
         // Dentro da raiz da forma: a "cutucada" move forma e conteúdo juntos.
         shape.root().Children()?.InsertAtTop(&layer)?;
         shape.clip_child(&ctx.comp, &layer.cast::<Visual>()?)?;
-        Ok(PanelView { hwnd, monitor: monitor.clone(), scale, _target: target, root, shape, layer, content, surface, window: Rect::default(), chip: Rect::default(), band_bottom: 0.0, panel: Rect::default(), previous_foreground: 0, open: false, visible: false })
+        Ok(PanelView { hwnd, monitor: monitor.clone(), scale, _target: target, root, shape, layer, content, surface, window: Rect::default(), chip: Rect::default(), band_bottom: 0.0, panel: Rect::default(), previous_foreground: 0, open: false, visible: false, lifecycle: PanelLifecycle::default() })
     }
 
     pub fn hwnd(&self) -> HWND {
@@ -111,6 +113,7 @@ impl PanelView {
             self.shape.animate_opacity(&ctx.comp, 1.0, ctx.theme.spring(SpringParams::SETTLE))?;
         }
         self.visible = true;
+        self.lifecycle.open();
         self.shape.bind_alpha(&ctx.comp, &self.layer.cast::<Visual>()?, panel_shape.rect.h)?;
         if ctx.theme.animations {
             // Abrir: mola de crescer + cutucada. Conteúdo mudando de tamanho: mola de ajuste.
@@ -151,6 +154,7 @@ impl PanelView {
             return Ok(());
         }
         self.open = false;
+        let ticket = self.lifecycle.close();
         window::set_interactive(self.hwnd, Vec::new());
         // Esc / clique no chip: o foco volta para a janela de antes (spec §6.1, item 5).
         if restore_focus {
@@ -159,7 +163,8 @@ impl PanelView {
         let style = ctx.theme.theme.shape.style;
         let chip_shape = Shape { rect: self.local(self.chip), radius: pill_radius(self.chip.h, ctx.theme.theme.shape.radius_max * self.scale, style, self.scale) };
         if ctx.theme.animations {
-            let batch = ctx.comp.on_settled(|| window::post_user(crate::event_loop::USER_PANEL_SETTLED))?;
+            let raw = self.hwnd.0 as isize;
+            let batch = ctx.comp.on_settled(move || window::post_panel_settled(raw, ticket))?;
             self.shape.animate(&ctx.comp, chip_shape, ctx.theme.spring(SpringParams::SHRINK))?;
             ctx.comp.fade_after(&self.shape.root().cast::<Visual>()?, 0.0, CHIP_FADE_S, CLOSE_FADE_DELAY_S)?;
             batch.End()?;
@@ -167,16 +172,27 @@ impl PanelView {
             self.shape.set(chip_shape)?;
             window::hide(self.hwnd);
             self.visible = false;
+            self.lifecycle.settle(ticket);
+            self.release_surface(ctx)?;
         }
         Ok(())
     }
 
     /// Chamado quando a animação de fechar terminou (se nada reabriu o painel nesse meio-tempo).
-    pub fn hide_if_closed(&mut self) {
-        if !self.open && self.visible {
+    pub fn hide_if_closed(&mut self, ctx: &AppCtx, ticket: usize) -> Result<()> {
+        if !self.open && self.visible && self.lifecycle.settle(ticket) {
             window::hide(self.hwnd);
             self.visible = false;
+            self.release_surface(ctx)?;
         }
+        Ok(())
+    }
+
+    fn release_surface(&mut self, ctx: &AppCtx) -> Result<()> {
+        let surface = ctx.comp.surface(1.0, 1.0)?;
+        self.content.SetBrush(&ctx.comp.compositor.CreateSurfaceBrushWithSurface(&surface)?)?;
+        self.surface = surface;
+        self.content.SetSize(Vector2 { X: 1.0, Y: 1.0 })
     }
 
     /// O teclado está neste painel agora.

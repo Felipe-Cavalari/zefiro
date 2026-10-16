@@ -14,9 +14,12 @@ use zefiro_platform_windows::compositor::ui_color;
 use zefiro_platform_windows::monitors::Monitor;
 use zefiro_platform_windows::morph::MorphShape;
 use zefiro_platform_windows::{appbar, island_zorder, window};
-use zefiro_ui::bar_layout::{BarLayout, ChipSpec, layout_bar, metrics};
+use zefiro_ui::bar_layout::{BarLayout, ChipSpec, layout_sections, metrics};
 use zefiro_ui::panel_layout::{CHIP_FADE_S, SHADOW_MARGIN_DIP, Shape, pill_radius};
 use zefiro_ui::spring::SpringParams;
+use zefiro_ui::paint::{DisplayList, DrawOp};
+use zefiro_platform::geometry::Size;
+use zefiro_platform::text::{Align, Family, FontWeight, TextStyle};
 
 use crate::app::AppCtx;
 use crate::theme_state::SurfaceKind;
@@ -37,17 +40,26 @@ pub struct BarView {
     appbar: bool,
     hover: Option<String>,
     active: Option<String>,
+    guides: Option<(CompositionDrawingSurface, SpriteVisual)>,
+    drag_ghost: Option<SpriteVisual>,
+    drag_marker: Option<SpriteVisual>,
 }
 
 fn chip_content(ctx: &AppCtx, id: &str, height: BarHeight, chip_h: f32, font_px: f32, scale: f32) -> ChipContent {
     let t = &ctx.theme.tokens;
     match id {
         "zefiro" => zefiro_chip(chip_h, font_px, height == BarHeight::Compacta, scale, t, &ctx.text),
-        _ => {
+        "clock" => {
             let now = now_local();
-            let s = ctx.clock.chip_text(&now, &ctx.config.clock.format, ctx.config.clock.seconds);
+            let mut s = ctx.clock.chip_text(&now, &ctx.config.clock.format, ctx.config.clock.seconds);
+            while clock_chip(&s, chip_h, font_px, t, &ctx.text).content_w > 160.0 * scale && s.chars().count() > 1 {
+                if s.ends_with('…') { s.pop(); }
+                s.pop();
+                s.push('…');
+            }
             clock_chip(&s, chip_h, font_px, t, &ctx.text)
         }
+        _ => clock_chip("⋯", chip_h, font_px, t, &ctx.text),
     }
 }
 
@@ -63,12 +75,12 @@ impl BarView {
         let divider = ctx.comp.compositor.CreateSpriteVisual()?;
         root.Children()?.InsertAtTop(&divider)?;
         let mut groups = Vec::new();
-        for _ in 0..2 {
+        for _ in 0..3 {
             let g = MorphShape::new(&ctx.comp, &root, &ctx.theme.morph_style(scale, SurfaceKind::Pill))?;
             g.set_opacity(0.0)?;
             groups.push(g);
         }
-        let mut view = BarView { hwnd, monitor: monitor.clone(), scale, _target: target, root, strip, divider, groups, chips: Vec::new(), layout: None, appbar: false, hover: None, active: None };
+        let mut view = BarView { hwnd, monitor: monitor.clone(), scale, _target: target, root, strip, divider, groups, chips: Vec::new(), layout: None, appbar: false, hover: None, active: None, guides: None, drag_ghost: None, drag_marker: None };
         view.apply(ctx, false)?;
         window::set_bounds(hwnd, bounds, true);
         Ok(view)
@@ -94,22 +106,36 @@ impl BarView {
     /// Refaz o layout e anima as formas até ele.
     pub fn apply(&mut self, ctx: &AppCtx, animate: bool) -> Result<()> {
         let cfg = &ctx.config.bar;
+        let sections = cfg.sections_for(self.monitor.identity.id.as_deref());
         let m = metrics(cfg.height, cfg.format);
         let chip_h = (m.chip_h * self.scale).round();
         let font_px = m.font * self.scale * ctx.theme.theme.font.scale;
-        let contents: Vec<(String, ChipContent)> = cfg
-            .sections
-            .start
-            .iter()
-            .chain(cfg.sections.end.iter())
-            .map(|id| (id.clone(), chip_content(ctx, id, cfg.height, chip_h, font_px, self.scale)))
+        let mut contents: Vec<(String, ChipContent)> = sections
+            .ids()
+            .filter(|id| zefiro_bar::catalog::descriptor(id).is_some())
+            .map(|id| (id.to_string(), chip_content(ctx, id, cfg.height, chip_h, font_px, self.scale)))
             .collect();
         let spec = |ids: &[String]| {
-            ids.iter()
+            ids.iter().filter(|id| zefiro_bar::catalog::descriptor(id).is_some())
                 .map(|id| ChipSpec { id: id.clone(), content_w: contents.iter().find(|(c, _)| c == id).map_or(0.0, |(_, c)| c.content_w) })
                 .collect::<Vec<_>>()
         };
-        let layout = layout_bar(self.monitor.rect.w, self.scale, cfg.height, cfg.format, &spec(&cfg.sections.start), &spec(&cfg.sections.end));
+        let specs = [spec(&sections.start), spec(&sections.center), spec(&sections.end)];
+        let reservation = (self.monitor.primary && ctx.config.island.enabled).then(|| window::island_reservation().unwrap_or(self.monitor.rect.w));
+        let layout = layout_sections(self.monitor.rect.w, self.scale, cfg.height, cfg.format, [&specs[0], &specs[1], &specs[2]], reservation);
+        for group in &layout.overflow {
+            contents.push((group.id.clone(), chip_content(ctx, &group.id, cfg.height, chip_h, font_px, self.scale)));
+        }
+        let mut index = 0;
+        while index < self.chips.len() {
+            if layout.chips.iter().any(|c| c.id == self.chips[index].id) {
+                index += 1;
+            } else {
+                let chip = self.chips.remove(index);
+                self.root.Children()?.Remove(&chip.content)?;
+                self.root.Children()?.Remove(chip.hover.root())?;
+            }
+        }
 
         self.strip.set_style(&ctx.comp, &ctx.theme.morph_style(self.scale, SurfaceKind::Strip))?;
         for g in &self.groups {
@@ -161,7 +187,8 @@ impl BarView {
         let pad = (10.0 * self.scale).round();
         for (id, content) in &contents {
             let Some(b) = layout.chips.iter().find(|c| &c.id == id) else { continue };
-            if !self.chips.iter().any(|c| &c.id == id) {
+            let is_new = !self.chips.iter().any(|c| &c.id == id);
+            if is_new {
                 let hover = MorphShape::new(&ctx.comp, &self.root, &ctx.theme.morph_style(self.scale, SurfaceKind::Hover))?;
                 hover.set_opacity(0.0)?;
                 let surface = ctx.comp.surface(content.list.size.w, content.list.size.h)?;
@@ -172,7 +199,12 @@ impl BarView {
             let chip = self.chips.iter_mut().find(|c| &c.id == id).expect("criado acima");
             ctx.comp.draw(&chip.surface, content.list.size.w, content.list.size.h, &content.list, &ctx.text)?;
             chip.content.SetSize(Vector2 { X: content.list.size.w, Y: content.list.size.h })?;
-            chip.content.SetOffset(Vector3 { X: b.rect.x + pad, Y: b.rect.y, Z: 0.0 })?;
+            if animate && !is_new && chip.rect != b.rect {
+                chip.content.StartAnimation(&windows::core::HSTRING::from("Offset.X"), &ctx.comp.scalar_spring(b.rect.x + pad, spring)?)?;
+                chip.content.StartAnimation(&windows::core::HSTRING::from("Offset.Y"), &ctx.comp.scalar_spring(b.rect.y, spring)?)?;
+            } else if is_new || !animate {
+                chip.content.SetOffset(Vector3 { X: b.rect.x + pad, Y: b.rect.y, Z: 0.0 })?;
+            }
             let r = Shape { rect: b.rect, radius: pill_radius(b.rect.h, radius_max, style, self.scale) };
             if animate { chip.hover.animate(&ctx.comp, r, spring)? } else { chip.hover.set(r)? }
             chip.rect = b.rect;
@@ -183,6 +215,7 @@ impl BarView {
         interactive.extend(layout.strip);
         interactive.extend(layout.groups.iter().copied());
         window::set_interactive(self.hwnd, interactive);
+        zefiro_platform_windows::bar_context::set_zone(self.hwnd, Rect::new(self.monitor.rect.x, self.monitor.rect.y, layout.band.w, layout.band.h));
 
         let height_px = layout.band.h as i32;
         let (hwnd, mon, reserve) = (self.hwnd, self.monitor.rect, self.appbar);
@@ -221,6 +254,74 @@ impl BarView {
 
     pub fn chip_at(&self, x: f32, y: f32) -> Option<String> {
         self.chips.iter().find(|c| c.rect.contains(Point { x, y })).map(|c| c.id.clone())
+    }
+
+    pub fn overflow_items(&self, id: &str) -> Vec<String> {
+        self.layout.as_ref().and_then(|layout| layout.overflow.iter().find(|g| g.id == id)).map(|g| g.ids.clone()).unwrap_or_default()
+    }
+
+    pub fn edit_regions(&self) -> [Rect; 3] {
+        let height = self.layout.as_ref().map_or(44.0 * self.scale, |l| l.band.h);
+        let third = self.monitor.rect.w / 3.0;
+        std::array::from_fn(|i| Rect::new(i as f32 * third, 0.0, third, height))
+    }
+
+    pub fn show_edit_guides(&mut self, ctx: &AppCtx, show: bool) -> Result<()> {
+        if !show {
+            if let Some((_, sprite)) = self.guides.take() { self.root.Children()?.Remove(&sprite)?; }
+            return Ok(());
+        }
+        if self.guides.is_some() { return Ok(()); }
+        let height = self.layout.as_ref().map_or(44.0 * self.scale, |l| l.band.h);
+        let size = Size { w: self.monitor.rect.w, h: 22.0 * self.scale };
+        let mut list = DisplayList::new(size);
+        for (section, rect) in zefiro_bar::editor::Section::ALL.into_iter().zip(self.edit_regions()) {
+            let guide = Rect::new(rect.x + 4.0 * self.scale, 0.0, (rect.w - 8.0 * self.scale).max(0.0), size.h);
+            list.push(DrawOp::RoundRect { rect: guide, radius: 5.0 * self.scale, color: ctx.theme.tokens.raised_strong });
+            list.push(DrawOp::RoundRectStroke { rect: guide, radius: 5.0 * self.scale, color: ctx.theme.tokens.accent, width: self.scale });
+            list.push(DrawOp::Text { rect: guide, text: format!("{}  +", section.label()), style: TextStyle { size: 11.0 * self.scale, weight: FontWeight::SemiBold, family: Family::Text }, color: ctx.theme.tokens.text, align: Align::Center });
+        }
+        if self.guides.is_none() {
+            let surface = ctx.comp.surface(size.w, size.h)?;
+            let sprite = ctx.comp.sprite_for(&surface, size.w, size.h)?;
+            self.root.Children()?.InsertAtTop(&sprite)?;
+            self.guides = Some((surface, sprite));
+        }
+        if let Some((surface, sprite)) = &self.guides {
+            ctx.comp.draw(surface, size.w, size.h, &list, &ctx.text)?;
+            sprite.SetOffset(Vector3 { X: 0.0, Y: height + self.scale, Z: 0.0 })?;
+        }
+        Ok(())
+    }
+
+    pub fn show_drag(&mut self, ctx: &AppCtx, id: &str, point: Point, marker: Option<Rect>) -> Result<()> {
+        if self.drag_ghost.is_none() && let Some(chip) = self.chips.iter().find(|chip| chip.id == id) {
+            let size = chip.content.Size()?;
+            let sprite = ctx.comp.sprite_for(&chip.surface, size.X, size.Y)?;
+            sprite.SetOpacity(0.85)?;
+            self.root.Children()?.InsertAtTop(&sprite)?;
+            self.drag_ghost = Some(sprite);
+        }
+        if let Some(sprite) = &self.drag_ghost { sprite.SetOffset(Vector3 { X: point.x + 8.0 * self.scale, Y: point.y, Z: 0.0 })?; }
+        if let Some(rect) = marker {
+            if self.drag_marker.is_none() {
+                let sprite = ctx.comp.compositor.CreateSpriteVisual()?;
+                sprite.SetBrush(&ctx.comp.compositor.CreateColorBrushWithColor(ui_color(ctx.theme.tokens.accent))?)?;
+                self.root.Children()?.InsertAtTop(&sprite)?;
+                self.drag_marker = Some(sprite);
+            }
+            if let Some(sprite) = &self.drag_marker {
+                sprite.SetOpacity(1.0)?;
+                sprite.SetSize(Vector2 { X: 2.0 * self.scale, Y: rect.h })?;
+                sprite.SetOffset(Vector3 { X: rect.x, Y: rect.y, Z: 0.0 })?;
+            }
+        } else if let Some(sprite) = &self.drag_marker { sprite.SetOpacity(0.0)?; }
+        Ok(())
+    }
+
+    pub fn clear_drag(&mut self) -> Result<()> {
+        for sprite in [self.drag_ghost.take(), self.drag_marker.take()].into_iter().flatten() { self.root.Children()?.Remove(&sprite)?; }
+        Ok(())
     }
 
     /// Retângulo do chip em coordenadas da tela (para o painel).

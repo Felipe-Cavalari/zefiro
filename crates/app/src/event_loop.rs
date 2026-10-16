@@ -14,17 +14,20 @@ use zefiro_platform_windows::window::{self, WinEvent};
 use zefiro_platform_windows::{island_zorder, system};
 use zefiro_resources::registry::export_builtin;
 use zefiro_ui::paint::DisplayList;
+use zefiro_ui::paint::DrawOp;
+use zefiro_platform::geometry::{Rect, Size};
+use zefiro_platform::text::{Align, Family, FontWeight, TextStyle};
 
 use crate::app::AppCtx;
 use crate::bar_view::BarView;
 use crate::panel_view::PanelView;
 
-pub const USER_PANEL_SETTLED: u32 = 1;
 pub const USER_CONFIG_CHANGED: u32 = 2;
 pub const USER_THEMES_CHANGED: u32 = 3;
 pub const USER_ISLAND: u32 = 4;
 /// O `island-state.ini` mudou: a ilha pode ter publicado outro destaque.
 pub const USER_ISLAND_ACCENT: u32 = 5;
+pub const USER_EDITOR_IO: u32 = 6;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
@@ -44,6 +47,13 @@ pub struct Loop {
     pub bars: Vec<BarView>,
     pub panels: Vec<PanelView>,
     pub controller: PanelController,
+    pub editor: Option<crate::editor_view::EditorRuntime>,
+    pub editor_worker: Option<crate::config_worker::ConfigWorker>,
+    pub editor_pending: Option<usize>,
+    pub editor_generation: u64,
+    overflow_ids: Vec<String>,
+    overflow_focus: usize,
+    overflow_scroll: usize,
     menu: Option<MenuModel>,
     shown_month: (i32, u32),
     /// Ciclos de medição: (total, feitos).
@@ -67,11 +77,11 @@ impl Loop {
             panels.push(PanelView::create(&ctx, b.monitor())?);
         }
         let today = now_local().date;
-        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), menu: None, shown_month: (today.year, today.month), cycles: None })
+        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), cycles: None })
     }
 
-    fn bar_index(&self, hwnd: isize) -> Option<usize> { self.bars.iter().position(|b| b.hwnd().0 as isize == hwnd) }
-    fn panel_index(&self, hwnd: isize) -> Option<usize> { self.panels.iter().position(|p| p.hwnd().0 as isize == hwnd) }
+    pub(crate) fn bar_index(&self, hwnd: isize) -> Option<usize> { self.bars.iter().position(|b| b.hwnd().0 as isize == hwnd) }
+    pub(crate) fn panel_index(&self, hwnd: isize) -> Option<usize> { self.panels.iter().position(|p| p.hwnd().0 as isize == hwnd) }
 
     fn panel_list(&mut self, kind: PanelKind, scale: f32) -> DisplayList {
         match kind {
@@ -84,6 +94,18 @@ impl Loop {
                 let (y, mo) = self.shown_month;
                 let grid = month_grid(y, mo, self.ctx.clock.first_weekday(), today);
                 calendar_paint(&grid, &calendar_names(&self.ctx.clock, y, mo, today), scale, &self.ctx.theme.tokens)
+            }
+            PanelKind::Overflow => {
+                let count = self.overflow_ids.len().saturating_sub(self.overflow_scroll).min(12);
+                let mut list = DisplayList::new(Size { w: 280.0 * scale, h: (48.0 + count as f32 * 32.0) * scale });
+                let style = TextStyle { size: 13.0 * scale, weight: FontWeight::Regular, family: Family::Text };
+                list.push(DrawOp::Text { rect: Rect::new(16.0 * scale, 4.0 * scale, 248.0 * scale, 28.0 * scale), text: "Mais itens".into(), style, color: self.ctx.theme.tokens.text_secondary, align: Align::Leading });
+                for (index, id) in self.overflow_ids.iter().enumerate().skip(self.overflow_scroll).take(count) {
+                    let rect = Rect::new(12.0 * scale, (32.0 + (index - self.overflow_scroll) as f32 * 32.0) * scale, 256.0 * scale, 32.0 * scale);
+                    if index == self.overflow_focus { list.push(DrawOp::RoundRect { rect, radius: 8.0 * scale, color: self.ctx.theme.tokens.raised_strong }); }
+                    list.push(DrawOp::Text { rect, text: zefiro_bar::catalog::name(id).into(), style, color: self.ctx.theme.tokens.text, align: Align::Center });
+                }
+                list
             }
         }
     }
@@ -106,6 +128,11 @@ impl Loop {
                     self.menu = None;
                 }
                 PanelEffect::Open(p) => {
+                    if p.kind == PanelKind::Overflow {
+                        self.overflow_ids = self.bars[p.monitor].overflow_items(&p.chip);
+                        self.overflow_focus = 0;
+                        self.overflow_scroll = 0;
+                    }
                     tracing::info!(monitor = p.monitor, chip = %p.chip, "painel abrindo");
                     if p.kind == PanelKind::Calendar {
                         let today = now_local().date;
@@ -113,7 +140,7 @@ impl Loop {
                     }
                     let scale = self.bars[p.monitor].scale();
                     let list = self.panel_list(p.kind, scale);
-                    let Some(chip) = self.bars[p.monitor].chip_rect(&p.chip) else { continue };
+                    let chip = self.panel_anchor(p.monitor, &p.chip);
                     let band_bottom = self.bars[p.monitor].band_bottom();
                     self.panels[p.monitor].open(&self.ctx, chip, band_bottom, &list)?;
                     self.bars[p.monitor].set_active(&self.ctx, Some(&p.chip))?;
@@ -150,9 +177,17 @@ impl Loop {
         let Some(open) = self.controller.open().cloned() else { return Ok(()) };
         let scale = self.bars[open.monitor].scale();
         let list = self.panel_list(open.kind, scale);
-        let Some(chip) = self.bars[open.monitor].chip_rect(&open.chip) else { return Ok(()) };
+        let chip = self.panel_anchor(open.monitor, &open.chip);
         let band_bottom = self.bars[open.monitor].band_bottom();
         self.panels[open.monitor].resize(&self.ctx, chip, band_bottom, &list)
+    }
+
+    fn panel_anchor(&self, monitor: usize, id: &str) -> Rect {
+        self.bars[monitor].chip_rect(id).unwrap_or_else(|| {
+            let bar = &self.bars[monitor];
+            let rect = bar.monitor().rect;
+            Rect::new(rect.x + 8.0 * bar.scale(), rect.y, 32.0 * bar.scale(), bar.band_bottom() - rect.y)
+        })
     }
 
     pub fn apply_bars(&mut self, animate: bool) -> Result<()> {
@@ -204,6 +239,10 @@ impl Loop {
                 unsafe { PostQuitMessage(0) };
                 return Ok(());
             }
+            MenuAction::EditBar => {
+                let monitor = self.controller.open().map_or(0, |p| p.monitor);
+                return self.start_editor(monitor);
+            }
         }
         // Altura/formato/tema: barras animam e o menu continua aberto, redesenhado com a nova escolha.
         self.menu = None;
@@ -244,6 +283,7 @@ impl Loop {
     }
 
     pub fn handle(&mut self, e: WinEvent) -> Result<bool> {
+        if self.editor_event(e)? { return Ok(true); }
         match e {
             WinEvent::Quit => return Ok(false),
             // Alt+F4 num painel fecha só o painel; na barra (ou `taskkill` sem /f), encerra o app
@@ -272,6 +312,12 @@ impl Loop {
                     let hit = self.menu.as_ref().and_then(|m| m.hit(Point { x: x - ox, y: y - oy }, scale));
                     if let Some(a) = hit {
                         self.menu_action(a)?;
+                    } else if self.controller.open().is_some_and(|o| o.kind == PanelKind::Overflow) {
+                        let row = ((y - oy) / scale - 32.0) / 32.0;
+                        if row >= 0.0 && let Some(id) = self.overflow_ids.get(self.overflow_scroll + row as usize).cloned() {
+                            let fx = self.controller.handle(PanelInput::ChipClick { monitor: i, chip: id });
+                            self.run_effects(fx)?;
+                        }
                     }
                 }
             }
@@ -327,10 +373,25 @@ impl Loop {
                         self.shown_month = shift_month(y, m, if vk == VK_LEFT { -1 } else { 1 });
                         self.redraw_open_panel()?;
                     }
+                    Some(PanelKind::Overflow) => {
+                        let monitor = self.controller.open().map_or(0, |p| p.monitor);
+                        if vk == VK_RETURN && let Some(id) = self.overflow_ids.get(self.overflow_focus).cloned() {
+                            let fx = self.controller.handle(PanelInput::ChipClick { monitor, chip: id });
+                            self.run_effects(fx)?;
+                        } else if vk == VK_UP || vk == VK_DOWN {
+                            self.overflow_focus = if vk == VK_UP { self.overflow_focus.saturating_sub(1) } else { (self.overflow_focus + 1).min(self.overflow_ids.len().saturating_sub(1)) };
+                            self.overflow_scroll = self.overflow_focus.saturating_sub(11);
+                            self.redraw_open_panel()?;
+                        }
+                    }
                     _ => {}
                 }
             }
             WinEvent::Wheel { hwnd, delta } => {
+                if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind == PanelKind::Overflow) {
+                    self.overflow_scroll = if delta > 0 { self.overflow_scroll.saturating_sub(1) } else { (self.overflow_scroll + 1).min(self.overflow_ids.len().saturating_sub(1)) };
+                    self.redraw_open_panel()?;
+                }
                 if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind == PanelKind::Calendar) {
                     let (y, m) = self.shown_month;
                     self.shown_month = shift_month(y, m, if delta > 0 { -1 } else { 1 });
@@ -345,10 +406,8 @@ impl Loop {
                 self.schedule_clock();
             }
             WinEvent::Timer { id: TIMER_CYCLE } => self.cycle_tick()?,
-            WinEvent::User { code: USER_PANEL_SETTLED } => {
-                for p in &mut self.panels {
-                    p.hide_if_closed();
-                }
+            WinEvent::PanelSettled { hwnd, ticket } => {
+                if let Some(index) = self.panel_index(hwnd) { self.panels[index].hide_if_closed(&self.ctx, ticket)?; }
             }
             WinEvent::User { code: USER_ISLAND } => crate::island::restart(&self.ctx),
             WinEvent::User { code } if code == USER_ISLAND + 100 => window::set_timer(TIMER_RAISE, 500),
@@ -378,6 +437,7 @@ impl Loop {
                 }
             }
             WinEvent::User { code: USER_ISLAND_ACCENT } => self.refresh_island_accent()?,
+            WinEvent::IslandGeometryChanged => self.apply_bars(true)?,
             WinEvent::User { code: USER_THEMES_CHANGED } => {
                 let (id, dir) = (self.ctx.config.theme.clone(), self.ctx.themes_dir.clone());
                 for e in self.ctx.theme.reload(&id, &dir) {
@@ -396,6 +456,7 @@ impl Loop {
 }
 
 pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
+    let _context_hook = zefiro_platform_windows::bar_context::BarContextHook::install().map_err(|error| tracing::warn!("recuperação pelo botão direito indisponível: {error}")).ok();
     let mut l = Loop::new(ctx, bars)?;
     l.schedule_clock();
     if let Err(e) = l.refresh_island_accent() {
