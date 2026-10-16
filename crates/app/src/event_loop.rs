@@ -28,12 +28,20 @@ pub const USER_ISLAND: u32 = 4;
 /// O `island-state.ini` mudou: a ilha pode ter publicado outro destaque.
 pub const USER_ISLAND_ACCENT: u32 = 5;
 pub const USER_EDITOR_IO: u32 = 6;
+/// As sessões de mídia mudaram (ilha embutida).
+pub const USER_MEDIA: u32 = 7;
+/// Chegou áudio novo para o visualizador (no máximo a 60 Hz).
+pub const USER_VISUALIZER: u32 = 8;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
 /// Modo de medição (`ZEFIRO_CYCLES=N`): abre e fecha o calendário N vezes e sai.
 pub const TIMER_CYCLE: usize = 4;
 pub const TIMER_GRAPHICS_TRIM: usize = 5;
+/// Fim da espiada da ilha (volta da pílula larga para a recolhida).
+pub const TIMER_ISLAND_PEEK: usize = 6;
+/// Linha do tempo do painel da ilha, uma vez por segundo.
+pub const TIMER_ISLAND_TICK: usize = 7;
 const CYCLE_HALF_MS: u32 = 450;
 
 const VK_ESCAPE: u32 = 0x1B;
@@ -57,7 +65,8 @@ pub struct Loop {
     overflow_focus: usize,
     overflow_scroll: usize,
     menu: Option<MenuModel>,
-    shown_month: (i32, u32),
+    pub(crate) shown_month: (i32, u32),
+    pub(crate) island: crate::island_loop::IslandRuntime,
     /// Ciclos de medição: (total, feitos).
     cycles: Option<(u32, u32)>,
 }
@@ -79,7 +88,7 @@ impl Loop {
             panels.push(PanelView::create(&ctx, b.monitor())?);
         }
         let today = now_local().date;
-        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), cycles: None })
+        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), cycles: None })
     }
 
     pub(crate) fn bar_index(&self, hwnd: isize) -> Option<usize> { self.bars.iter().position(|b| b.hwnd().0 as isize == hwnd) }
@@ -109,6 +118,7 @@ impl Loop {
                 }
                 list
             }
+            PanelKind::Island => self.island_panel_list(scale),
         }
     }
 
@@ -127,11 +137,12 @@ impl Loop {
                         b.set_active(&self.ctx, None)?;
                     }
                     for b in &self.bars {
-                        for id in ["zefiro", "clock"] {
+                        for id in ["zefiro", "clock", crate::bar_view::ISLAND_CHIP] {
                             b.fade_chip(&self.ctx, id, true)?;
                         }
                     }
                     self.menu = None;
+                    self.island_panel_closed();
                 }
                 PanelEffect::Open(p) => {
                     if p.kind == PanelKind::Overflow {
@@ -140,7 +151,7 @@ impl Loop {
                         self.overflow_scroll = 0;
                     }
                     tracing::info!(monitor = p.monitor, chip = %p.chip, "painel abrindo");
-                    if p.kind == PanelKind::Calendar {
+                    if matches!(p.kind, PanelKind::Calendar | PanelKind::Island) {
                         let today = now_local().date;
                         self.shown_month = (today.year, today.month);
                     }
@@ -160,7 +171,11 @@ impl Loop {
     /// Lê o destaque que a ilha publicou (capa do álbum ou o dela) e, se mudou, redesenha a barra
     /// e o painel aberto — o calendário usa o mesmo destaque da ilha.
     pub fn refresh_island_accent(&mut self) -> Result<()> {
-        let accent = if self.ctx.config.island.enabled {
+        // A ilha embutida publica o destaque direto (island_loop), sem passar pelo .ini.
+        if self.ctx.config.island.embedded() {
+            return Ok(());
+        }
+        let accent = if self.ctx.config.island.external() {
             let path = self.ctx.config_path.with_file_name("island-state.ini");
             std::fs::read_to_string(path).ok().and_then(|t| zefiro_island_host::ini::read_accent(&t))
         } else {
@@ -321,7 +336,9 @@ impl Loop {
                     let (ox, oy) = self.panels[i].content_origin();
                     let scale = self.bars[i].scale();
                     let hit = self.menu.as_ref().and_then(|m| m.hit(Point { x: x - ox, y: y - oy }, scale));
-                    if let Some(a) = hit {
+                    if self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) {
+                        self.island_panel_click(Point { x: x - ox, y: y - oy })?;
+                    } else if let Some(a) = hit {
                         self.menu_action(a)?;
                     } else if self.controller.open().is_some_and(|o| o.kind == PanelKind::Overflow) {
                         let row = ((y - oy) / scale - 32.0) / 32.0;
@@ -344,12 +361,19 @@ impl Loop {
             WinEvent::MouseMove { hwnd, x, y } => {
                 if let Some(i) = self.bar_index(hwnd) {
                     let chip = self.bars[i].chip_at(x, y);
-                    self.bars[i].set_hover(&self.ctx, chip.as_deref())?;
+                    let on_island = chip.as_deref() == Some(crate::bar_view::ISLAND_CHIP);
+                    self.bars[i].set_hover(&self.ctx, chip.as_deref().filter(|_| !on_island))?;
+                    if self.bars[i].has_island() {
+                        self.island_hover(on_island)?;
+                    }
                 }
             }
             WinEvent::MouseLeave { hwnd } => {
                 if let Some(i) = self.bar_index(hwnd) {
                     self.bars[i].set_hover(&self.ctx, None)?;
+                    if self.bars[i].has_island() {
+                        self.island_hover(false)?;
+                    }
                 }
             }
             WinEvent::FocusLost { hwnd } => {
@@ -369,7 +393,7 @@ impl Loop {
                     let fx = self.controller.handle(PanelInput::Escape);
                     return self.run_effects(fx).map(|_| true);
                 }
-                match self.controller.open().map(|o| o.kind) {
+                match self.effective_open_kind() {
                     Some(PanelKind::Menu) => {
                         let key = match vk { VK_UP => Some(NavKey::Up), VK_DOWN => Some(NavKey::Down), VK_LEFT => Some(NavKey::Left), VK_RIGHT => Some(NavKey::Right), VK_RETURN => Some(NavKey::Enter), _ => None };
                         if let (Some(k), Some(m)) = (key, self.menu.as_mut()) {
@@ -403,7 +427,7 @@ impl Loop {
                     self.overflow_scroll = if delta > 0 { self.overflow_scroll.saturating_sub(1) } else { (self.overflow_scroll + 1).min(self.overflow_ids.len().saturating_sub(1)) };
                     self.redraw_open_panel()?;
                 }
-                if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind == PanelKind::Calendar) {
+                if self.panel_index(hwnd).is_some() && self.effective_open_kind() == Some(PanelKind::Calendar) {
                     let (y, m) = self.shown_month;
                     self.shown_month = shift_month(y, m, if delta > 0 { -1 } else { 1 });
                     self.redraw_open_panel()?;
@@ -411,12 +435,16 @@ impl Loop {
             }
             WinEvent::Timer { id: TIMER_CLOCK } => {
                 self.apply_bars(true)?;
-                if self.controller.open().is_some_and(|o| o.kind == PanelKind::Calendar) {
+                if self.effective_open_kind() == Some(PanelKind::Calendar) {
                     self.redraw_open_panel()?;
                 }
                 self.schedule_clock();
             }
             WinEvent::Timer { id: TIMER_CYCLE } => self.cycle_tick()?,
+            WinEvent::Timer { id: TIMER_ISLAND_PEEK } => self.island_peek_timer()?,
+            WinEvent::Timer { id: TIMER_ISLAND_TICK } => self.island_tick()?,
+            WinEvent::User { code: USER_MEDIA } => self.island_media_changed()?,
+            WinEvent::User { code: USER_VISUALIZER } => self.island_visualizer()?,
             WinEvent::Timer { id: TIMER_GRAPHICS_TRIM } => {
                 window::kill_timer(TIMER_GRAPHICS_TRIM);
                 if self.controller.open().is_none() && self.editor.is_none() { self.ctx.gfx.trim_idle_resources(); }
@@ -437,7 +465,14 @@ impl Loop {
                         let fx = self.controller.handle(PanelInput::ConfigChanged);
                         self.run_effects(fx)?;
                         let theme_changed = new.theme != self.ctx.config.theme;
+                        let external = (self.ctx.config.island.external(), new.island.external());
                         self.ctx.config = new;
+                        // Trocar `[island] engine` liga uma ilha e desliga a outra sem reiniciar a barra.
+                        match external {
+                            (false, true) => crate::island::start(&self.ctx),
+                            (true, false) => crate::island::stop(),
+                            _ => {}
+                        }
                         if theme_changed {
                             let (id, dir) = (self.ctx.config.theme.clone(), self.ctx.themes_dir.clone());
                             self.ctx.theme.reload(&id, &dir);
@@ -445,6 +480,7 @@ impl Loop {
                         }
                         self.apply_bars(true)?;
                         crate::island::sync(&self.ctx);
+                        self.island_services()?;
                         self.schedule_clock();
                     }
                     Ok(_) => {}
@@ -483,6 +519,7 @@ pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
         window::set_timer(TIMER_CYCLE, 2000);
     }
     crate::island::start(&l.ctx);
+    l.island_services()?;
     'pump: while window::pump() {
         for e in window::take_events() {
             match l.handle(e) {

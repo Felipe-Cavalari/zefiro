@@ -22,7 +22,7 @@ static HOST: OnceLock<Mutex<Option<Host>>> = OnceLock::new();
 fn host() -> &'static Mutex<Option<Host>> { HOST.get_or_init(|| Mutex::new(None)) }
 
 pub fn sync(ctx: &AppCtx) {
-    if !ctx.config.island.enabled {
+    if !ctx.config.island.external() {
         return;
     }
     let dir = ctx.config_path.parent().map(PathBuf::from).unwrap_or_default();
@@ -40,7 +40,7 @@ pub fn sync(ctx: &AppCtx) {
 }
 
 pub fn start(ctx: &AppCtx) {
-    if !ctx.config.island.enabled {
+    if !ctx.config.island.external() {
         return;
     }
     let Some(exe) = resolve_exe(&ctx.config.island.exe, &system::exe_dir()) else {

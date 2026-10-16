@@ -61,6 +61,7 @@ pub fn handle(l: &mut Loop, e: WinEvent) -> Result<bool> {
                 if fullscreen && l.editor.as_ref().is_some_and(|editor| editor.monitor == i) { l.suspend_editor(true)?; }
                 l.bars[i].set_hidden(fullscreen);
             }
+            l.island_visibility_changed();
             if param == 0 {
                 island_zorder::raise_island();
                 l.suspend_editor(false)?;

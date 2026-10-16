@@ -22,7 +22,12 @@ use zefiro_platform::geometry::Size;
 use zefiro_platform::text::{Align, Family, FontWeight, TextStyle};
 
 use crate::app::AppCtx;
+use crate::island_view::IslandView;
 use crate::theme_state::SurfaceKind;
+use zefiro_island::view::{Collapsed, PillContent, RESERVE_DESIGN_W, idle_pill, media_pill};
+
+/// Id do "chip" da ilha embutida (clique, painel e foco usam o mesmo caminho dos chips).
+pub const ISLAND_CHIP: &str = "island";
 
 struct ChipView { id: String, hover: MorphShape, content: SpriteVisual, surface: CompositionDrawingSurface, rect: Rect }
 
@@ -43,6 +48,24 @@ pub struct BarView {
     guides: Option<(CompositionDrawingSurface, SpriteVisual)>,
     drag_ghost: Option<SpriteVisual>,
     drag_marker: Option<SpriteVisual>,
+    island: Option<IslandView>,
+    hidden: bool,
+    /// Áreas clicáveis sem a ilha (a ilha muda de tamanho sem refazer o layout inteiro).
+    interactive_base: Vec<Rect>,
+}
+
+/// Conteúdo recolhido da ilha agora.
+fn island_content(ctx: &AppCtx, pill_h: f32) -> PillContent {
+    let font_scale = ctx.theme.theme.font.scale;
+    let tokens = &ctx.theme.tokens;
+    match (ctx.island.collapsed(ctx.now()), ctx.island.media()) {
+        (Collapsed::Media, Some(s)) => media_pill(s, false, pill_h, font_scale, tokens),
+        (Collapsed::Peek, Some(s)) => media_pill(s, true, pill_h, font_scale, tokens),
+        _ => {
+            let clock = ctx.clock.chip_text(&now_local(), "", false);
+            idle_pill(&clock, pill_h, font_scale, tokens, &ctx.text)
+        }
+    }
 }
 
 fn chip_content(ctx: &AppCtx, id: &str, height: BarHeight, chip_h: f32, font_px: f32, scale: f32) -> ChipContent {
@@ -75,7 +98,7 @@ impl BarView {
         let divider = ctx.comp.compositor.CreateSpriteVisual()?;
         root.Children()?.InsertAtTop(&divider)?;
         let groups = Vec::new();
-        let mut view = BarView { hwnd, monitor: monitor.clone(), scale, _target: target, root, strip, divider, groups, chips: Vec::new(), layout: None, appbar: false, hover: None, active: None, guides: None, drag_ghost: None, drag_marker: None };
+        let mut view = BarView { hwnd, monitor: monitor.clone(), scale, _target: target, root, strip, divider, groups, chips: Vec::new(), layout: None, appbar: false, hover: None, active: None, guides: None, drag_ghost: None, drag_marker: None, island: None, hidden: false, interactive_base: Vec::new() };
         view.apply(ctx, false)?;
         window::set_bounds(hwnd, bounds, true);
         Ok(view)
@@ -116,7 +139,12 @@ impl BarView {
                 .collect::<Vec<_>>()
         };
         let specs = [spec(&sections.start), spec(&sections.center), spec(&sections.end)];
-        let reservation = (self.monitor.primary && ctx.config.island.enabled).then(|| window::island_reservation().unwrap_or(self.monitor.rect.w));
+        let hosts_island = self.hosts_island(ctx);
+        let reservation = if hosts_island {
+            Some((RESERVE_DESIGN_W * (m.island_pill * self.scale).round() / 44.0).round())
+        } else {
+            (self.monitor.primary && ctx.config.island.external()).then(|| window::island_reservation().unwrap_or(self.monitor.rect.w))
+        };
         let layout = layout_sections(self.monitor.rect.w, self.scale, cfg.height, cfg.format, [&specs[0], &specs[1], &specs[2]], reservation);
         while self.groups.len() < layout.groups.len() {
             let group = MorphShape::new(&ctx.comp, &self.root, &ctx.theme.morph_style(self.scale, SurfaceKind::Pill))?;
@@ -215,12 +243,25 @@ impl BarView {
         let mut interactive: Vec<Rect> = layout.chips.iter().map(|c| c.rect).collect();
         interactive.extend(layout.strip);
         interactive.extend(layout.groups.iter().copied());
-        window::set_interactive(self.hwnd, interactive);
+        self.interactive_base = interactive;
         zefiro_platform_windows::bar_context::set_zone(self.hwnd, Rect::new(self.monitor.rect.x, self.monitor.rect.y, layout.band.w, layout.band.h));
 
         let height_px = layout.band.h as i32;
         let (hwnd, mon, reserve) = (self.hwnd, self.monitor.rect, self.appbar);
         self.layout = Some(layout);
+        match (hosts_island, self.island.is_some()) {
+            (true, false) => {
+                let view = IslandView::new(ctx, &self.root, &ctx.theme.morph_style(self.scale, SurfaceKind::Pill))?;
+                self.island = Some(view);
+            }
+            (false, true) => {
+                if let Some(view) = self.island.take() {
+                    self.root.Children()?.Remove(view.root())?;
+                }
+            }
+            _ => {}
+        }
+        self.refresh_island(ctx, animate)?;
         self.refresh_chip_fills(ctx)?;
         if reserve {
             if animate {
@@ -253,7 +294,51 @@ impl BarView {
         }
     }
 
+    /// A ilha embutida mora no centro da barra do monitor principal.
+    pub fn hosts_island(&self, ctx: &AppCtx) -> bool {
+        self.monitor.primary && ctx.config.island.embedded()
+    }
+
+    /// Redesenha só a ilha (mídia, espiada, visualizador), sem refazer o layout da barra.
+    pub fn refresh_island(&mut self, ctx: &AppCtx, animate: bool) -> Result<()> {
+        let (Some(layout), Some(view)) = (&self.layout, &mut self.island) else {
+            window::set_interactive(self.hwnd, self.interactive_base.clone());
+            return Ok(());
+        };
+        let pill_h = layout.island_pill_h;
+        let content = island_content(ctx, pill_h);
+        let rect = Rect::new(((self.monitor.rect.w - content.size.w) / 2.0).round(), ((layout.band.h - pill_h) / 2.0).round(), content.size.w, pill_h);
+        // Na faixa, a ilha se funde à barra (sem contorno nem sombra); nas pílulas, é uma pílula.
+        let kind = if layout.strip.is_some() { SurfaceKind::Strip } else { SurfaceKind::Pill };
+        let style = ctx.theme.morph_style(self.scale, kind);
+        let radius = pill_radius(pill_h, ctx.theme.theme.shape.radius_max * self.scale, ctx.theme.theme.shape.style, self.scale);
+        view.update(ctx, content, rect, radius, &style, animate && ctx.theme.animations)?;
+        let mut interactive = self.interactive_base.clone();
+        interactive.push(rect);
+        window::set_interactive(self.hwnd, interactive);
+        Ok(())
+    }
+
+    /// Barras do visualizador (`None` = paradas).
+    pub fn set_visualizer(&self, wave: Option<&zefiro_island::waveform::Waveform>) -> Result<()> {
+        match &self.island {
+            Some(view) => view.set_levels(&wave.map(|w| w.bars(view.bar_count())).unwrap_or_default()),
+            None => Ok(()),
+        }
+    }
+
+    pub fn has_island(&self) -> bool {
+        self.island.is_some()
+    }
+
+    pub fn is_hidden(&self) -> bool {
+        self.hidden
+    }
+
     pub fn chip_at(&self, x: f32, y: f32) -> Option<String> {
+        if self.island.as_ref().is_some_and(|v| v.rect.contains(Point { x, y })) {
+            return Some(ISLAND_CHIP.into());
+        }
         self.chips.iter().find(|c| c.rect.contains(Point { x, y })).map(|c| c.id.clone())
     }
 
@@ -327,6 +412,10 @@ impl BarView {
 
     /// Retângulo do chip em coordenadas da tela (para o painel).
     pub fn chip_rect(&self, id: &str) -> Option<Rect> {
+        if id == ISLAND_CHIP {
+            let r = self.island.as_ref()?.rect;
+            return Some(Rect::new(r.x + self.monitor.rect.x, r.y + self.monitor.rect.y, r.w, r.h));
+        }
         self.chips.iter().find(|c| c.id == id).map(|c| Rect::new(c.rect.x + self.monitor.rect.x, c.rect.y + self.monitor.rect.y, c.rect.w, c.rect.h))
     }
 
@@ -360,6 +449,12 @@ impl BarView {
 
     /// Esconde (ao abrir o painel) ou mostra (ao fechar) o conteúdo do chip em 0,17 s.
     pub fn fade_chip(&self, ctx: &AppCtx, chip: &str, visible: bool) -> Result<()> {
+        if chip == ISLAND_CHIP {
+            if let Some(view) = &self.island {
+                view.fade_content(ctx, visible)?;
+            }
+            return Ok(());
+        }
         if let Some(c) = self.chips.iter().find(|c| c.id == chip) {
             ctx.comp.fade(&c.content.cast::<Visual>()?, if visible { 1.0 } else { 0.0 }, CHIP_FADE_S)?;
         }
@@ -367,7 +462,8 @@ impl BarView {
     }
 
     /// Some (app em tela cheia neste monitor) ou volta. A reserva da AppBar continua.
-    pub fn set_hidden(&self, hidden: bool) {
+    pub fn set_hidden(&mut self, hidden: bool) {
+        self.hidden = hidden;
         if hidden {
             window::hide(self.hwnd);
         } else {
