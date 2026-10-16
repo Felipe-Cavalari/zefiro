@@ -8,7 +8,7 @@ use zefiro_resources::tokens::Tokens;
 use zefiro_ui::paint::{DisplayList, DrawOp};
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum MenuAction { SetHeight(BarHeight), SetFormat(BarFormat), SetTheme(String), ReloadTheme, OpenThemesFolder, RestartIsland, Exit }
+pub enum MenuAction { SetHeight(BarHeight), SetFormat(BarFormat), SetTheme(String), ReloadTheme, OpenThemesFolder, RestartIsland, Exit, EditBar }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThemeSwatch { pub id: String, pub name: String, pub background: Rgba, pub text: Rgba, pub border: Option<Rgba> }
@@ -28,8 +28,9 @@ const SWATCH_H: f32 = 56.0;
 const SECTION_GAP: f32 = 8.0;
 const COLS: usize = 4;
 
-fn actions() -> [(&'static str, MenuAction); 4] {
+fn actions() -> [(&'static str, MenuAction); 5] {
     [
+        ("Editar barra", MenuAction::EditBar),
         ("Recarregar tema", MenuAction::ReloadTheme),
         ("Abrir pasta de temas", MenuAction::OpenThemesFolder),
         ("Reiniciar a ilha", MenuAction::RestartIsland),
@@ -234,7 +235,7 @@ mod tests {
         m.key(NavKey::Down); // segunda linha de temas, coluna 3
         assert_eq!(m.key(NavKey::Enter), Some(MenuAction::SetTheme("t7".into())));
         m.key(NavKey::Down); // primeira ação, coluna volta a 0
-        assert_eq!(m.key(NavKey::Enter), Some(MenuAction::ReloadTheme));
+        assert_eq!(m.key(NavKey::Enter), Some(MenuAction::EditBar));
         for _ in 0..10 {
             m.key(NavKey::Down);
         }

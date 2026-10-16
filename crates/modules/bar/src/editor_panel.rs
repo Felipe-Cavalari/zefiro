@@ -38,8 +38,12 @@ impl EditorPanel {
         let mut rows = Vec::new();
         let mut row = |label: String, action, enabled| rows.push(EditorRow { label, action, enabled: enabled && !session.saving });
         if session.conflict {
-            row("Recarregar arquivo".into(), EditorAction::Reload, true);
-            row("Reaplicar minhas alterações".into(), EditorAction::Reapply, true);
+            row("Recarregar arquivo".into(), EditorAction::Reload, session.file_error.is_none());
+            row("Reaplicar minhas alterações".into(), EditorAction::Reapply, session.file_error.is_none());
+            if self.message.starts_with("Conflito:") {
+                row("Manter esta seção do arquivo".into(), EditorAction::ResolveFile, true);
+                row("Manter esta seção do rascunho".into(), EditorAction::ResolveDraft, true);
+            }
         }
         match self.page {
             EditorPage::Items => {

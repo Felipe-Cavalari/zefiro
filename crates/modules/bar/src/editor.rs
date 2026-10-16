@@ -21,6 +21,7 @@ pub struct EditorSession {
     pub original_text: String,
     pub latest_text: String,
     pub conflict: bool,
+    pub file_error: Option<String>,
     pub monitor_id: Option<String>,
     pub generation: u64,
     pub saving: bool,
@@ -30,7 +31,7 @@ pub struct EditorSession {
 
 impl EditorSession {
     pub fn new(config: Config, text: String) -> Self {
-        Self { confirmed: config.clone(), draft: config.clone(), original: config, original_text: text.clone(), latest_text: text, conflict: false, monitor_id: None, generation: 0, saving: false, moving: None }
+        Self { confirmed: config.clone(), draft: config.clone(), original: config, original_text: text.clone(), latest_text: text, conflict: false, file_error: None, monitor_id: None, generation: 0, saving: false, moving: None }
     }
 
     pub fn select_monitor(&mut self, id: Option<String>) { self.cancel_move(); self.monitor_id = id; }
@@ -97,17 +98,25 @@ impl EditorSession {
     }
 
     pub fn external_change(&mut self, config: Config, text: String) {
+        self.file_error = None;
         self.conflict = text != self.original_text;
         self.confirmed = config;
         self.latest_text = text;
     }
 
     pub fn reload(&mut self) {
+        if self.file_error.is_some() || self.saving { return; }
         self.draft = self.confirmed.clone();
         self.original = self.confirmed.clone();
         self.original_text = self.latest_text.clone();
         self.conflict = false;
         self.moving = None;
+    }
+
+    pub fn external_invalid(&mut self, text: String, message: String) {
+        self.latest_text = text;
+        self.file_error = Some(message);
+        self.conflict = true;
     }
 
     pub fn patch(&self) -> ConfigPatch {

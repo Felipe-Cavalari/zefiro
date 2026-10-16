@@ -64,3 +64,20 @@ fn patch_contains_only_fields_changed_by_the_editor() {
     assert_eq!(config.bar.sections.start, ["zefiro", "clock"]);
     assert!(config.bar.sections.end.is_empty());
 }
+
+#[test]
+fn invalid_external_text_blocks_reload_and_keeps_last_valid_cancel_base() {
+    let mut editor = EditorSession::new(Config::default(), "theme = 'obsidian'".into());
+    editor.move_item("clock", Section::Start, 0).unwrap();
+    editor.external_invalid("[broken".into(), "Erro de sintaxe".into());
+    assert!(editor.conflict);
+    assert!(editor.file_error.is_some());
+    assert_eq!(editor.latest_text, "[broken");
+    editor.reload();
+    assert_eq!(editor.draft.bar.sections.start, ["clock", "zefiro"]);
+    assert_eq!(editor.confirmed, Config::default());
+    editor.external_change(Config::default(), "theme = 'obsidian' # corrigido".into());
+    assert!(editor.file_error.is_none());
+    editor.reload();
+    assert_eq!(editor.draft, Config::default());
+}

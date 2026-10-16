@@ -1,7 +1,7 @@
 //! Quem abre e quem fecha: um painel por vez.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PanelKind { Menu, Calendar }
+pub enum PanelKind { Menu, Calendar, Overflow }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenPanel { pub monitor: usize, pub chip: String, pub kind: PanelKind }
@@ -13,6 +13,7 @@ pub enum PanelInput { ChipClick { monitor: usize, chip: String }, ClickOutside, 
 pub enum PanelEffect { Open(OpenPanel), Close { monitor: usize } }
 
 pub fn panel_kind_for(chip: &str) -> Option<PanelKind> {
+    if chip.starts_with("__more_") { return Some(PanelKind::Overflow); }
     match chip {
         "zefiro" => Some(PanelKind::Menu),
         "clock" => Some(PanelKind::Calendar),
