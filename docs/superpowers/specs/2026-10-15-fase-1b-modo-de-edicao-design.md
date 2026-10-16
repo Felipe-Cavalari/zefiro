@@ -211,7 +211,7 @@ Quando o arquivo muda durante a edição, manter o rascunho visível e avisar **
 - **Recarregar arquivo:** descartar o rascunho e começar com a última versão válida.
 - **Reaplicar minhas alterações:** aplicar somente os campos editados sobre a versão atual; preservar os demais. Para um mesmo array de seção alterado dos dois lados, mostrar o conflito e exigir escolha explícita entre a seção do arquivo e a do rascunho. Não concatenar arrays automaticamente.
 
-Revalidar antes de gravar. A comparação final e a substituição devem proteger contra outro escritor no intervalo de gravação; se não for possível obter exclusão apropriada no Windows, abortar e pedir nova reconciliação, sem prometer mesclagem segura. Arquivo externo inválido não é sobrescrito pelo editor: mostrar erro e permitir cancelar ou aguardar sua correção.
+Revalidar antes de gravar e conferir a revisão novamente imediatamente antes da substituição atômica. **Ajuste aprovado pelo usuário durante a implementação:** usar concorrência otimista, sem prometer exclusão contra editores externos não cooperantes. Existe uma pequena janela de corrida entre essa última conferência e a substituição; registrar essa limitação no ADR. Conflitos detectados abortam a gravação e pedem reconciliação. Arquivo externo inválido não é sobrescrito pelo editor: mostrar erro e permitir cancelar ou aguardar sua correção.
 
 Mudanças de tema e preferências do Windows podem atualizar a aparência do rascunho sem alterar sua organização. Um conflito externo de configuração continua sujeito às regras acima, mesmo quando seus efeitos visuais já puderem ser apresentados.
 
