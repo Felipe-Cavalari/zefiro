@@ -8,6 +8,8 @@ use crate::grid::weekday;
 pub struct LocalTime { pub date: Date, pub hour: u32, pub minute: u32, pub second: u32, pub millis: u32 }
 
 pub trait ClockText {
+    /// Validação estrutural compartilhada; a plataforma pode validar também sua API de formato.
+    fn validate_format(&self, pattern: &str) -> Result<(), String> { validate_pattern(pattern) }
     /// Texto do chip. `custom_date` vazio = formato do sistema; senão, padrão de data do Windows (ex.: "ddd d MMM").
     fn chip_text(&self, now: &LocalTime, custom_date: &str, seconds: bool) -> String;
     fn long_date(&self, d: Date) -> String;
@@ -17,6 +19,12 @@ pub trait ClockText {
     fn weekday_initials(&self) -> [String; 7];
     /// 0 = domingo, 1 = segunda…
     fn first_weekday(&self) -> u32;
+}
+
+pub fn validate_pattern(pattern: &str) -> Result<(), String> {
+    if pattern.contains('\0') { return Err("O formato não pode conter caractere nulo".into()); }
+    if pattern.encode_utf16().count() > 1024 { return Err("O formato deve ter no máximo 1024 unidades UTF-16".into()); }
+    Ok(())
 }
 
 pub struct PtBrFallback;

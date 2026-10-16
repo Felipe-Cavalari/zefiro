@@ -27,7 +27,10 @@ fn systemtime(d: Date, hour: u32, minute: u32, second: u32) -> SYSTEMTIME {
 
 fn date_text(st: &SYSTEMTIME, pattern: &str) -> String {
     let pat = HSTRING::from(pattern);
-    let mut buf = [0u16; 128];
+    // SAFETY: consulta o tamanho necessário sem fornecer buffer de saída.
+    let size = unsafe { GetDateFormatEx(USER_DEFAULT, ENUM_DATE_FORMATS_FLAGS(0), Some(st), &pat, None, None) };
+    if size <= 0 { return String::new(); }
+    let mut buf = vec![0u16; size as usize];
     // SAFETY: buffer local com tamanho correto; padrão terminado em zero (HSTRING).
     let n = unsafe { GetDateFormatEx(USER_DEFAULT, ENUM_DATE_FORMATS_FLAGS(0), Some(st), &pat, Some(&mut buf), None) };
     String::from_utf16_lossy(&buf[..(n.max(1) - 1) as usize])
@@ -42,6 +45,15 @@ fn time_text(st: &SYSTEMTIME, seconds: bool) -> String {
 }
 
 impl ClockText for WindowsClock {
+    fn validate_format(&self, pattern: &str) -> Result<(), String> {
+        crate::format::validate_pattern(pattern)?;
+        if pattern.is_empty() { return Ok(()); }
+        let pattern = HSTRING::from(pattern);
+        let st = systemtime(Date { year: 2026, month: 10, day: 15 }, 12, 0, 0);
+        // SAFETY: data válida e string UTF-16 local; apenas consulta tamanho.
+        let size = unsafe { GetDateFormatEx(USER_DEFAULT, ENUM_DATE_FORMATS_FLAGS(0), Some(&st), &pattern, None, None) };
+        if size > 0 { Ok(()) } else { Err("O Windows não aceitou o formato de data".into()) }
+    }
     fn chip_text(&self, now: &LocalTime, custom_date: &str, seconds: bool) -> String {
         let st = systemtime(now.date, now.hour, now.minute, now.second);
         let date = date_text(&st, if custom_date.is_empty() { "ddd d" } else { custom_date });
