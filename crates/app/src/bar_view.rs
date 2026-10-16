@@ -61,7 +61,7 @@ fn island_content(ctx: &AppCtx, pill_h: f32) -> PillContent {
     match (ctx.island.collapsed(ctx.now()), ctx.island.media()) {
         (Collapsed::Media, Some(s)) => with_privacy(media_pill(s, false, pill_h, font_scale, tokens), ctx.island.privacy),
         (Collapsed::Peek, Some(s)) => with_privacy(media_pill(s, true, pill_h, font_scale, tokens), ctx.island.privacy),
-        (Collapsed::Activity(a), _) => activity_pill(a, pill_h, font_scale, tokens),
+        (Collapsed::Activity(a), _) => activity_pill(&a, pill_h, font_scale, tokens),
         _ => {
             let clock = ctx.clock.chip_text(&now_local(), "", false);
             with_privacy(idle_pill(&clock, pill_h, font_scale, tokens, &ctx.text), ctx.island.privacy)

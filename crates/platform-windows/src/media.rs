@@ -9,7 +9,6 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use windows::Foundation::TypedEventHandler;
-use windows::Graphics::Imaging::{BitmapAlphaMode, BitmapDecoder, BitmapInterpolationMode, BitmapPixelFormat, BitmapTransform, ColorManagementMode, ExifOrientationMode};
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession as Session, GlobalSystemMediaTransportControlsSessionManager as Manager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status,
@@ -248,27 +247,10 @@ pub fn now_unix_ms() -> i64 {
 }
 
 fn decode_cover(props: &windows::Media::Control::GlobalSystemMediaTransportControlsSessionMediaProperties) -> Result<Option<Image>> {
-    let Ok(thumb) = props.Thumbnail() else { return Ok(None) };
-    let stream = thumb.OpenReadAsync()?.get()?;
-    let decoder = BitmapDecoder::CreateAsync(&stream)?.get()?;
-    let (w, h) = (decoder.PixelWidth()?, decoder.PixelHeight()?);
-    if w == 0 || h == 0 {
-        return Ok(None);
+    match props.Thumbnail() {
+        Ok(thumb) => crate::imaging::decode(&thumb, COVER_PX, true),
+        Err(_) => Ok(None),
     }
-    // Recorte quadrado no centro (capas de vídeo são 16:9), reduzido para COVER_PX.
-    let side = w.min(h);
-    let scale = COVER_PX as f64 / side as f64;
-    let (sw, sh) = (((w as f64) * scale).round().max(1.0) as u32, ((h as f64) * scale).round().max(1.0) as u32);
-    let transform = BitmapTransform::new()?;
-    transform.SetScaledWidth(sw)?;
-    transform.SetScaledHeight(sh)?;
-    transform.SetInterpolationMode(BitmapInterpolationMode::Fant)?;
-    transform.SetBounds(windows::Graphics::Imaging::BitmapBounds { X: (sw - COVER_PX.min(sw)) / 2, Y: (sh - COVER_PX.min(sh)) / 2, Width: COVER_PX.min(sw), Height: COVER_PX.min(sh) })?;
-    let data = decoder
-        .GetPixelDataTransformedAsync(BitmapPixelFormat::Bgra8, BitmapAlphaMode::Premultiplied, &transform, ExifOrientationMode::RespectExifOrientation, ColorManagementMode::DoNotColorManage)?
-        .get()?;
-    let pixels = data.DetachPixelData()?.to_vec();
-    Ok(Image::new(COVER_PX.min(sw), COVER_PX.min(sh), pixels))
 }
 
 #[cfg(test)]

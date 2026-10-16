@@ -27,7 +27,7 @@ const ICON_NEXT: &str = "\u{E893}";
 const ICON_PLAY: &str = "\u{E768}";
 const ICON_PAUSE: &str = "\u{E769}";
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Collapsed { Idle, Media, Peek, Activity(Activity) }
 
 /// Aviso de volume/brilho: 300 × 54 (px de conteúdo), ícone, barra e porcentagem.
@@ -36,30 +36,77 @@ pub const OSD_DESIGN: Size = Size { w: 300.0, h: 54.0 };
 const ICON_MUTE: &str = "\u{E74F}";
 const ICON_VOLUME: [&str; 4] = ["\u{E992}", "\u{E993}", "\u{E994}", "\u{E995}"];
 const ICON_BRIGHTNESS: &str = "\u{E706}";
+const ICON_COPY: &str = "\u{E8C8}";
+const ICON_KEYBOARD: &str = "\u{E765}";
+const ICON_QUIET: &str = "\u{E708}";
+const ICON_BELL: &str = "\u{EA8F}";
 
-pub fn activity_pill(a: Activity, pill_h: f32, font_scale: f32, tokens: &Tokens) -> PillContent {
-    let k = pill_h / OSD_DESIGN.h;
-    let w = round2(OSD_DESIGN.w * k);
-    let mut list = DisplayList::new(Size { w, h: pill_h });
-    let (glyph, level, dim) = match a {
-        Activity::Volume { level, muted } => {
-            let glyph = if muted || level <= 0.0 { ICON_MUTE } else { ICON_VOLUME[((level * 3.0).ceil() as usize).clamp(1, 3)] };
-            (glyph, level, muted)
-        }
-        Activity::Brightness { level } => (ICON_BRIGHTNESS, level, false),
-    };
-    let level = level.clamp(0.0, 1.0);
-    let icon_rect = Rect::new(16.0 * k, 0.0, 26.0 * k, pill_h);
-    list.push(DrawOp::Text { rect: icon_rect, text: glyph.into(), style: icon(18.0 * k), color: tokens.text, align: Align::Center });
-    let pct_w = 44.0 * k;
-    let track = Rect::new(icon_rect.right() + 10.0 * k, (pill_h - 6.0 * k) / 2.0, w - icon_rect.right() - 10.0 * k - pct_w - 18.0 * k, 6.0 * k);
-    list.push(DrawOp::RoundRect { rect: track, radius: track.h / 2.0, color: tokens.raised_strong });
-    let fill = if dim { tokens.text_tertiary } else { tokens.accent };
-    if level > 0.0 {
-        list.push(DrawOp::RoundRect { rect: Rect::new(track.x, track.y, (track.w * level).max(track.h), track.h), radius: track.h / 2.0, color: fill });
+/// Tamanho de projeto de cada aviso (tabela §3.2 das notas de porte).
+fn activity_design(a: &Activity) -> Size {
+    match a {
+        Activity::Clipboard { .. } => Size { w: 340.0, h: 56.0 },
+        Activity::Lock { .. } => Size { w: 180.0, h: 42.0 },
+        Activity::DoNotDisturb { .. } => Size { w: 220.0, h: 42.0 },
+        Activity::Volume { .. } | Activity::Brightness { .. } => OSD_DESIGN,
+        Activity::Notification(_) => Size { w: 360.0, h: 58.0 },
     }
-    let pct = format!("{}", (level * 100.0).round() as u32);
-    list.push(DrawOp::Text { rect: Rect::new(w - pct_w - 14.0 * k, 0.0, pct_w, pill_h), text: pct, style: style(14.0 * k * font_scale, FontWeight::SemiBold), color: tokens.text, align: Align::Trailing });
+}
+
+pub fn activity_pill(a: &Activity, pill_h: f32, font_scale: f32, tokens: &Tokens) -> PillContent {
+    let design = activity_design(a);
+    let k = pill_h / design.h;
+    let w = round2(design.w * k);
+    let mut list = DisplayList::new(Size { w, h: pill_h });
+    let icon_rect = Rect::new(16.0 * k, 0.0, 26.0 * k, pill_h);
+    let text_x = icon_rect.right() + 10.0 * k;
+    let text_w = (w - text_x - 16.0 * k).max(0.0);
+    let primary = style(14.0 * k * font_scale, FontWeight::SemiBold);
+    let secondary = style(12.0 * k * font_scale, FontWeight::Regular);
+    let glyph = |list: &mut DisplayList, g: &str, color: Rgba| list.push(DrawOp::Text { rect: icon_rect, text: g.into(), style: icon(18.0 * k), color, align: Align::Center });
+    let line = |list: &mut DisplayList, text: String, style: TextStyle, color: Rgba, y: f32, h: f32| list.push(DrawOp::Text { rect: Rect::new(text_x, y, text_w, h), text, style, color, align: Align::Leading });
+    match a {
+        Activity::Volume { .. } | Activity::Brightness { .. } => {
+            let (g, level, dim) = match *a {
+                Activity::Volume { level, muted } => (if muted || level <= 0.0 { ICON_MUTE } else { ICON_VOLUME[((level * 3.0).ceil() as usize).clamp(1, 3)] }, level, muted),
+                Activity::Brightness { level } => (ICON_BRIGHTNESS, level, false),
+                _ => unreachable!("tratado no braço acima"),
+            };
+            glyph(&mut list, g, tokens.text);
+            let level = level.clamp(0.0, 1.0);
+            let pct_w = 44.0 * k;
+            let track = Rect::new(text_x, (pill_h - 6.0 * k) / 2.0, w - text_x - pct_w - 18.0 * k, 6.0 * k);
+            list.push(DrawOp::RoundRect { rect: track, radius: track.h / 2.0, color: tokens.raised_strong });
+            if level > 0.0 {
+                list.push(DrawOp::RoundRect { rect: Rect::new(track.x, track.y, (track.w * level).max(track.h), track.h), radius: track.h / 2.0, color: if dim { tokens.text_tertiary } else { tokens.accent } });
+            }
+            let pct = format!("{}", (level * 100.0).round() as u32);
+            list.push(DrawOp::Text { rect: Rect::new(w - pct_w - 14.0 * k, 0.0, pct_w, pill_h), text: pct, style: primary, color: tokens.text, align: Align::Trailing });
+        }
+        Activity::Clipboard { text } => {
+            glyph(&mut list, ICON_COPY, tokens.accent);
+            line(&mut list, "Copiado".into(), primary, tokens.text, pill_h * 0.12, pill_h * 0.42);
+            line(&mut list, text.replace(['\r', '\n', '\t'], " "), secondary, tokens.text_secondary, pill_h * 0.5, pill_h * 0.38);
+        }
+        Activity::Lock { caps, on } => {
+            glyph(&mut list, ICON_KEYBOARD, if *on { tokens.accent } else { tokens.text_secondary });
+            let name = if *caps { "Caps Lock" } else { "Num Lock" };
+            line(&mut list, format!("{name} {}", if *on { "ligado" } else { "desligado" }), primary, tokens.text, 0.0, pill_h);
+        }
+        Activity::DoNotDisturb { on } => {
+            glyph(&mut list, ICON_QUIET, if *on { tokens.accent } else { tokens.text_secondary });
+            line(&mut list, format!("Não perturbe {}", if *on { "ligado" } else { "desligado" }), primary, tokens.text, 0.0, pill_h);
+        }
+        Activity::Notification(n) => {
+            let art = 30.0 * k;
+            let art_rect = Rect::new(16.0 * k, (pill_h - art) / 2.0, art, art);
+            match &n.icon {
+                Some(image) => list.push(DrawOp::Image { rect: art_rect, image: image.clone(), radius: 7.0 * k, opacity: 1.0 }),
+                None => glyph(&mut list, ICON_BELL, tokens.accent),
+            }
+            line(&mut list, n.app.clone(), secondary, tokens.text_secondary, pill_h * 0.1, pill_h * 0.38);
+            line(&mut list, n.text.clone(), primary, tokens.text, pill_h * 0.45, pill_h * 0.45);
+        }
+    }
     PillContent { size: Size { w, h: pill_h }, list, visualizer: None, dots: Vec::new() }
 }
 
@@ -362,13 +409,13 @@ mod osd_tests {
 
     #[test]
     fn volume_pill_shows_icon_level_and_percent() {
-        let p = activity_pill(Activity::Volume { level: 0.42, muted: false }, 54.0, 1.0, &tokens());
+        let p = activity_pill(&Activity::Volume { level: 0.42, muted: false }, 54.0, 1.0, &tokens());
         assert_eq!(p.size, Size { w: 300.0, h: 54.0 });
         assert_eq!(texts(&p), vec!["\u{E994}".to_string(), "42".into()]);
-        let muted = activity_pill(Activity::Volume { level: 0.42, muted: true }, 27.0, 1.0, &tokens());
+        let muted = activity_pill(&Activity::Volume { level: 0.42, muted: true }, 27.0, 1.0, &tokens());
         assert_eq!(muted.size.w, 150.0);
         assert_eq!(texts(&muted)[0], ICON_MUTE);
-        let b = activity_pill(Activity::Brightness { level: 1.2 }, 54.0, 1.0, &tokens());
+        let b = activity_pill(&Activity::Brightness { level: 1.2 }, 54.0, 1.0, &tokens());
         assert_eq!(texts(&b), vec![ICON_BRIGHTNESS.to_string(), "100".into()]);
     }
 }
@@ -392,5 +439,39 @@ mod privacy_tests {
         assert_eq!(both.dots.iter().map(|d| d.2).collect::<Vec<_>>(), vec![cam_color(), mic_color()]);
         assert!(both.size.w > mic.size.w && both.size.w % 2.0 == 0.0);
         assert_eq!(both.list.size.w, both.size.w);
+    }
+}
+
+#[cfg(test)]
+mod activity_tests {
+    use super::*;
+    use crate::state::Notice;
+    use zefiro_platform::color::Rgba;
+    use zefiro_resources::theme::{BUILTIN, parse_theme};
+    use zefiro_resources::tokens::derive_tokens;
+
+    fn tokens() -> Tokens {
+        derive_tokens(&parse_theme("obsidian", "o", BUILTIN[0].1).unwrap(), Rgba::rgb(0, 120, 215), None)
+    }
+
+    fn texts(p: &PillContent) -> Vec<String> {
+        p.list.ops.iter().filter_map(|o| if let DrawOp::Text { text, .. } = o { Some(text.clone()) } else { None }).collect()
+    }
+
+    #[test]
+    fn each_activity_has_the_island_size_and_text() {
+        let t = tokens();
+        let copy = activity_pill(&Activity::Clipboard { text: "linha 1\nlinha 2".into() }, 56.0, 1.0, &t);
+        assert_eq!(copy.size, Size { w: 340.0, h: 56.0 });
+        assert_eq!(texts(&copy)[1..], ["Copiado".to_string(), "linha 1 linha 2".into()]);
+        let caps = activity_pill(&Activity::Lock { caps: true, on: true }, 42.0, 1.0, &t);
+        assert_eq!(caps.size.w, 180.0);
+        assert!(texts(&caps).contains(&"Caps Lock ligado".to_string()));
+        let dnd = activity_pill(&Activity::DoNotDisturb { on: false }, 21.0, 1.0, &t);
+        assert_eq!(dnd.size.w, 110.0);
+        assert!(texts(&dnd).contains(&"Não perturbe desligado".to_string()));
+        let note = activity_pill(&Activity::Notification(Notice { app: "WhatsApp".into(), text: "Vida - oi".into(), icon: None }), 58.0, 1.0, &t);
+        assert_eq!(note.size.w, 360.0);
+        assert_eq!(texts(&note)[1..], ["WhatsApp".to_string(), "Vida - oi".into()]);
     }
 }

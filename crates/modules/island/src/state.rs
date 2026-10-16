@@ -1,31 +1,52 @@
 //! Qual pílula recolhida mostrar: ocioso, mídia ou espiando (troca de faixa por ~3 s, ou o mouse em cima).
 //! O expandido é o painel da barra (pílula → painel), aberto pelo clique.
 
+use zefiro_platform::image::Image;
+
 use crate::view::Collapsed;
 
 pub const PEEK_SECS: f64 = 3.0;
 
-/// Avisos que tomam a pílula por alguns segundos, por cima da mídia (§3.1 das notas de porte).
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Uma notificação do Windows, já resumida para a pílula.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Notice { pub app: String, pub text: String, pub icon: Option<Image> }
+
+/// Avisos que tomam a pílula por alguns segundos, por cima da mídia (§3.1 e §3.2 das notas de porte).
+#[derive(Debug, Clone, PartialEq)]
 pub enum Activity {
+    /// Texto copiado: 2,5 s.
+    Clipboard { text: String },
+    /// Caps Lock / Num Lock: 2,5 s.
+    Lock { caps: bool, on: bool },
+    /// Não perturbe ligado ou desligado: 3 s.
+    DoNotDisturb { on: bool },
     /// 1,8 s depois da última mudança.
     Volume { level: f32, muted: bool },
     /// 1,8 s depois da última mudança.
     Brightness { level: f32 },
+    /// 4 s.
+    Notification(Notice),
 }
 
 impl Activity {
-    pub fn duration_s(self) -> f64 {
+    pub fn duration_s(&self) -> f64 {
         match self {
             Activity::Volume { .. } | Activity::Brightness { .. } => 1.8,
+            Activity::Clipboard { .. } | Activity::Lock { .. } => 2.5,
+            Activity::DoNotDisturb { .. } => 3.0,
+            Activity::Notification(_) => 4.0,
         }
     }
 
-    /// Prioridade da ilha: menor vence (volume 7, brilho 8).
-    fn priority(self) -> u8 {
+    /// Prioridade da ilha: menor vence (área de transferência 2 … notificação 9).
+    fn priority(&self) -> u8 {
         match self {
+            Activity::Clipboard { .. } => 2,
+            Activity::Lock { .. } => 3,
+            Activity::DoNotDisturb { .. } => 6,
             Activity::Volume { .. } => 7,
             Activity::Brightness { .. } => 8,
+            Activity::Notification(_) => 9,
         }
     }
 }
@@ -42,11 +63,12 @@ impl IslandState {
     /// Mostra (ou renova) um aviso. O mesmo tipo de aviso substitui o anterior.
     pub fn activity(&mut self, a: Activity, now: f64) {
         self.activities.retain(|(old, until)| std::mem::discriminant(old) != std::mem::discriminant(&a) && *until > now);
-        self.activities.push((a, now + a.duration_s()));
+        let until = now + a.duration_s();
+        self.activities.push((a, until));
     }
 
     fn current_activity(&self, now: f64) -> Option<Activity> {
-        self.activities.iter().filter(|(_, until)| *until > now).map(|(a, _)| *a).min_by_key(|a| a.priority())
+        self.activities.iter().filter(|(_, until)| *until > now).map(|(a, _)| a).min_by_key(|a| a.priority()).cloned()
     }
 
     /// A faixa atual mudou (ou a primeira apareceu). Devolve `true` se começou a espiar.
@@ -122,10 +144,10 @@ mod tests {
         let mut s = IslandState::default();
         s.track(key("a"), 0.0);
         let v = Activity::Volume { level: 0.5, muted: false };
-        s.activity(v, 10.0);
-        assert_eq!(s.collapsed(true, 11.0), Collapsed::Activity(v));
+        s.activity(v.clone(), 10.0);
+        assert_eq!(s.collapsed(true, 11.0), Collapsed::Activity(v.clone()));
         let v2 = Activity::Volume { level: 0.6, muted: false };
-        s.activity(v2, 11.5);
+        s.activity(v2.clone(), 11.5);
         assert_eq!(s.collapsed(true, 13.0), Collapsed::Activity(v2), "renovado");
         assert!((s.next_change(13.0).unwrap() - 0.3).abs() < 1e-9);
         assert_eq!(s.collapsed(true, 13.3), Collapsed::Media);
@@ -138,8 +160,8 @@ mod tests {
         let b = Activity::Brightness { level: 0.3 };
         let v = Activity::Volume { level: 0.5, muted: true };
         s.activity(b, 0.0);
-        s.activity(v, 0.5);
-        assert_eq!(s.collapsed(false, 1.0), Collapsed::Activity(v));
+        s.activity(v.clone(), 0.5);
+        assert_eq!(s.collapsed(false, 1.0), Collapsed::Activity(v.clone()));
         assert_eq!(s.collapsed(false, 2.0), Collapsed::Activity(v), "volume ainda vale até 2,3 s");
         assert_eq!(s.collapsed(false, 2.4), Collapsed::Idle, "o brilho acabou em 1,8 s");
     }

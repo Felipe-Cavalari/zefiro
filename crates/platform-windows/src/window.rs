@@ -28,6 +28,10 @@ pub enum WinEvent {
     Character { hwnd: isize, code: u32 },
     ControlChanged { hwnd: isize, control: isize },
     IslandGeometryChanged,
+    /// A área de transferência mudou (qualquer app copiou algo).
+    ClipboardChanged,
+    /// Caps Lock (`caps`) ou Num Lock foi solto em qualquer app.
+    LockKey { caps: bool },
     PanelSettled { hwnd: isize, ticket: usize },
     MouseMove { hwnd: isize, x: f32, y: f32 },
     MouseLeave { hwnd: isize },
@@ -152,6 +156,14 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         }
         WM_CAPTURECHANGED | WM_CANCELMODE => push(WinEvent::CaptureLost { hwnd: h }),
         WM_CHAR => push(WinEvent::Character { hwnd: h, code: wp.0 as u32 }),
+        WM_CLIPBOARDUPDATE => push(WinEvent::ClipboardChanged),
+        WM_INPUT => {
+            if let Some(caps) = crate::system_events::lock_key(lp) {
+                push(WinEvent::LockKey { caps });
+            }
+            // SAFETY: o Windows libera a entrada bruta no DefWindowProc.
+            return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
+        }
         m if m == WM_APP + 2 => push(WinEvent::PanelSettled { hwnd: h, ticket: wp.0 }),
         WM_RBUTTONUP => {
             let (x, y) = xy(lp);
@@ -256,6 +268,11 @@ pub fn post_user(code: u32) {
         // SAFETY: PostMessage é seguro entre threads; a janela de mensagens vive até o fim do app.
         let _ = unsafe { PostMessageW(Some(HWND(h as *mut _)), WM_USER_BASE + code, WPARAM(0), LPARAM(0)) };
     }
+}
+
+/// A janela de mensagens (temporizadores, avisos do sistema).
+pub fn message_window() -> HWND {
+    HWND(MESSAGE_HWND.load(Ordering::SeqCst) as *mut _)
 }
 
 pub fn post_panel_settled(hwnd: isize, ticket: usize) {

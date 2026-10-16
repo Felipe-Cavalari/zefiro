@@ -19,14 +19,16 @@ use zefiro_platform_windows::volume::VolumeWatcher;
 use zefiro_platform_windows::audio_devices::{self, AudioDevice, Flow, RouteState};
 use zefiro_platform_windows::popup_menu;
 use zefiro_platform_windows::privacy::PrivacyWatcher;
+use zefiro_platform_windows::notifications::NotificationWatcher;
+use zefiro_platform_windows::system_events;
 use zefiro_island::view::Privacy;
 use zefiro_island::menu::{self, AppOutput, MenuCommand, MenuInput};
-use zefiro_island::state::Activity;
+use zefiro_island::state::{Activity, Notice};
 use zefiro_platform_windows::window;
 use zefiro_ui::paint::DisplayList;
 
 use crate::bar_view::ISLAND_CHIP;
-use crate::event_loop::{Loop, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_MEDIA, USER_PRIVACY, USER_VISUALIZER, USER_VOLUME};
+use crate::event_loop::{Loop, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_MEDIA, USER_NOTIFICATION, USER_PRIVACY, USER_VISUALIZER, USER_VOLUME};
 
 /// Destaque quando a capa não tem cor viva (o mesmo padrão da ilha C++).
 const DEFAULT_ACCENT: Rgba = Rgba { r: 0x4C as f32 / 255.0, g: 0xC9 as f32 / 255.0, b: 0xF0 as f32 / 255.0, a: 1.0 };
@@ -38,6 +40,9 @@ pub struct IslandRuntime {
     media: Option<MediaService>,
     volume: Option<VolumeWatcher>,
     privacy: Option<PrivacyWatcher>,
+    notifications: Option<NotificationWatcher>,
+    /// Área de transferência e Caps Lock ligados na janela de mensagens.
+    listening: bool,
     capture: Option<AudioCapture>,
     waveform: Arc<Mutex<Waveform>>,
     expanded: Option<ExpandedView>,
@@ -78,7 +83,57 @@ impl Loop {
         } else if !embedded {
             self.island.privacy = None;
         }
+        if embedded && self.island.notifications.is_none() {
+            match NotificationWatcher::start(Arc::new(|| window::post_user(USER_NOTIFICATION))) {
+                Ok(w) => self.island.notifications = Some(w),
+                Err(e) => tracing::warn!("notificações indisponíveis: {e}"),
+            }
+        } else if !embedded {
+            self.island.notifications = None;
+        }
+        if embedded != self.island.listening {
+            if embedded {
+                if let Err(e) = system_events::listen(window::message_window()) {
+                    tracing::warn!("avisos de área de transferência e Caps Lock indisponíveis: {e}");
+                }
+            } else {
+                system_events::stop(window::message_window());
+            }
+            self.island.listening = embedded;
+        }
         Ok(())
+    }
+
+    pub fn island_notifications(&mut self) -> Result<()> {
+        let Some(w) = &self.island.notifications else { return Ok(()) };
+        // Várias de uma vez: a mais recente fica na pílula.
+        if let Some(n) = w.take().pop() {
+            let now = self.ctx.now();
+            self.ctx.island.state.activity(Activity::Notification(Notice { app: n.app, text: n.text, icon: n.icon }), now);
+            self.island_refresh()?;
+        }
+        Ok(())
+    }
+
+    pub fn island_clipboard(&mut self) -> Result<()> {
+        if !self.ctx.config.island.embedded() {
+            return Ok(());
+        }
+        if let Some(text) = system_events::clipboard_text() {
+            let now = self.ctx.now();
+            self.ctx.island.state.activity(Activity::Clipboard { text }, now);
+            self.island_refresh()?;
+        }
+        Ok(())
+    }
+
+    pub fn island_lock_key(&mut self, caps: bool) -> Result<()> {
+        if !self.ctx.config.island.embedded() {
+            return Ok(());
+        }
+        let now = self.ctx.now();
+        self.ctx.island.state.activity(Activity::Lock { caps, on: system_events::lock_on(caps) }, now);
+        self.island_refresh()
     }
 
     /// Câmera ou microfone mudaram: os pontos aparecem ou somem na pílula.
