@@ -1,6 +1,7 @@
 //! `%APPDATA%\zefiro\config.toml`: leitura com padrões, criação e edição sem perder comentários.
 
 use serde::Deserialize;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 pub const DEFAULT_CONFIG: &str = r#"# Zefiro — configuração da barra. Salvar aplica na hora.
@@ -56,11 +57,80 @@ pub struct Config { pub theme: String, pub bar: BarConfig, pub island: IslandCon
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
-pub struct BarConfig { pub height: BarHeight, pub format: BarFormat, pub sections: Sections }
+pub struct BarConfig {
+    pub height: BarHeight,
+    pub format: BarFormat,
+    pub sections: Sections,
+    pub layout_mode: LayoutMode,
+    pub monitors: BTreeMap<String, MonitorConfig>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LayoutMode { #[default] Shared, PerMonitor }
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct MonitorConfig {
+    #[serde(deserialize_with = "complete_sections")]
+    pub sections: Sections,
+}
+
+fn complete_sections<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Sections, D::Error> {
+    #[derive(Deserialize)]
+    struct Complete { start: Vec<String>, center: Vec<String>, end: Vec<String> }
+    let Complete { start, center, end } = Complete::deserialize(deserializer)?;
+    Ok(Sections { start, center, end })
+}
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
-pub struct Sections { pub start: Vec<String>, pub end: Vec<String> }
+pub struct Sections { pub start: Vec<String>, pub center: Vec<String>, pub end: Vec<String> }
+
+impl Sections {
+    pub fn ids(&self) -> impl Iterator<Item = &str> {
+        self.start.iter().chain(&self.center).chain(&self.end).map(String::as_str)
+    }
+
+    pub fn validate(&self, path: &str) -> Result<(), ConfigError> {
+        let error = |message: String| ConfigError { line: None, message: format!("{path}: {message}") };
+        if self.ids().count() > 64 {
+            return Err(error("o limite é de 64 itens por layout".into()));
+        }
+        let mut ids = HashSet::new();
+        for id in self.ids() {
+            if id.is_empty() || id.len() > 256 {
+                return Err(error("o ID do item deve ter de 1 a 256 bytes UTF-8".into()));
+            }
+            if !ids.insert(id) {
+                return Err(error(format!("item repetido: `{id}`")));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl BarConfig {
+    pub fn sections_for(&self, monitor_id: Option<&str>) -> &Sections {
+        if self.layout_mode == LayoutMode::PerMonitor
+            && let Some(entry) = monitor_id.and_then(|id| self.monitors.get(id)) {
+            return &entry.sections;
+        }
+        &self.sections
+    }
+}
+
+impl Config {
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        self.bar.sections.validate("bar.sections")?;
+        if self.bar.monitors.len() > 128 {
+            return Err(ConfigError { line: None, message: "bar.monitors: o limite é de 128 monitores".into() });
+        }
+        for (id, monitor) in &self.bar.monitors {
+            monitor.sections.validate(&format!("bar.monitors.{id}.sections"))?;
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
@@ -78,13 +148,13 @@ impl Default for Config {
 
 impl Default for BarConfig {
     fn default() -> Self {
-        BarConfig { height: BarHeight::Completa, format: BarFormat::Faixa, sections: Sections::default() }
+        BarConfig { height: BarHeight::Completa, format: BarFormat::Faixa, sections: Sections::default(), layout_mode: LayoutMode::Shared, monitors: BTreeMap::new() }
     }
 }
 
 impl Default for Sections {
     fn default() -> Self {
-        Sections { start: vec!["zefiro".into()], end: vec!["clock".into()] }
+        Sections { start: vec!["zefiro".into()], center: Vec::new(), end: vec!["clock".into()] }
     }
 }
 
@@ -98,10 +168,12 @@ impl Default for IslandConfig {
 pub struct ConfigError { pub line: Option<usize>, pub message: String }
 
 pub fn parse_config(text: &str) -> Result<Config, ConfigError> {
-    toml::from_str(text).map_err(|e| ConfigError {
+    let config: Config = toml::from_str(text).map_err(|e| ConfigError {
         line: e.span().map(|s| text[..s.start.min(text.len())].matches('\n').count() + 1),
         message: e.message().to_string(),
-    })
+    })?;
+    config.validate()?;
+    Ok(config)
 }
 
 /// Lê o arquivo; se não existir, cria com `DEFAULT_CONFIG`.
