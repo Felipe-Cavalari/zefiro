@@ -333,18 +333,28 @@ fn dock_slot_center(i: f32, scale: f32) -> f32 {
 
 /// Ops com opacidade multiplicada e deslocadas na horizontal (grupo da troca de fonte).
 fn faded(ops: Vec<DrawOp>, alpha: f32, dx: f32) -> Vec<DrawOp> {
-    if alpha >= 0.999 && dx.abs() < 0.01 {
+    transformed(ops, alpha, dx, 1.0, Point::default())
+}
+
+/// Ops com opacidade multiplicada, escaladas em torno de `center` e deslocadas `dx` na horizontal
+/// (troca de fonte e carrossel das abas). O texto também escala, então nada "pula" no fim.
+pub fn transformed(ops: Vec<DrawOp>, alpha: f32, dx: f32, scale: f32, center: Point) -> Vec<DrawOp> {
+    if alpha >= 0.999 && dx.abs() < 0.01 && (scale - 1.0).abs() < 1e-4 {
         return ops;
     }
-    let mv = |r: Rect| Rect::new(r.x + dx, r.y, r.w, r.h);
+    let pt = |p: Point| Point { x: center.x + (p.x - center.x) * scale + dx, y: center.y + (p.y - center.y) * scale };
+    let mv = |r: Rect| {
+        let o = pt(Point { x: r.x, y: r.y });
+        Rect::new(o.x, o.y, r.w * scale, r.h * scale)
+    };
     let a = |c: Rgba| c.with_alpha(c.a * alpha);
     ops.into_iter()
         .map(|op| match op {
-            DrawOp::RoundRect { rect, radius, color } => DrawOp::RoundRect { rect: mv(rect), radius, color: a(color) },
-            DrawOp::RoundRectStroke { rect, radius, color, width } => DrawOp::RoundRectStroke { rect: mv(rect), radius, color: a(color), width },
-            DrawOp::Circle { center, radius, color } => DrawOp::Circle { center: Point { x: center.x + dx, y: center.y }, radius, color: a(color) },
-            DrawOp::Text { rect, text, style, color, align } => DrawOp::Text { rect: mv(rect), text, style, color: a(color), align },
-            DrawOp::Image { rect, image, radius, opacity } => DrawOp::Image { rect: mv(rect), image, radius, opacity: opacity * alpha },
+            DrawOp::RoundRect { rect, radius, color } => DrawOp::RoundRect { rect: mv(rect), radius: radius * scale, color: a(color) },
+            DrawOp::RoundRectStroke { rect, radius, color, width } => DrawOp::RoundRectStroke { rect: mv(rect), radius: radius * scale, color: a(color), width: width * scale },
+            DrawOp::Circle { center: c, radius, color } => DrawOp::Circle { center: pt(c), radius: radius * scale, color: a(color) },
+            DrawOp::Text { rect, text, style, color, align } => DrawOp::Text { rect: mv(rect), text, style: TextStyle { size: style.size * scale, ..style }, color: a(color), align },
+            DrawOp::Image { rect, image, radius, opacity } => DrawOp::Image { rect: mv(rect), image, radius: radius * scale, opacity: opacity * alpha },
             DrawOp::PushClip(rect) => DrawOp::PushClip(mv(rect)),
             DrawOp::PopClip => DrawOp::PopClip,
         })

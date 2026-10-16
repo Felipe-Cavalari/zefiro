@@ -6,7 +6,7 @@ use windows::core::Result;
 use zefiro_bar::controller::PanelKind;
 use zefiro_integration_clock::windows::now_local;
 use zefiro_island::accent::cover_accent;
-use zefiro_island::view::{ExpandedAnim, ExpandedView, IslandAction, dock_index, expanded, hit};
+use zefiro_island::view::{ExpandedAnim, ExpandedView, IslandAction, dock_index, expanded, hit, transformed};
 use zefiro_island::waveform::Waveform;
 use zefiro_platform::color::Rgba;
 use zefiro_platform::geometry::Point;
@@ -53,6 +53,9 @@ pub struct IslandRuntime {
     /// Faixa cuja letra foi pedida por último.
     lyrics_for: Option<LyricsRequest>,
     swap: Option<Swap>,
+    carousel: tabs::Carousel,
+    /// Último quadro das animações do painel (passo da mola do carrossel).
+    anim_last: Option<Instant>,
     /// Área de transferência e Caps Lock ligados na janela de mensagens.
     listening: bool,
     capture: Option<AudioCapture>,
@@ -375,51 +378,79 @@ impl Loop {
             self.island.tab = available[0];
         }
         let tab = self.island.tab;
+        let index = available.iter().position(|t| *t == tab).unwrap_or(0);
+        if self.island.carousel.count() != available.len() {
+            self.island.carousel.snap(index, available.len());
+        }
+        self.island.carousel.go(index);
         // O monitor de hardware só amostra com a aba na tela.
         if tab == Tab::Hardware && self.island.hardware.is_none() {
             self.island.hardware = HardwareMonitor::start(Arc::new(|| window::post_user(USER_HARDWARE))).map_err(|e| tracing::warn!("monitor de hardware indisponível: {e}")).ok();
         } else if tab != Tab::Hardware {
             self.island.hardware = None;
         }
+        let size = zefiro_platform::geometry::Size { w: zefiro_island::view::EXPANDED_DESIGN.w * scale, h: zefiro_island::view::EXPANDED_DESIGN.h * scale };
+        let mut list = DisplayList::new(size);
+        self.island.expanded = None;
+        let layers = self.island.carousel.layers();
+        let moving = self.island.carousel.moving();
+        let center = Point { x: size.w / 2.0, y: size.h / 2.0 };
+        for layer in layers {
+            let content = self.island_tab_content(available[layer.index], scale, layer.index == index && !moving);
+            list.ops.extend(transformed(content.ops, layer.alpha, layer.dx * scale, layer.scale, center));
+        }
+        if moving {
+            // Enquanto o carrossel anda, os cliques não valem: as áreas estão fora do lugar.
+            self.island.expanded = None;
+            window::set_timer(TIMER_ISLAND_ANIM, 16);
+        }
+        tabs::tab_dots(&mut list, available.len(), index, scale, &self.ctx.theme.tokens);
+        list
+    }
+
+    /// Conteúdo de uma aba, sem os pontos. `interactive`: guarda as áreas de clique da mídia.
+    fn island_tab_content(&mut self, tab: Tab, scale: f32, interactive: bool) -> DisplayList {
         let anim = self.island_expanded_anim();
         let font_scale = self.ctx.theme.theme.font.scale;
         let tokens = &self.ctx.theme.tokens;
-        let mut list = match (tab, self.ctx.island.media(), &self.ctx.island.weather) {
+        match (tab, self.ctx.island.media(), &self.ctx.island.weather) {
             (Tab::Media, Some(s), _) => {
                 let view = expanded(s, &self.ctx.island.source_slots(), now_unix_ms(), scale, font_scale, tokens, anim);
                 let list = view.list.clone();
-                self.island.expanded = Some(view);
-                window::set_timer(TIMER_ISLAND_TICK, 1000);
+                if interactive {
+                    self.island.expanded = Some(view);
+                    window::set_timer(TIMER_ISLAND_TICK, 1000);
+                }
                 list
             }
-            (Tab::Weather, _, Some(w)) => {
-                self.island.expanded = None;
-                tabs::weather_tab(w, &forecast_names(), scale, font_scale, tokens)
-            }
+            (Tab::Weather, _, Some(w)) => tabs::weather_tab(w, &forecast_names(), scale, font_scale, tokens),
             (Tab::Lyrics, Some(s), _) if self.ctx.island.lyrics.is_some() => {
-                self.island.expanded = None;
                 let position_ms = (s.position_at(now_unix_ms()) * 1000.0) as i64;
-                if self.ctx.island.playing() {
+                if interactive && self.ctx.island.playing() {
                     window::set_timer(TIMER_LYRICS, 66);
                 }
                 tabs::lyrics_tab(self.ctx.island.lyrics.as_ref().expect("conferido no padrão"), position_ms, scale, font_scale, tokens, &self.ctx.text)
             }
             _ => {
-                self.island.expanded = None;
                 let h = self.island.hardware.as_ref().and_then(HardwareMonitor::latest).unwrap_or_default();
                 tabs::hardware_tab(&h, scale, font_scale, tokens)
             }
-        };
-        let index = available.iter().position(|t| *t == tab).unwrap_or(0);
-        tabs::tab_dots(&mut list, available.len(), index, scale, tokens);
-        list
+        }
     }
 
     /// Roda do mouse no painel da ilha: troca de aba.
     pub fn island_wheel(&mut self, delta: i32) -> Result<()> {
-        let next = tabs::step(&self.island_tabs(), self.island.tab, delta);
+        let available = self.island_tabs();
+        let next = tabs::step(&available, self.island.tab, delta);
         if next != self.island.tab {
             self.island.tab = next;
+            if !self.ctx.theme.animations {
+                let index = available.iter().position(|t| *t == next).unwrap_or(0);
+                self.island.carousel.snap(index, available.len());
+            } else if !self.island.carousel.moving() {
+                // Primeiro quadro do movimento: o anterior pode ter sido há muito tempo.
+                self.island.anim_last = Some(Instant::now() - std::time::Duration::from_millis(8));
+            }
             self.redraw_island_panel()?;
         }
         Ok(())
@@ -586,33 +617,40 @@ impl Loop {
     /// Quadro da animação de troca (60 Hz só enquanto ela dura).
     pub fn island_anim_tick(&mut self) -> Result<()> {
         let now = Instant::now();
-        let Some(swap) = &mut self.island.swap else {
+        let open = self.controller.open().is_some_and(|o| o.kind == PanelKind::Island);
+        // Carrossel das abas: passo da mola desde o último quadro.
+        let dt = self.island.anim_last.map_or(1.0 / 120.0, |t| now.duration_since(t).as_secs_f32());
+        self.island.anim_last = Some(now);
+        let was_moving = self.island.carousel.moving();
+        let carousel_moving = was_moving && self.island.carousel.step(dt, self.ctx.theme.theme.animation.speed);
+        // Troca de fonte.
+        if let Some(swap) = &mut self.island.swap {
+            let elapsed = now.duration_since(swap.start).as_secs_f32();
+            match swap.phase {
+                SwapPhase::Out if elapsed >= SWITCH_OUT_S => {
+                    let target = swap.target.clone();
+                    swap.phase = SwapPhase::In;
+                    swap.start = now;
+                    let t = self.ctx.now();
+                    self.ctx.island.pick(&target, t);
+                    self.island_refresh()?;
+                }
+                SwapPhase::In if elapsed >= SWITCH_IN_S && now.duration_since(swap.dock.2).as_secs_f32() >= DOCK_SLIDE_S => self.island.swap = None,
+                _ => {}
+            }
+        }
+        if !open {
+            self.island.swap = None;
+            self.island.anim_last = None;
             window::kill_timer(TIMER_ISLAND_ANIM);
             return Ok(());
-        };
-        let elapsed = now.duration_since(swap.start).as_secs_f32();
-        match swap.phase {
-            SwapPhase::Out if elapsed >= SWITCH_OUT_S => {
-                let target = swap.target.clone();
-                swap.phase = SwapPhase::In;
-                swap.start = now;
-                let t = self.ctx.now();
-                self.ctx.island.pick(&target, t);
-                self.island_refresh()?;
-            }
-            SwapPhase::In if elapsed >= SWITCH_IN_S && now.duration_since(swap.dock.2).as_secs_f32() >= DOCK_SLIDE_S => {
-                self.island.swap = None;
-                window::kill_timer(TIMER_ISLAND_ANIM);
-            }
-            _ => {}
         }
-        if self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) {
-            self.redraw_island_panel()
-        } else {
-            self.island.swap = None;
+        if !carousel_moving && self.island.swap.is_none() {
+            // Último quadro, já parado: devolve as áreas de clique.
             window::kill_timer(TIMER_ISLAND_ANIM);
-            Ok(())
+            self.island.anim_last = None;
         }
+        self.redraw_island_panel()
     }
 
     fn island_expanded_anim(&self) -> ExpandedAnim {
@@ -634,7 +672,9 @@ impl Loop {
 
     /// Ao abrir, o painel começa na primeira aba (a mídia, quando há).
     pub fn island_panel_opening(&mut self) {
-        self.island.tab = self.island_tabs()[0];
+        let available = self.island_tabs();
+        self.island.tab = available[0];
+        self.island.carousel.snap(0, available.len());
     }
 
     /// Ao fechar: o painel da ilha não guarda áreas de clique de um desenho antigo.
