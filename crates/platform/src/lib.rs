@@ -2,4 +2,5 @@
 
 pub mod color;
 pub mod geometry;
+pub mod monitor;
 pub mod text;
