@@ -279,9 +279,17 @@ pub fn media_pill(s: &MediaSession, peek: bool, pill_h: f32, font_scale: f32, to
 #[derive(Debug, Clone, PartialEq)]
 pub enum IslandAction { Previous, PlayPause, Next, Seek(f64), Source(String) }
 
-/// Painel expandido da mídia: desenho e áreas de clique (coordenadas do painel).
+/// Painel expandido da mídia em camadas, para o compositor animar sem redesenhar:
+/// `list` = parte fixa (controles, fundo da barra de fontes); `indicator` = o aro da fonte atual, que
+/// desliza entre as posições; `dock` = ícones das fontes, por cima do aro; `group` = capa, textos e
+/// linha do tempo (o que troca com a fonte).
+/// Coordenadas do painel.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExpandedView { pub list: DisplayList, pub hits: Vec<(Rect, IslandAction)> }
+pub struct ExpandedView { pub list: DisplayList, pub group: DisplayList, pub indicator: Option<Indicator>, pub dock: DisplayList, pub hits: Vec<(Rect, IslandAction)> }
+
+/// Indicador da barra de fontes: desenho pequeno e onde fica (canto superior esquerdo) em cada posição.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Indicator { pub list: DisplayList, pub slot_x: Vec<f32>, pub y: f32, pub active: usize }
 
 fn time_text(s: f64) -> String {
     let s = s.max(0.0).round() as u64;
@@ -292,21 +300,7 @@ fn time_text(s: f64) -> String {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceSlot { pub id: String, pub name: String, pub icon: Option<Image>, pub playing: bool }
 
-/// Estado das animações do painel num instante (o app avança o tempo e redesenha).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ExpandedAnim {
-    /// Posição do indicador da barra de fontes, em posições (fracionária durante o deslize de 0,30 s).
-    pub dock_pos: Option<f32>,
-    /// Troca de fonte: opacidade e deslocamento horizontal (px de conteúdo) do bloco capa + textos + tempo.
-    pub swap_alpha: f32,
-    pub swap_dx: f32,
-}
 
-impl Default for ExpandedAnim {
-    fn default() -> Self {
-        ExpandedAnim { dock_pos: None, swap_alpha: 1.0, swap_dx: 0.0 }
-    }
-}
 
 /// Medidas da barra de fontes (§6.2): x = 20, altura 30, posições de 26 com 2 de espaço e 2 de borda.
 pub const DOCK_LEFT: f32 = 20.0;
@@ -331,38 +325,9 @@ fn dock_slot_center(i: f32, scale: f32) -> f32 {
     (DOCK_LEFT + DOCK_PAD + i * (DOCK_SLOT + DOCK_GAP) + DOCK_SLOT / 2.0) * scale
 }
 
-/// Ops com opacidade multiplicada e deslocadas na horizontal (grupo da troca de fonte).
-fn faded(ops: Vec<DrawOp>, alpha: f32, dx: f32) -> Vec<DrawOp> {
-    transformed(ops, alpha, dx, 1.0, Point::default())
-}
-
-/// Ops com opacidade multiplicada, escaladas em torno de `center` e deslocadas `dx` na horizontal
-/// (troca de fonte e carrossel das abas). O texto também escala, então nada "pula" no fim.
-pub fn transformed(ops: Vec<DrawOp>, alpha: f32, dx: f32, scale: f32, center: Point) -> Vec<DrawOp> {
-    if alpha >= 0.999 && dx.abs() < 0.01 && (scale - 1.0).abs() < 1e-4 {
-        return ops;
-    }
-    let pt = |p: Point| Point { x: center.x + (p.x - center.x) * scale + dx, y: center.y + (p.y - center.y) * scale };
-    let mv = |r: Rect| {
-        let o = pt(Point { x: r.x, y: r.y });
-        Rect::new(o.x, o.y, r.w * scale, r.h * scale)
-    };
-    let a = |c: Rgba| c.with_alpha(c.a * alpha);
-    ops.into_iter()
-        .map(|op| match op {
-            DrawOp::RoundRect { rect, radius, color } => DrawOp::RoundRect { rect: mv(rect), radius: radius * scale, color: a(color) },
-            DrawOp::RoundRectStroke { rect, radius, color, width } => DrawOp::RoundRectStroke { rect: mv(rect), radius: radius * scale, color: a(color), width: width * scale },
-            DrawOp::Circle { center: c, radius, color } => DrawOp::Circle { center: pt(c), radius: radius * scale, color: a(color) },
-            DrawOp::Text { rect, text, style, color, align } => DrawOp::Text { rect: mv(rect), text, style: TextStyle { size: style.size * scale, ..style }, color: a(color), align },
-            DrawOp::Image { rect, image, radius, opacity } => DrawOp::Image { rect: mv(rect), image, radius: radius * scale, opacity: opacity * alpha },
-            DrawOp::PushClip(rect) => DrawOp::PushClip(mv(rect)),
-            DrawOp::PopClip => DrawOp::PopClip,
-        })
-        .collect()
-}
 
 /// `sources`: todas as sessões, na ordem estável do SMTC.
-pub fn expanded(s: &MediaSession, sources: &[SourceSlot], now_ms: i64, scale: f32, font_scale: f32, tokens: &Tokens, anim: ExpandedAnim) -> ExpandedView {
+pub fn expanded(s: &MediaSession, sources: &[SourceSlot], now_ms: i64, scale: f32, font_scale: f32, tokens: &Tokens) -> ExpandedView {
     let px = |v: f32| v * scale;
     let fs = |v: f32| v * scale * font_scale;
     let size = Size { w: px(EXPANDED_DESIGN.w), h: px(EXPANDED_DESIGN.h) };
@@ -414,12 +379,11 @@ pub fn expanded(s: &MediaSession, sources: &[SourceSlot], now_ms: i64, scale: f3
         let label = style(fs(11.0), FontWeight::Regular);
         group.push(DrawOp::Text { rect: Rect::new(px(20.0), px(104.0), px(46.0), px(20.0)), text: time_text(pos), style: label, color: tokens.text_secondary, align: Align::Trailing });
         group.push(DrawOp::Text { rect: Rect::new(size.w - px(66.0), px(104.0), px(46.0), px(20.0)), text: time_text(s.duration_s), style: label, color: tokens.text_secondary, align: Align::Leading });
-        if s.can_seek && anim.swap_alpha >= 0.999 {
+        if s.can_seek {
             // Clique ±14 px na vertical; a fração é calculada por quem trata o clique.
             hits.push((Rect::new(track.x, px(100.0), track.w, px(28.0)), IslandAction::Seek(-1.0)));
         }
     }
-    list.ops.extend(faded(group.ops, anim.swap_alpha, px(anim.swap_dx)));
 
     // ── Controles em y = 148, espaçamento 64; raios 16 e 22 (+6 de folga no clique) ──
     let cy = px(148.0);
@@ -445,22 +409,27 @@ pub fn expanded(s: &MediaSession, sources: &[SourceSlot], now_ms: i64, scale: f3
     // ── Barra de fontes (2 ou mais), parada durante a troca ──────────────────
     let active = sources.iter().position(|x| x.id == s.id).unwrap_or(0);
     let slots = dock_slots(sources.len(), active);
+    // Ícones por cima do indicador (camada própria), como a ilha C++ desenha.
+    let mut dock = DisplayList::new(size);
+    let mut indicator = None;
     if !slots.is_empty() {
         let n = slots.len() as f32;
         let card = Rect::new(px(DOCK_LEFT), cy - px(DOCK_HEIGHT / 2.0), px(DOCK_PAD * 2.0 + n * DOCK_SLOT + (n - 1.0) * DOCK_GAP), px(DOCK_HEIGHT));
         list.push(DrawOp::RoundRect { rect: card, radius: card.h / 2.0, color: tokens.raised });
-        let target = slots.iter().position(|x| *x == Some(active)).unwrap_or(0) as f32;
-        let pos = anim.dock_pos.unwrap_or(target).clamp(0.0, n - 1.0);
-        // Indicador: círculo cheio com aro de destaque, deslizando entre as posições.
-        let ic = dock_slot_center(pos, scale);
+        let target = slots.iter().position(|x| *x == Some(active)).unwrap_or(0);
+        // Indicador: círculo cheio com aro de destaque; o compositor o desliza entre as posições.
         let ir = px(DOCK_SLOT / 2.0);
-        list.push(DrawOp::Circle { center: Point { x: ic, y: cy }, radius: ir, color: tokens.raised_strong });
-        list.push(DrawOp::RoundRectStroke { rect: Rect::new(ic - ir, cy - ir, 2.0 * ir, 2.0 * ir), radius: ir, color: tokens.accent, width: px(1.5) });
+        let side = (2.0 * ir + 2.0).ceil();
+        let mut ind = DisplayList::new(Size { w: side, h: side });
+        ind.push(DrawOp::Circle { center: Point { x: side / 2.0, y: side / 2.0 }, radius: ir, color: tokens.raised_strong });
+        ind.push(DrawOp::RoundRectStroke { rect: Rect::new(side / 2.0 - ir, side / 2.0 - ir, 2.0 * ir, 2.0 * ir), radius: ir, color: tokens.accent, width: px(1.5) });
+        let slot_x = (0..slots.len()).map(|i| (dock_slot_center(i as f32, scale) - side / 2.0).round()).collect();
+        indicator = Some(Indicator { list: ind, slot_x, y: (cy - side / 2.0).round(), active: target });
         for (i, slot) in slots.iter().enumerate() {
             let c = Point { x: dock_slot_center(i as f32, scale), y: cy };
             let slot_rect = Rect::new(c.x - px(13.0), cy - px(13.0), px(26.0), px(26.0));
-            let lit = (1.0 - (pos - i as f32).abs()).clamp(0.0, 1.0);
-            let opacity = 0.5 + 0.5 * lit;
+            let opacity = if i == target { 1.0 } else { 0.5 };
+            let list = &mut dock;
             match slot.and_then(|k| sources.get(k)) {
                 Some(src) => {
                     match &src.icon {
@@ -489,7 +458,7 @@ pub fn expanded(s: &MediaSession, sources: &[SourceSlot], now_ms: i64, scale: f3
             }
         }
     }
-    ExpandedView { list, hits }
+    ExpandedView { list, group, indicator, dock, hits }
 }
 
 /// Posição (índice) da fonte `id` na barra de fontes, para animar o indicador.
@@ -567,7 +536,7 @@ mod tests {
     #[test]
     fn expanded_controls_and_timeline_are_clickable() {
         let s = session("a", Playback::Playing);
-        let v = expanded(&s, &[], 1_000, 1.0, 1.0, &tokens(), ExpandedAnim::default());
+        let v = expanded(&s, &[], 1_000, 1.0, 1.0, &tokens());
         assert_eq!(v.list.size, Size { w: 380.0, h: 184.0 });
         assert_eq!(hit(&v, &s, Point { x: 190.0, y: 148.0 }), Some(IslandAction::PlayPause));
         assert_eq!(hit(&v, &s, Point { x: 126.0, y: 148.0 }), Some(IslandAction::Previous));
@@ -582,20 +551,21 @@ mod tests {
     }
 
     #[test]
-    fn dock_uses_app_icons_indicator_and_playing_dot() {
+    fn dock_layers_icons_over_a_sliding_indicator() {
         let s = session("a", Playback::Playing);
         let icon = Image::new(1, 1, vec![0, 0, 255, 255]).unwrap();
         let sources = [SourceSlot { icon: Some(icon.clone()), playing: true, ..slot("a", "Spotify") }, slot("b", "Brave")];
-        let v = expanded(&s, &sources, 0, 1.0, 1.0, &tokens(), ExpandedAnim::default());
+        let v = expanded(&s, &sources, 0, 1.0, 1.0, &tokens());
         // Ícone do app no lugar da letra, opaco na atual; a outra fonte sem ícone mostra a inicial a 50 %.
-        assert!(v.list.ops.iter().any(|o| matches!(o, DrawOp::Image { image, opacity, .. } if *image == icon && (*opacity - 1.0).abs() < 1e-6)));
-        assert!(v.list.ops.iter().any(|o| matches!(o, DrawOp::Text { text, color, .. } if text == "B" && (color.a - tokens().text.a * 0.5).abs() < 1e-3)));
-        // Ponto verde de quem está tocando e o aro de destaque do indicador na posição 0.
-        assert!(v.list.ops.iter().any(|o| matches!(o, DrawOp::Circle { center, .. } if (center.x - 44.5).abs() < 0.01 && (center.y - 157.5).abs() < 0.01)));
-        assert!(v.list.ops.iter().any(|o| matches!(o, DrawOp::RoundRectStroke { rect, color, .. } if (rect.x - 22.0).abs() < 0.01 && *color == tokens().accent)));
-        // Indicador no meio do deslize.
-        let mid = expanded(&s, &sources, 0, 1.0, 1.0, &tokens(), ExpandedAnim { dock_pos: Some(0.5), ..Default::default() });
-        assert!(mid.list.ops.iter().any(|o| matches!(o, DrawOp::RoundRectStroke { rect, .. } if (rect.x - 36.0).abs() < 0.01)));
+        assert!(v.dock.ops.iter().any(|o| matches!(o, DrawOp::Image { image, opacity, .. } if *image == icon && (*opacity - 1.0).abs() < 1e-6)));
+        assert!(v.dock.ops.iter().any(|o| matches!(o, DrawOp::Text { text, color, .. } if text == "B" && (color.a - tokens().text.a * 0.5).abs() < 1e-3)));
+        // Ponto verde de quem está tocando.
+        assert!(v.dock.ops.iter().any(|o| matches!(o, DrawOp::Circle { center, .. } if (center.x - 44.5).abs() < 0.01 && (center.y - 157.5).abs() < 0.01)));
+        // Indicador em camada própria: posições 0 e 1 a 28 px uma da outra, na atual.
+        let ind = v.indicator.unwrap();
+        assert_eq!((ind.slot_x.clone(), ind.y, ind.active), (vec![21.0, 49.0], 134.0, 0));
+        assert!(ind.list.ops.iter().any(|o| matches!(o, DrawOp::RoundRectStroke { color, .. } if *color == tokens().accent)));
+        assert!(!v.list.ops.iter().any(|o| matches!(o, DrawOp::RoundRectStroke { .. })), "o aro não fica na camada fixa");
     }
 
     #[test]
@@ -606,30 +576,28 @@ mod tests {
         assert!(dock_slots(1, 0).is_empty());
         let sources: Vec<_> = ["a", "b", "c", "d"].iter().map(|x| slot(x, x)).collect();
         let s = session("a", Playback::Playing);
-        let v = expanded(&s, &sources, 0, 1.0, 1.0, &tokens(), ExpandedAnim::default());
-        assert!(v.list.ops.iter().any(|o| matches!(o, DrawOp::Text { text, .. } if text == "+2")));
+        let v = expanded(&s, &sources, 0, 1.0, 1.0, &tokens());
+        assert!(v.dock.ops.iter().any(|o| matches!(o, DrawOp::Text { text, .. } if text == "+2")));
         assert_eq!(dock_index(&sources, "a", "d"), Some(2), "fora da barra: vai para o +N");
         assert_eq!(dock_index(&sources, "a", "b"), Some(1));
     }
 
     #[test]
-    fn swap_fades_and_shifts_cover_texts_and_timeline_but_not_controls() {
+    fn cover_texts_and_timeline_are_the_layer_that_switches_with_the_source() {
         let s = session("a", Playback::Paused);
-        let v = expanded(&s, &[], 0, 1.0, 1.0, &tokens(), ExpandedAnim { swap_alpha: 0.5, swap_dx: -7.0, ..Default::default() });
-        let title = v.list.ops.iter().find_map(|o| if let DrawOp::Text { text, rect, color, .. } = o { (text == "a música").then_some((*rect, *color)) } else { None }).unwrap();
-        assert_eq!(title.0.x, 102.0 - 7.0);
-        assert!((title.1.a - tokens().text.a * 0.5).abs() < 1e-3);
-        assert!(v.list.ops.iter().any(|o| matches!(o, DrawOp::Text { text, .. } if text == "Pausado no a")));
-        assert!(!v.hits.iter().any(|(_, a)| matches!(a, IslandAction::Seek(_))), "sem busca no meio da troca");
-        assert!(v.hits.iter().any(|(_, a)| *a == IslandAction::PlayPause), "controles ficam");
+        let v = expanded(&s, &[], 0, 1.0, 1.0, &tokens());
+        let in_group = |t: &str| v.group.ops.iter().any(|o| matches!(o, DrawOp::Text { text, .. } if text == t));
+        assert!(in_group("a música") && in_group("Pausado no a") && in_group("0:10"));
+        assert!(!v.list.ops.iter().any(|o| matches!(o, DrawOp::Text { text, .. } if text == "a música")));
+        assert!(v.hits.iter().any(|(_, a)| *a == IslandAction::PlayPause), "controles na camada fixa");
     }
 
     #[test]
     fn sources_bar_appears_with_two_or_more_sessions() {
         let s = session("a", Playback::Playing);
-        let one = expanded(&s, &[slot("a", "Spotify")], 0, 1.0, 1.0, &tokens(), ExpandedAnim::default());
+        let one = expanded(&s, &[slot("a", "Spotify")], 0, 1.0, 1.0, &tokens());
         assert!(!one.hits.iter().any(|(_, a)| matches!(a, IslandAction::Source(_))));
-        let two = expanded(&s, &[slot("a", "Spotify"), slot("b", "Brave")], 0, 1.0, 1.0, &tokens(), ExpandedAnim::default());
+        let two = expanded(&s, &[slot("a", "Spotify"), slot("b", "Brave")], 0, 1.0, 1.0, &tokens());
         assert_eq!(hit(&two, &s, Point { x: 61.0, y: 148.0 }), Some(IslandAction::Source("b".into())));
     }
 
@@ -637,7 +605,7 @@ mod tests {
     fn disabled_buttons_are_not_clickable_and_time_formats() {
         let mut s = session("a", Playback::Paused);
         s.can_next = false;
-        let v = expanded(&s, &[], 0, 1.0, 1.0, &tokens(), ExpandedAnim::default());
+        let v = expanded(&s, &[], 0, 1.0, 1.0, &tokens());
         assert_eq!(hit(&v, &s, Point { x: 254.0, y: 148.0 }), None);
         assert_eq!(time_text(65.4), "1:05");
         assert_eq!(time_text(3725.0), "1:02:05");

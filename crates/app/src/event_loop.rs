@@ -185,6 +185,11 @@ impl Loop {
                     let chip = self.panel_anchor(p.monitor, &p.chip);
                     let band_bottom = self.bars[p.monitor].band_bottom();
                     self.panels[p.monitor].open(&self.ctx, chip, band_bottom, &list)?;
+                    if p.kind == PanelKind::Island {
+                        self.island_sync_tabs(p.monitor, false)?;
+                    } else {
+                        self.panels[p.monitor].clear_tabs()?;
+                    }
                     self.bars[p.monitor].set_active(&self.ctx, Some(&p.chip))?;
                     self.bars[p.monitor].fade_chip(&self.ctx, &p.chip, false)?;
                 }
@@ -230,7 +235,11 @@ impl Loop {
         let list = self.panel_list(open.kind, scale);
         let chip = self.panel_anchor(open.monitor, &open.chip);
         let band_bottom = self.bars[open.monitor].band_bottom();
-        self.panels[open.monitor].resize(&self.ctx, chip, band_bottom, &list)
+        self.panels[open.monitor].resize(&self.ctx, chip, band_bottom, &list)?;
+        if open.kind == PanelKind::Island {
+            self.island_sync_tabs(open.monitor, false)?;
+        }
+        Ok(())
     }
 
     fn panel_anchor(&self, monitor: usize, id: &str) -> Rect {

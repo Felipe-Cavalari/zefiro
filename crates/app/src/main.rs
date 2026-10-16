@@ -10,6 +10,7 @@ mod island_loop;
 mod island_view;
 mod panel_view;
 mod robustness;
+mod tab_strip;
 mod theme_state;
 
 use std::time::Instant;

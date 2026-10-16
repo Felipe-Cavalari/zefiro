@@ -38,83 +38,14 @@ pub fn step(tabs: &[Tab], current: Tab, delta: i32) -> Tab {
 }
 
 /// Carrossel das abas, como a ilha C++ (`DrawTabTransition`): uma posição contínua persegue a aba
-/// escolhida com a mola 250/31 (assenta em ~0,29 s, sem balanço). Cada aba é desenhada pela
-/// distância até essa posição (desliza 34 px, encolhe até 96,5 % e some), então a troca pode ser
-/// interrompida e invertida no meio sem pular.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct Carousel { pos: f32, vel: f32, target: f32, count: usize }
-
+/// escolhida com a mola 250/31 (assenta em ~0,29 s, sem balanço), e cada aba é desenhada pela
+/// distância `d` até essa posição: desliza `d × 34` px (na horizontal, porque os pontos ficam lado a
+/// lado), encolhe até 96,5 % e some com `(1 − smoothstep(|d|))^1,4`. Quem anima é o compositor.
 pub const TAB_STIFFNESS: f32 = 250.0;
 pub const TAB_DAMPING: f32 = 31.0;
-/// Distância entre abas vizinhas (px de conteúdo); na horizontal, porque os pontos ficam lado a lado.
 pub const TAB_TRAVEL: f32 = 34.0;
-const TAB_MIN_SCALE: f32 = 0.965;
-const TAB_FADE_POWER: f32 = 1.4;
-
-fn smoothstep(x: f32) -> f32 {
-    let x = x.clamp(0.0, 1.0);
-    x * x * (3.0 - 2.0 * x)
-}
-
-/// Uma aba visível num quadro: índice, opacidade, deslocamento (px de conteúdo) e escala.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TabLayer { pub index: usize, pub alpha: f32, pub dx: f32, pub scale: f32 }
-
-impl Carousel {
-    /// Sem animação: painel abrindo ou o número de abas mudou.
-    pub fn snap(&mut self, index: usize, count: usize) {
-        *self = Carousel { pos: index as f32, vel: 0.0, target: index as f32, count };
-    }
-
-    pub fn count(&self) -> usize {
-        self.count
-    }
-
-    pub fn go(&mut self, index: usize) {
-        self.target = index.min(self.count.saturating_sub(1)) as f32;
-    }
-
-    pub fn moving(&self) -> bool {
-        self.pos != self.target || self.vel != 0.0
-    }
-
-    /// Avança `dt` segundos (`speed` = velocidade das animações do tema). Devolve se ainda se move.
-    pub fn step(&mut self, dt: f32, speed: f32) -> bool {
-        let max = self.count.saturating_sub(1) as f32;
-        let mut remaining = dt.clamp(0.0, 0.05) * speed;
-        while remaining > 0.0 && self.moving() {
-            let h = remaining.min(0.004);
-            self.vel += (-TAB_STIFFNESS * (self.pos - self.target) - TAB_DAMPING * self.vel) * h;
-            self.pos += self.vel * h;
-            // A primeira e a última aba são batentes: sem passar delas nem tremer.
-            if self.pos < 0.0 {
-                self.pos = 0.0;
-                self.vel = self.vel.max(0.0);
-            } else if self.pos > max {
-                self.pos = max;
-                self.vel = self.vel.min(0.0);
-            }
-            remaining -= h;
-        }
-        if (self.pos - self.target).abs() < 0.0008 && self.vel.abs() < 0.02 {
-            self.pos = self.target;
-            self.vel = 0.0;
-        }
-        self.moving()
-    }
-
-    /// Abas a desenhar agora (parado: só a atual, inteira).
-    pub fn layers(&self) -> Vec<TabLayer> {
-        (0..self.count)
-            .filter_map(|index| {
-                let d = index as f32 - self.pos;
-                let eased = smoothstep(d.abs());
-                let alpha = (1.0 - eased).powf(TAB_FADE_POWER);
-                (alpha > 0.004).then_some(TabLayer { index, alpha, dx: d * TAB_TRAVEL, scale: 1.0 - (1.0 - TAB_MIN_SCALE) * eased })
-            })
-            .collect()
-    }
-}
+pub const TAB_MIN_SCALE: f32 = 0.965;
+pub const TAB_FADE_POWER: f32 = 1.4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Hardware {
@@ -355,59 +286,3 @@ mod lyrics_tests {
     }
 }
 
-#[cfg(test)]
-mod carousel_tests {
-    use super::*;
-
-    #[test]
-    fn settles_in_about_three_tenths_of_a_second_without_overshoot() {
-        let mut c = Carousel::default();
-        c.snap(0, 3);
-        assert_eq!(c.layers(), vec![TabLayer { index: 0, alpha: 1.0, dx: 0.0, scale: 1.0 }]);
-        c.go(1);
-        let mut t = 0.0;
-        let mut max_pos: f32 = 0.0;
-        while c.step(1.0 / 120.0, 1.0) && t < 2.0 {
-            t += 1.0 / 120.0;
-            max_pos = max_pos.max(c.layers().iter().map(|l| l.index as f32 - l.dx / TAB_TRAVEL).fold(0.0, f32::max));
-        }
-        assert!((0.2..0.6).contains(&t), "{t}");
-        assert!(max_pos <= 1.01, "sem passar da aba: {max_pos}");
-        assert_eq!(c.layers().len(), 1);
-    }
-
-    #[test]
-    fn mid_move_draws_both_tabs_sliding_shrinking_and_fading() {
-        let mut c = Carousel::default();
-        c.snap(0, 2);
-        c.go(1);
-        // Avança até cerca da metade do caminho.
-        while c.layers().iter().all(|l| l.index == 0 || l.alpha < 0.2) {
-            c.step(0.004, 1.0);
-        }
-        let layers = c.layers();
-        assert_eq!(layers.len(), 2);
-        let (old, new) = (layers[0], layers[1]);
-        assert!(old.dx < 0.0 && new.dx > 0.0, "a antiga sai pela esquerda, a nova entra pela direita");
-        assert!(old.scale < 1.0 && new.scale < 1.0 && old.alpha < 1.0);
-    }
-
-    #[test]
-    fn edges_are_hard_stops_and_double_speed_is_faster() {
-        let mut c = Carousel::default();
-        c.snap(1, 2);
-        c.go(5);
-        assert!(!c.moving(), "já está na última");
-        let time = |speed: f32| {
-            let mut c = Carousel::default();
-            c.snap(0, 2);
-            c.go(1);
-            let mut t = 0.0;
-            while c.step(1.0 / 240.0, speed) {
-                t += 1.0 / 240.0;
-            }
-            t
-        };
-        assert!(time(2.0) < time(1.0) * 0.6);
-    }
-}

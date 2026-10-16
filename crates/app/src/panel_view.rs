@@ -41,6 +41,8 @@ pub struct PanelView {
     /// A janela está na tela (aberta, ou ainda animando o fechamento).
     visible: bool,
     lifecycle: PanelLifecycle,
+    /// Abas da ilha no compositor (só no painel da ilha).
+    strip: Option<crate::tab_strip::TabStrip>,
 }
 
 impl PanelView {
@@ -56,7 +58,7 @@ impl PanelView {
         // Dentro da raiz da forma: a "cutucada" move forma e conteúdo juntos.
         shape.root().Children()?.InsertAtTop(&layer)?;
         shape.clip_child(&ctx.comp, &layer.cast::<Visual>()?)?;
-        Ok(PanelView { hwnd, monitor: monitor.clone(), scale, _target: target, root, shape, layer, content, surface, window: Rect::default(), chip: Rect::default(), band_bottom: 0.0, panel: Rect::default(), previous_foreground: 0, open: false, visible: false, lifecycle: PanelLifecycle::default() })
+        Ok(PanelView { hwnd, monitor: monitor.clone(), scale, _target: target, root, shape, layer, content, surface, window: Rect::default(), chip: Rect::default(), band_bottom: 0.0, panel: Rect::default(), previous_foreground: 0, open: false, visible: false, lifecycle: PanelLifecycle::default(), strip: None })
     }
 
     pub fn hwnd(&self) -> HWND {
@@ -188,7 +190,33 @@ impl PanelView {
         Ok(())
     }
 
+    /// Abas da ilha no compositor, sobre o conteúdo normal (que fica com os pontos das abas).
+    pub fn set_tabs(&mut self, ctx: &AppCtx, tabs: &[Vec<crate::tab_strip::LayerSpec>], index: usize, animate: bool) -> Result<()> {
+        if self.strip.is_none() {
+            self.strip = Some(crate::tab_strip::TabStrip::new(ctx, &self.layer)?);
+        }
+        let p = self.local(self.panel);
+        let size = zefiro_platform::geometry::Size { w: self.panel.w, h: self.panel.h };
+        if let Some(strip) = &mut self.strip {
+            strip.sync(ctx, zefiro_platform::geometry::Point { x: p.x, y: p.y }, size, tabs, index, animate)?;
+        }
+        Ok(())
+    }
+
+    /// Outro painel abriu (menu, calendário): as abas da ilha saem.
+    pub fn clear_tabs(&mut self) -> Result<()> {
+        if let Some(strip) = self.strip.take() {
+            self.layer.Children()?.Remove(strip.root())?;
+        }
+        Ok(())
+    }
+
+    pub fn tab_layer(&self, tab: usize, layer: usize) -> Option<Visual> {
+        self.strip.as_ref()?.layer(tab, layer)
+    }
+
     fn release_surface(&mut self, ctx: &AppCtx) -> Result<()> {
+        self.clear_tabs()?;
         let surface = ctx.comp.surface(1.0, 1.0)?;
         self.content.SetBrush(&ctx.comp.compositor.CreateSurfaceBrushWithSurface(&surface)?)?;
         self.surface = surface;
