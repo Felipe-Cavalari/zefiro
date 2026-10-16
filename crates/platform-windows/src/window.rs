@@ -7,7 +7,8 @@ use std::sync::atomic::{AtomicIsize, Ordering};
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, DeleteObject, RGN_OR, ScreenToClient, SetWindowRgn};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Input::KeyboardAndMouse::{SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
+use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetCapture, GetKeyState, ReleaseCapture, SetCapture, SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, Result, w};
 use zefiro_platform::geometry::{Point, Rect};
@@ -22,6 +23,12 @@ pub enum WindowKind { Bar, Panel, Message }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WinEvent {
+    LeftDown { hwnd: isize, x: f32, y: f32 },
+    CaptureLost { hwnd: isize },
+    Character { hwnd: isize, code: u32 },
+    ControlChanged { hwnd: isize, control: isize },
+    IslandGeometryChanged,
+    PanelSettled { hwnd: isize, ticket: usize },
     MouseMove { hwnd: isize, x: f32, y: f32 },
     MouseLeave { hwnd: isize },
     LeftUp { hwnd: isize, x: f32, y: f32 },
@@ -48,6 +55,7 @@ const MESSAGE: PCWSTR = w!("ZefiroMessage");
 const INPUT: PCWSTR = w!("ZefiroInput");
 static TASKBAR_CREATED: OnceLock<u32> = OnceLock::new();
 static MESSAGE_HWND: AtomicIsize = AtomicIsize::new(0);
+static ISLAND_GEOMETRY: OnceLock<u32> = OnceLock::new();
 
 thread_local! {
     static EVENTS: RefCell<Vec<WinEvent>> = const { RefCell::new(Vec::new()) };
@@ -68,7 +76,7 @@ fn owner_of(hwnd: HWND) -> Option<isize> {
     OWNERS.with(|m| m.borrow().get(&(hwnd.0 as isize)).copied())
 }
 
-fn push(e: WinEvent) {
+pub(crate) fn push(e: WinEvent) {
     EVENTS.with(|q| q.borrow_mut().push(e));
 }
 
@@ -108,6 +116,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
     let input = owner_of(hwnd);
     let h = input.unwrap_or(hwnd.0 as isize);
     match msg {
+        WM_COMMAND if ((wp.0 >> 16) & 0xffff) as u32 == EN_CHANGE => push(WinEvent::ControlChanged { hwnd: h, control: lp.0 }),
+        WM_CTLCOLOREDIT => if let Some(result) = crate::text_input::control_color(wp, lp) { return result; },
         // A região da janela de entrada já recorta o clique.
         WM_NCHITTEST if input.is_some() => return LRESULT(HTCLIENT as isize),
         WM_NCHITTEST => {
@@ -136,6 +146,13 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             let (x, y) = xy(lp);
             push(WinEvent::LeftUp { hwnd: h, x, y });
         }
+        WM_LBUTTONDOWN => {
+            let (x, y) = xy(lp);
+            push(WinEvent::LeftDown { hwnd: h, x, y });
+        }
+        WM_CAPTURECHANGED | WM_CANCELMODE => push(WinEvent::CaptureLost { hwnd: h }),
+        WM_CHAR => push(WinEvent::Character { hwnd: h, code: wp.0 as u32 }),
+        m if m == WM_APP + 2 => push(WinEvent::PanelSettled { hwnd: h, ticket: wp.0 }),
         WM_RBUTTONUP => {
             let (x, y) = xy(lp);
             push(WinEvent::RightUp { hwnd: h, x, y });
@@ -162,6 +179,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         m if m == WM_APPBAR => push(WinEvent::AppBar { hwnd: h, notification: wp.0 as u32, param: lp.0 }),
         m if (WM_USER_BASE..WM_USER_BASE + 0x100).contains(&m) => push(WinEvent::User { code: m - WM_USER_BASE }),
         m if Some(&m) == TASKBAR_CREATED.get() => push(WinEvent::TaskbarCreated),
+        m if Some(&m) == ISLAND_GEOMETRY.get() => push(WinEvent::IslandGeometryChanged),
         // SAFETY: mensagens não tratadas vão para o Windows.
         _ => return unsafe { DefWindowProcW(hwnd, msg, wp, lp) },
     }
@@ -189,6 +207,7 @@ pub fn register_classes() -> Result<()> {
                 }
             }
             let _ = TASKBAR_CREATED.set(RegisterWindowMessageW(w!("TaskbarCreated")));
+            let _ = ISLAND_GEOMETRY.set(RegisterWindowMessageW(w!("Zefiro.IslandGeometry")));
         }
         Ok(())
     });
@@ -239,6 +258,11 @@ pub fn post_user(code: u32) {
     }
 }
 
+pub fn post_panel_settled(hwnd: isize, ticket: usize) {
+    // SAFETY: mensagem sem ponteiros para janela conhecida; se já morreu, PostMessage falha.
+    let _ = unsafe { PostMessageW(Some(HWND(hwnd as *mut _)), WM_APP + 2, WPARAM(ticket), LPARAM(0)) };
+}
+
 pub fn set_bounds(hwnd: HWND, r: Rect, show: bool) {
     let flags = SWP_NOACTIVATE | if show { SWP_SHOWWINDOW } else { SET_WINDOW_POS_FLAGS(0) };
     // Desenho primeiro, entrada depois: a de entrada fica por cima, com os mesmos limites.
@@ -266,6 +290,8 @@ pub fn hide(hwnd: HWND) {
 
 /// Destrói a janela e a de entrada dela (barras e painéis recriados quando os monitores mudam).
 pub fn destroy(hwnd: HWND) {
+    crate::bar_context::remove_zone(hwnd);
+    if has_capture(hwnd) { release_capture(); }
     let h = hwnd.0 as isize;
     if let Some(input) = INPUTS.with(|m| m.borrow_mut().remove(&h)) {
         OWNERS.with(|m| m.borrow_mut().remove(&input));
@@ -279,12 +305,54 @@ pub fn destroy(hwnd: HWND) {
     let _ = unsafe { DestroyWindow(hwnd) };
 }
 
+pub fn capture(hwnd: HWND) {
+    let input = input_window(hwnd).unwrap_or(hwnd);
+    // SAFETY: captura limitada ao gesto da janela de entrada viva.
+    unsafe { SetCapture(input) };
+}
+
+pub fn has_capture(hwnd: HWND) -> bool {
+    // SAFETY: consulta sem alterar estado.
+    (unsafe { GetCapture() }) == input_window(hwnd).unwrap_or(hwnd)
+}
+
+pub fn release_capture() {
+    // SAFETY: libera somente a captura da thread chamadora.
+    let _ = unsafe { ReleaseCapture() };
+}
+
+pub fn shift_pressed() -> bool {
+    // SAFETY: consulta estado de uma tecla virtual válida.
+    (unsafe { GetKeyState(0x10) }) < 0
+}
+
+/// Limite visual publicado pelo fork; não usa a largura da janela transparente.
+pub fn island_reservation() -> Option<f32> {
+    // SAFETY: apenas procura a janela conhecida e lê uma propriedade inteira, sem desreferenciar.
+    unsafe {
+        let hwnd = FindWindowW(w!("Windhawk.DynamicIslandForWindows"), PCWSTR::null()).ok()?;
+        let value = GetPropW(hwnd, w!("Zefiro.ReservedWidth")).0 as usize;
+        (value > 0 && value <= 65536).then_some(value as f32)
+    }
+}
+
 /// Dá o foco do teclado (o clique que abriu o painel dá ao processo o direito de fazer isso).
 pub fn focus(hwnd: HWND) {
     let hwnd = input_window(hwnd).unwrap_or(hwnd);
     // SAFETY: hwnd válido.
     unsafe {
-        let _ = SetForegroundWindow(hwnd);
+        if !SetForegroundWindow(hwnd).as_bool() {
+            // O botão direito observado na faixa vazia não pertence à janela de entrada.
+            // Sincroniza as filas só durante esta ativação pedida pelo usuário e sempre desfaz.
+            let foreground_thread = GetWindowThreadProcessId(GetForegroundWindow(), None);
+            let current_thread = GetCurrentThreadId();
+            if foreground_thread != 0 && foreground_thread != current_thread && AttachThreadInput(current_thread, foreground_thread, true).as_bool() {
+                let _ = BringWindowToTop(hwnd);
+                let _ = SetForegroundWindow(hwnd);
+                let _ = SetFocus(Some(hwnd));
+                let _ = AttachThreadInput(current_thread, foreground_thread, false);
+            }
+        }
         let _ = SetFocus(Some(hwnd));
     }
 }
