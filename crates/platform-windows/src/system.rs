@@ -60,9 +60,11 @@ pub fn enable_per_monitor_dpi() -> bool {
     }
 }
 
-/// Uma janela comum (não a área de trabalho nem a barra de tarefas) cobrindo o monitor inteiro.
+/// Uma janela comum (não a área de trabalho, a barra de tarefas nem o Zefiro) cobrindo o monitor inteiro.
 pub fn is_fullscreen(class: &str, window: Rect, monitor: Rect) -> bool {
-    if matches!(class, "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
+    // A área de trabalho e a barra de tarefas cobrem o monitor sem ser app; as janelas do próprio
+    // Zefiro também (o painel aberto tem uma janela de entrada do tamanho do monitor, com o foco).
+    if matches!(class, "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd" | "ZefiroInput" | "ZefiroPanel" | "ZefiroBar") {
         return false;
     }
     window.x <= monitor.x && window.y <= monitor.y && window.right() >= monitor.right() && window.bottom() >= monitor.bottom()
@@ -120,6 +122,10 @@ mod tests {
         assert!(!is_fullscreen("Chrome_WidgetWin_1", Rect::new(1920.0, 0.0, 1920.0, 1080.0), mon), "outro monitor");
         for shell in ["Progman", "WorkerW", "Shell_TrayWnd"] {
             assert!(!is_fullscreen(shell, mon, mon), "{shell} é a área de trabalho, não um app");
+        }
+        // O painel aberto tem uma janela de entrada do tamanho do monitor com o foco: não é tela cheia.
+        for ours in ["ZefiroInput", "ZefiroPanel", "ZefiroBar"] {
+            assert!(!is_fullscreen(ours, mon, mon), "{ours} é do próprio Zefiro");
         }
     }
 

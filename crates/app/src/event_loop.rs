@@ -91,6 +91,7 @@ impl Loop {
         for e in fx {
             match e {
                 PanelEffect::Close { monitor } => {
+                    tracing::info!(monitor, "painel fechando");
                     self.panels[monitor].close(&self.ctx, !opens_another)?;
                     for b in &mut self.bars {
                         b.set_active(&self.ctx, None)?;
@@ -103,6 +104,7 @@ impl Loop {
                     self.menu = None;
                 }
                 PanelEffect::Open(p) => {
+                    tracing::info!(monitor = p.monitor, chip = %p.chip, "painel abrindo");
                     if p.kind == PanelKind::Calendar {
                         let today = now_local().date;
                         self.shown_month = (today.year, today.month);
