@@ -882,6 +882,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "zefiro-island"
+version = "0.1.0"
+dependencies = [
+ "zefiro-platform",
+ "zefiro-resources",
+ "zefiro-ui",
+]
+
+[[package]]
 name = "zefiro-island-host"
 version = "0.1.0"
 dependencies = [
@@ -904,6 +913,7 @@ dependencies = [
  "windows",
  "windows-core",
  "windows-numerics",
+ "zefiro-island",
  "zefiro-platform",
  "zefiro-resources",
  "zefiro-ui",

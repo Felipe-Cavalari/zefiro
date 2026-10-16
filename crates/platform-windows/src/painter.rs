@@ -3,8 +3,9 @@
 use windows::Win32::Graphics::Direct2D::Common::*;
 use windows::Win32::Graphics::Direct2D::*;
 use windows::Win32::Graphics::DirectWrite::DWRITE_MEASURING_MODE_NATURAL;
+use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::core::Result;
-use windows_numerics::Vector2;
+use windows_numerics::{Matrix3x2, Vector2};
 use zefiro_platform::color::Rgba;
 use zefiro_platform::geometry::Rect;
 use zefiro_ui::paint::{DisplayList, DrawOp};
@@ -43,6 +44,22 @@ pub fn paint(dc: &ID2D1DeviceContext, list: &DisplayList, text: &DWriteText) -> 
                     let format = text.format(style, *align)?;
                     let utf16: Vec<u16> = s.encode_utf16().collect();
                     dc.DrawText(&utf16, &format, &d2d_rect(*rect), &b, D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
+                }
+                DrawOp::Image { rect, image, radius, opacity } => {
+                    let props = D2D1_BITMAP_PROPERTIES1 {
+                        pixelFormat: D2D1_PIXEL_FORMAT { format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED },
+                        dpiX: 96.0,
+                        dpiY: 96.0,
+                        ..Default::default()
+                    };
+                    let size = D2D_SIZE_U { width: image.width(), height: image.height() };
+                    let bitmap = dc.CreateBitmap(size, Some(image.bgra().as_ptr() as *const _), image.width() * 4, &props)?;
+                    let sx = rect.w / image.width() as f32;
+                    let sy = rect.h / image.height() as f32;
+                    let brush_props = D2D1_BRUSH_PROPERTIES { opacity: *opacity, transform: Matrix3x2 { M11: sx, M12: 0.0, M21: 0.0, M22: sy, M31: rect.x, M32: rect.y } };
+                    let bitmap_props = D2D1_BITMAP_BRUSH_PROPERTIES1 { extendModeX: D2D1_EXTEND_MODE_CLAMP, extendModeY: D2D1_EXTEND_MODE_CLAMP, interpolationMode: D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC };
+                    let brush = dc.CreateBitmapBrush(&bitmap, Some(&bitmap_props), Some(&brush_props))?;
+                    dc.FillRoundedRectangle(&D2D1_ROUNDED_RECT { rect: d2d_rect(*rect), radiusX: *radius, radiusY: *radius }, &brush);
                 }
             }
         }

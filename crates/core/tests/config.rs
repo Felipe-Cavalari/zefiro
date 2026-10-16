@@ -10,8 +10,19 @@ fn default_config_parses_to_the_spec_defaults() {
     assert_eq!(c.bar.sections.end, vec!["clock".to_string()]);
     assert!(c.island.enabled);
     assert_eq!(c.island.exe, "");
+    assert_eq!(c.island.engine, IslandEngine::Externa);
+    assert!(c.island.external() && !c.island.embedded());
     assert_eq!(c.clock.format, "");
     assert!(!c.clock.seconds);
+}
+
+#[test]
+fn embedded_island_engine_is_opt_in_and_needs_the_island_enabled() {
+    let c = parse_config("[island]\nengine = \"embutida\"\n").unwrap();
+    assert!(c.island.embedded() && !c.island.external());
+    let off = parse_config("[island]\nenabled = false\nengine = \"embutida\"\n").unwrap();
+    assert!(!off.island.embedded() && !off.island.external());
+    assert!(parse_config("[island]\nengine = \"outra\"\n").is_err());
 }
 
 #[test]

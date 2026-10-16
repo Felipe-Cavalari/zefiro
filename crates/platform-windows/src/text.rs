@@ -28,13 +28,11 @@ impl DWriteText {
 
     fn face(&self, family: Family) -> String {
         let base = self.family.borrow().clone();
-        if base == "Segoe UI Variable" {
-            match family {
-                Family::Text => "Segoe UI Variable Text".into(),
-                Family::Display => "Segoe UI Variable Display".into(),
-            }
-        } else {
-            base
+        match family {
+            Family::Icons => "Segoe Fluent Icons".into(),
+            Family::Text if base == "Segoe UI Variable" => "Segoe UI Variable Text".into(),
+            Family::Display if base == "Segoe UI Variable" => "Segoe UI Variable Display".into(),
+            _ => base,
         }
     }
 
@@ -59,6 +57,9 @@ impl DWriteText {
             })?;
             f.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
             f.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
+            // Texto maior que a caixa (título de música) termina em reticências.
+            let sign = self.dwrite.CreateEllipsisTrimmingSign(&f)?;
+            f.SetTrimming(&DWRITE_TRIMMING { granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER, delimiter: 0, delimiterCount: 0 }, &sign)?;
             f
         };
         self.cache.borrow_mut().insert(key, f.clone());

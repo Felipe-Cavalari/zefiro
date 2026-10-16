@@ -1,0 +1,14 @@
+[package]
+name = "zefiro-island"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+zefiro-platform.workspace = true
+zefiro-resources.workspace = true
+zefiro-ui.workspace = true

@@ -2,6 +2,7 @@
 
 use zefiro_platform::color::Rgba;
 use zefiro_platform::geometry::{Point, Rect, Size};
+use zefiro_platform::image::Image;
 use zefiro_platform::text::{Align, TextStyle};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -10,6 +11,8 @@ pub enum DrawOp {
     RoundRectStroke { rect: Rect, radius: f32, color: Rgba, width: f32 },
     Circle { center: Point, radius: f32, color: Rgba },
     Text { rect: Rect, text: String, style: TextStyle, color: Rgba, align: Align },
+    /// Imagem esticada para `rect`, recortada num retângulo arredondado.
+    Image { rect: Rect, image: Image, radius: f32, opacity: f32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -35,6 +38,7 @@ impl DisplayList {
                 DrawOp::RoundRectStroke { rect, radius, color, width } => DrawOp::RoundRectStroke { rect: mv(rect), radius, color, width },
                 DrawOp::Circle { center, radius, color } => DrawOp::Circle { center: Point { x: center.x + dx, y: center.y + dy }, radius, color },
                 DrawOp::Text { rect, text, style, color, align } => DrawOp::Text { rect: mv(rect), text, style, color, align },
+                DrawOp::Image { rect, image, radius, opacity } => DrawOp::Image { rect: mv(rect), image, radius, opacity },
             })
             .collect();
         DisplayList { size: self.size, ops }
