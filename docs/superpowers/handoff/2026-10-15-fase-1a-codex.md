@@ -154,16 +154,26 @@ O modo de medição está no código: `ZEFIRO_CYCLES=N` abre e fecha o calendár
 - O usuário **aprovou a galeria como está**; a aprovação está registrada no ADR-0007.
 - Também ficam com ele os testes reais de Explorer reiniciado, Win+P e efeitos de animação desligados.
 
-### Revisão final (em andamento: um revisor independente foi disparado no commit `f0b8091`)
+### Revisão final: feita; correções commitadas
 
-Depois da Task 25, faça uma revisão da branch inteira (`git merge-base main HEAD`..HEAD) contra a spec. Confira com atenção cada item da seção **Review Focus** do plano.
+O revisor independente não achou nenhum Critical, achou 5 Important e uma lista de Minor. O veredito foi "With fixes".
 
-Classifique os achados pelo efeito para quem usa a barra:
+Corrigido e commitado em `20457e7`, `17f30c1` e `8a61c2a`:
 
-- **Critical e Important:** corrija numa única passada. Cada correção precisa de um teste que falhe antes e passe depois, e a suíte inteira precisa ficar verde.
-- **Minor:** vai para o ledger como `Final: minor (deferred): ...`.
+1. **DPI por monitor:** ligado com `system::enable_per_monitor_dpi()`, chamado no início do `main`.
+2. **Alt+F4 / `WM_CLOSE`:** no painel, só fecha o painel; na barra, encerra pelo `shutdown()`, que tira a AppBar antes de parar a ilha.
+3. **Tela cheia:** com `ABN_FULLSCREENAPP`, a barra do monitor coberto some e depois volta.
+4. **Clique na faixa vazia:** fecha o painel aberto (`ClickOutside`).
+5. **Ilha:** fica click-through fora da pílula em qualquer estado (`// ZEFIRO:` no fork).
 
-No fim, entregue ao usuário duas listas: "Rulings I made", com todas as linhas `Ruling:` do ledger, e "Deferred minors".
+**Falta verificar na tela, com a barra reiniciada:**
+
+- Alt+F4 com o calendário aberto;
+- a barra some com uma janela em tela cheia;
+- o clique na faixa fecha o painel;
+- a sonda `WindowFromPoint(1000,40)` cai na janela de baixo, e não na ilha.
+
+Os Minor adiados estão no ledger, nas linhas `Final: minor (deferred)`.
 
 ## Scripts do fluxo
 
