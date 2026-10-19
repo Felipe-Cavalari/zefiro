@@ -72,6 +72,19 @@ fn island_content(ctx: &AppCtx, pill_h: f32) -> PillContent {
     }
 }
 
+/// Ícone dos chips da 1e enquanto o dado não chega.
+fn pending_glyph(id: &str) -> &'static str {
+    match id {
+        "claude" => "\u{E945}",
+        "codex" => "\u{E943}",
+        "vscode" => "\u{E8B7}",
+        "apps" => "\u{E71D}",
+        "notifications" => "\u{EA8F}",
+        "dnd" => "\u{E708}",
+        _ => "\u{E7E8}",
+    }
+}
+
 /// `device`: monitor desta barra (o chip de brilho mostra o brilho dele).
 fn chip_content(ctx: &AppCtx, id: &str, device: &str, height: BarHeight, chip_h: f32, font_px: f32, scale: f32) -> ChipContent {
     let t = &ctx.theme.tokens;
@@ -96,6 +109,9 @@ fn chip_content(ctx: &AppCtx, id: &str, device: &str, height: BarHeight, chip_h:
             let p = ctx.devices.brightness_of(device);
             let text = p.map(|p| format!("{p}%")).unwrap_or_default();
             level_chip(Level { glyph: ICON_BRIGHTNESS, text: &text, dim: p.is_none() }, chip_h, font_px, scale, t, &ctx.text)
+        }
+        "claude" | "codex" | "vscode" | "apps" | "notifications" | "dnd" | "power" => {
+            level_chip(Level { glyph: pending_glyph(id), text: "", dim: true }, chip_h, font_px, scale, t, &ctx.text)
         }
         _ => clock_chip("⋯", chip_h, font_px, t, &ctx.text),
     }

@@ -39,6 +39,7 @@ pub enum WinEvent {
     MouseLeave { hwnd: isize },
     LeftUp { hwnd: isize, x: f32, y: f32 },
     RightUp { hwnd: isize, x: f32, y: f32 },
+    MiddleUp { hwnd: isize, x: f32, y: f32 },
     Wheel { hwnd: isize, delta: i32 },
     Key { hwnd: isize, vk: u32 },
     FocusLost { hwnd: isize },
@@ -179,6 +180,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         WM_RBUTTONUP => {
             let (x, y) = xy(lp);
             push(WinEvent::RightUp { hwnd: h, x, y });
+        }
+        WM_MBUTTONUP => {
+            let (x, y) = xy(lp);
+            push(WinEvent::MiddleUp { hwnd: h, x, y });
         }
         WM_MOUSEWHEEL => push(WinEvent::Wheel { hwnd: h, delta: ((wp.0 >> 16) & 0xFFFF) as i16 as i32 }),
         WM_KEYDOWN => push(WinEvent::Key { hwnd: h, vk: wp.0 as u32 }),

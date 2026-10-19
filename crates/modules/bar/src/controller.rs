@@ -1,7 +1,7 @@
 //! Quem abre e quem fecha: um painel por vez.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PanelKind { Menu, Calendar, Overflow, Island, Audio, Mic, Brightness }
+pub enum PanelKind { Menu, Calendar, Overflow, Island, Audio, Mic, Brightness, Claude, Codex, VsCode, Power }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenPanel { pub monitor: usize, pub chip: String, pub kind: PanelKind }
@@ -21,8 +21,17 @@ pub fn panel_kind_for(chip: &str) -> Option<PanelKind> {
         "audio" => Some(PanelKind::Audio),
         "mic" => Some(PanelKind::Mic),
         "brightness" => Some(PanelKind::Brightness),
+        "claude" => Some(PanelKind::Claude),
+        "codex" => Some(PanelKind::Codex),
+        "vscode" => Some(PanelKind::VsCode),
+        "power" => Some(PanelKind::Power),
         _ => None,
     }
+}
+
+/// Chips que agem direto no clique, sem painel (Apps, Notificações, Não perturbe).
+pub fn action_chip(chip: &str) -> bool {
+    matches!(chip, "apps" | "notifications" | "dnd")
 }
 
 #[derive(Debug, Default)]
@@ -68,6 +77,20 @@ mod tests {
 
     fn click(monitor: usize, chip: &str) -> PanelInput {
         PanelInput::ChipClick { monitor, chip: chip.into() }
+    }
+
+    #[test]
+    fn new_chips_map_to_panels_or_actions() {
+        assert_eq!(panel_kind_for("claude"), Some(PanelKind::Claude));
+        assert_eq!(panel_kind_for("codex"), Some(PanelKind::Codex));
+        assert_eq!(panel_kind_for("vscode"), Some(PanelKind::VsCode));
+        assert_eq!(panel_kind_for("power"), Some(PanelKind::Power));
+        for id in ["apps", "notifications", "dnd"] {
+            assert_eq!(panel_kind_for(id), None);
+            assert!(action_chip(id));
+        }
+        assert_eq!(panel_kind_for("clock"), Some(PanelKind::Calendar));
+        assert!(!action_chip("clock"));
     }
 
     #[test]

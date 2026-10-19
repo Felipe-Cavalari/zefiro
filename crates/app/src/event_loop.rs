@@ -77,6 +77,9 @@ const VK_UP: u32 = 0x26;
 const VK_RIGHT: u32 = 0x27;
 const VK_DOWN: u32 = 0x28;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseButton { Left, Middle, Right }
+
 pub struct Loop {
     pub ctx: AppCtx,
     pub bars: Vec<BarView>,
@@ -147,6 +150,7 @@ impl Loop {
             }
             PanelKind::Island => self.island_panel_list(scale),
             PanelKind::Audio | PanelKind::Mic | PanelKind::Brightness => self.devices_panel_list(kind, scale),
+            PanelKind::Claude | PanelKind::Codex | PanelKind::VsCode | PanelKind::Power => DisplayList::new(Size { w: 320.0 * scale, h: 80.0 * scale }),
         }
     }
 
@@ -165,7 +169,7 @@ impl Loop {
                         b.set_active(&self.ctx, None)?;
                     }
                     for b in &self.bars {
-                        for id in ["zefiro", "clock", "audio", "mic", "brightness", crate::bar_view::ISLAND_CHIP] {
+                        for id in zefiro_bar::catalog::ITEMS.iter().map(|i| i.id).chain([crate::bar_view::ISLAND_CHIP]) {
                             b.fade_chip(&self.ctx, id, true)?;
                         }
                     }
@@ -256,6 +260,13 @@ impl Loop {
             let rect = bar.monitor().rect;
             Rect::new(rect.x + 8.0 * bar.scale(), rect.y, 32.0 * bar.scale(), bar.band_bottom() - rect.y)
         })
+    }
+
+    /// Clique num chip que age direto (Apps, Notificações, Não perturbe), botão do meio em qualquer
+    /// chip e botão direito no Apps. Cada widget trata o seu caso.
+    pub fn chip_action(&mut self, bar: usize, chip: &str, button: MouseButton, _x: f32, _y: f32) -> Result<()> {
+        tracing::info!(bar, chip, ?button, "ação de chip");
+        Ok(())
     }
 
     pub fn apply_bars(&mut self, animate: bool) -> Result<()> {
@@ -366,6 +377,10 @@ impl Loop {
             }
             WinEvent::LeftUp { hwnd, x, y } => {
                 if let Some(i) = self.bar_index(hwnd) {
+                    if let Some(chip) = self.bars[i].chip_at(x, y).filter(|c| zefiro_bar::controller::action_chip(c)) {
+                        self.close_open_panel()?;
+                        return self.chip_action(i, &chip, MouseButton::Left, x, y).map(|_| true);
+                    }
                     let input = match self.bars[i].chip_at(x, y) {
                         Some(chip) => PanelInput::ChipClick { monitor: i, chip },
                         // Faixa vazia: é "clicar fora" do painel aberto (a barra não rouba o foco,
@@ -393,12 +408,22 @@ impl Loop {
                     }
                 }
             }
+            WinEvent::MiddleUp { hwnd, x, y } => {
+                if let Some(i) = self.bar_index(hwnd)
+                    && let Some(chip) = self.bars[i].chip_at(x, y)
+                {
+                    self.chip_action(i, &chip, MouseButton::Middle, x, y)?;
+                }
+            }
             WinEvent::RightUp { hwnd, x, y } => {
                 tracing::debug!(hwnd, x, y, "botão direito");
                 if let Some(i) = self.bar_index(hwnd) {
                     if self.bars[i].chip_at(x, y).as_deref() == Some(crate::bar_view::ISLAND_CHIP) {
                         self.close_open_panel()?;
                         return self.island_menu(i).map(|_| true);
+                    }
+                    if self.bars[i].chip_at(x, y).as_deref() == Some("apps") {
+                        return self.chip_action(i, "apps", MouseButton::Right, x, y).map(|_| true);
                     }
                     let already = self.controller.open().is_some_and(|o| o.chip == "zefiro" && o.monitor == i);
                     if !already {
