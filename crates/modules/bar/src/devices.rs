@@ -24,12 +24,11 @@ pub fn mic_icon(muted: bool) -> &'static str {
     if muted { ICON_MIC_OFF } else { ICON_MIC }
 }
 
-/// Chip de som (`mic = false`) ou microfone a partir de `(porcentagem, mudo)`: ícone, texto e se
-/// fica apagado. O mudo só apaga o chip; o % continua, para a largura não mudar.
-pub fn volume_level(state: Option<(u32, bool)>, mic: bool) -> (&'static str, String, bool) {
+/// Chip de som (`mic = false`) ou microfone a partir de `(porcentagem, mudo)`: ícone e se fica
+/// apagado. A % fica só no painel, que abre ao clicar (pedido do usuário).
+pub fn volume_level(state: Option<(u32, bool)>, mic: bool) -> (&'static str, bool) {
     let (percent, muted) = state.unwrap_or((0, true));
-    let glyph = if mic { mic_icon(muted) } else { speaker_icon(percent, muted) };
-    (glyph, state.map(|_| format!("{percent}%")).unwrap_or_default(), muted)
+    (if mic { mic_icon(muted) } else { speaker_icon(percent, muted) }, muted)
 }
 
 fn icon_style(size: f32) -> TextStyle {
@@ -211,11 +210,13 @@ mod tests {
     }
 
     #[test]
-    fn muted_volume_keeps_its_percent() {
-        assert_eq!(volume_level(Some((94, true)), true), (ICON_MIC_OFF, "94%".to_string(), true));
-        assert_eq!(volume_level(Some((94, false)), true), (ICON_MIC, "94%".to_string(), false));
-        assert_eq!(volume_level(Some((68, true)), false), (ICON_MUTE, "68%".to_string(), true));
-        assert_eq!(volume_level(None, false), (ICON_MUTE, String::new(), true));
+    fn volume_chip_is_only_the_icon_and_the_percent_lives_in_the_panel() {
+        // A % fica no painel (ao clicar); na barra, só o ícone, que muda com o nível e o mudo.
+        assert_eq!(volume_level(Some((94, true)), true), (ICON_MIC_OFF, true));
+        assert_eq!(volume_level(Some((94, false)), true), (ICON_MIC, false));
+        assert_eq!(volume_level(Some((68, true)), false), (ICON_MUTE, true));
+        assert_eq!(volume_level(Some((68, false)), false), (speaker_icon(68, false), false));
+        assert_eq!(volume_level(None, false), (ICON_MUTE, true));
     }
 
     #[test]

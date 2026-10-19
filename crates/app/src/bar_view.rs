@@ -94,13 +94,13 @@ fn chip_content(ctx: &AppCtx, id: &str, device: &str, height: BarHeight, chip_h:
         }
         "audio" | "mic" => {
             let v = if id == "mic" { ctx.devices.mic } else { ctx.devices.speaker };
-            let (glyph, text, dim) = volume_level(v.map(|v| ((v.level * 100.0).round() as u32, v.muted)), id == "mic");
-            level_chip(Level { glyph, text: &text, dim }, chip_h, font_px, scale, t, &ctx.text)
+            let (glyph, dim) = volume_level(v.map(|v| ((v.level * 100.0).round() as u32, v.muted)), id == "mic");
+            level_chip(Level { glyph, text: "", dim }, chip_h, font_px, scale, t, &ctx.text)
         }
+        // Só o ícone: o nível aparece no painel, ao clicar.
         "brightness" => {
             let p = ctx.devices.brightness_of(device);
-            let text = p.map(|p| format!("{p}%")).unwrap_or_default();
-            level_chip(Level { glyph: ICON_BRIGHTNESS, text: &text, dim: p.is_none() }, chip_h, font_px, scale, t, &ctx.text)
+            level_chip(Level { glyph: ICON_BRIGHTNESS, text: "", dim: p.is_none() }, chip_h, font_px, scale, t, &ctx.text)
         }
         "codex" => zefiro_bar::usage::usage_chip(crate::usage_loop::CODEX_GLYPH, ctx.usage.codex.as_ref().and_then(|(_, u)| crate::usage_loop::codex_percent(u)), chip_h, font_px, scale, t, &ctx.text),
         "claude" => zefiro_bar::usage::usage_chip(crate::usage_loop::CLAUDE_GLYPH, ctx.usage.claude_chip(), chip_h, font_px, scale, t, &ctx.text),
