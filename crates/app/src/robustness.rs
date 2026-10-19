@@ -61,6 +61,9 @@ pub fn handle(l: &mut Loop, e: WinEvent) -> Result<bool> {
                     l.close_open_panel()?;
                 }
                 if fullscreen && l.editor.as_ref().is_some_and(|editor| editor.monitor == i) { l.suspend_editor(true)?; }
+                if fullscreen && !l.bars[i].is_hidden() {
+                    tracing::info!(monitor = i, janela = %system::foreground_description(), "tela cheia: barra sai da frente");
+                }
                 l.bars[i].set_hidden(fullscreen);
             }
             l.island_visibility_changed();

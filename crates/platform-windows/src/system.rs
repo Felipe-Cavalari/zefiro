@@ -76,6 +76,31 @@ pub fn is_fullscreen(class: &str, window: Rect, monitor: Rect) -> bool {
     window.x <= monitor.x && window.y <= monitor.y && window.right() >= monitor.right() && window.bottom() >= monitor.bottom()
 }
 
+/// Classe e programa da janela em primeiro plano ("Chrome_WidgetWin_1 · brave.exe"), para o log.
+pub fn foreground_description() -> String {
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW};
+    // SAFETY: buffers locais; o handle do processo é fechado logo depois da leitura.
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        let mut buf = [0u16; 128];
+        let n = GetClassNameW(hwnd, &mut buf);
+        let class = String::from_utf16_lossy(&buf[..n.max(0) as usize]);
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        let mut exe = String::new();
+        if let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+            let mut path = [0u16; 260];
+            let mut len = path.len() as u32;
+            if QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, windows::core::PWSTR(path.as_mut_ptr()), &mut len).is_ok() {
+                let full = String::from_utf16_lossy(&path[..len as usize]);
+                exe = full.rsplit('\\').next().unwrap_or_default().to_string();
+            }
+            let _ = windows::Win32::Foundation::CloseHandle(process);
+        }
+        format!("{class} · {exe}")
+    }
+}
+
 /// A janela em primeiro plano está em tela cheia em `monitor`?
 pub fn foreground_fullscreen_on(monitor: Rect) -> bool {
     use windows::Win32::Foundation::RECT;
