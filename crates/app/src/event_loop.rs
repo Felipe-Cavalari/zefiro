@@ -288,6 +288,7 @@ impl Loop {
         tracing::info!(bar, chip, ?button, "ação de chip");
         match chip {
             "notifications" => self.notifications_action(button),
+            "dnd" => self.dnd_action(button),
             _ => Ok(()),
         }
     }
@@ -591,7 +592,7 @@ impl Loop {
                     self.apply_bars(true)?;
                 }
             }
-            WinEvent::User { code: USER_DND } => self.island_dnd_changed()?,
+            WinEvent::User { code: USER_DND } => self.dnd_changed()?,
             WinEvent::User { code: USER_BLUETOOTH } => self.island_bluetooth()?,
             WinEvent::User { code: USER_WEATHER } => self.island_weather()?,
             WinEvent::User { code: USER_HARDWARE } => self.island_hardware()?,

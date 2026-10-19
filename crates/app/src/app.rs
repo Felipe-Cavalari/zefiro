@@ -43,6 +43,8 @@ impl AppCtx {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SystemState {
     pub notifications: usize,
+    /// Não perturbe ativo.
+    pub dnd: bool,
 }
 
 /// O que os chips de uso mostram: o último uso do Codex lido e quando o arquivo mudou.

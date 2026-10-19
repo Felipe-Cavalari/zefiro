@@ -44,6 +44,12 @@ pub fn open_folder(path: &Path) {
     unsafe { ShellExecuteW(None, w!("open"), &HSTRING::from(path.as_os_str()), None, None, SW_SHOWNORMAL) };
 }
 
+/// Abre uma URI do Windows (`ms-settings:…`) com o app associado.
+pub fn open_uri(uri: &str) {
+    // SAFETY: strings válidas durante a chamada.
+    unsafe { ShellExecuteW(None, w!("open"), &HSTRING::from(uri), None, None, SW_SHOWNORMAL) };
+}
+
 pub fn exe_dir() -> PathBuf {
     std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_else(|| PathBuf::from("."))
 }

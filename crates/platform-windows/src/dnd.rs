@@ -39,6 +39,12 @@ fn ntdll(name: windows::core::PCSTR) -> Option<unsafe extern "system" fn() -> is
     unsafe { GetProcAddress(GetModuleHandleW(w!("ntdll.dll")).ok()?, name) }
 }
 
+/// Abre as configurações de notificação do Windows (onde fica o Não perturbe). Alternar direto não
+/// foi validado (S5 incompleto; o usuário preferiu não alternar o estado dele na fase 1e).
+pub fn open_settings() {
+    crate::system::open_uri("ms-settings:notifications");
+}
+
 pub fn active() -> bool {
     ACTIVE.load(Ordering::SeqCst)
 }

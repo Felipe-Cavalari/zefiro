@@ -3,10 +3,11 @@
 
 use std::sync::Arc;
 use windows::core::Result;
+use zefiro_platform_windows::dnd;
 use zefiro_platform_windows::notifications::{NotificationWatcher, open_notification_center};
 use zefiro_platform_windows::window;
 
-use crate::event_loop::{Loop, MouseButton, USER_NOTIFICATION};
+use crate::event_loop::{Loop, MouseButton, USER_DND, USER_NOTIFICATION};
 
 #[derive(Default)]
 pub struct SystemRuntime {
@@ -21,8 +22,11 @@ impl Loop {
         bar.sections.ids().any(|i| i == id) || bar.monitors.values().any(|m| m.sections.ids().any(|i| i == id))
     }
 
-    /// Liga ou desliga o serviço de notificações: a ilha embutida ou o chip precisam dele.
+    /// Liga ou desliga o serviço de notificações: a ilha embutida ou o chip precisam dele. O Não
+    /// perturbe é lido sempre (uma inscrição WNF por processo, sem consulta).
     pub fn system_services(&mut self) {
+        dnd::watch(Arc::new(|| window::post_user(USER_DND)));
+        self.ctx.system.dnd = dnd::active();
         let wanted = self.ctx.config.island.embedded() || self.layout_has("notifications");
         match (wanted, self.system.notifications.is_some()) {
             (true, false) => {
@@ -33,6 +37,24 @@ impl Loop {
             (false, true) => self.system.notifications = None,
             _ => {}
         }
+    }
+
+    /// O Não perturbe mudou (por aqui ou pelo Windows).
+    pub fn dnd_changed(&mut self) -> Result<()> {
+        let active = dnd::active();
+        if active != self.ctx.system.dnd {
+            self.ctx.system.dnd = active;
+            self.apply_bars(true)?;
+        }
+        self.island_dnd_changed()
+    }
+
+    /// Clique na lua: abre as configurações de notificação.
+    pub fn dnd_action(&mut self, button: MouseButton) -> Result<()> {
+        if button == MouseButton::Left {
+            dnd::open_settings();
+        }
+        Ok(())
     }
 
     pub fn notification_count(&self) -> usize {

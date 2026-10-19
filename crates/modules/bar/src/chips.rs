@@ -62,6 +62,17 @@ pub fn bell_chip(count: usize, chip_h: f32, font_px: f32, scale: f32, tokens: &T
     ChipContent { content_w: w, list: DisplayList { size: Size { w, h: chip_h }, ops } }
 }
 
+pub const MOON: &str = "\u{E708}";
+
+/// Não perturbe: lua na cor de destaque quando ativo, apagada quando não.
+pub fn dnd_chip(active: bool, chip_h: f32, font_px: f32, tokens: &Tokens) -> ChipContent {
+    let w = (font_px * 1.25).ceil();
+    let style = TextStyle { size: font_px * 1.05, weight: FontWeight::Regular, family: Family::Icons };
+    let color = if active { tokens.accent } else { tokens.text_secondary };
+    let ops = vec![DrawOp::Text { rect: Rect::new(0.0, 0.0, w, chip_h), text: MOON.into(), style, color, align: Align::Center }];
+    ChipContent { content_w: w, list: DisplayList { size: Size { w, h: chip_h }, ops } }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,5 +137,15 @@ mod tests {
         let t = tokens();
         let w = |n| bell_chip(n, 28.0, 12.0, 1.0, &t, &FixedWidthMeasurer).content_w;
         assert_eq!(w(1), w(250));
+    }
+
+    #[test]
+    fn dnd_chip_lights_up_when_active() {
+        let t = tokens();
+        let on = dnd_chip(true, 28.0, 12.0, &t);
+        let off = dnd_chip(false, 28.0, 12.0, &t);
+        assert!(matches!(&on.list.ops[0], DrawOp::Text { color, .. } if color == &t.accent));
+        assert!(matches!(&off.list.ops[0], DrawOp::Text { color, .. } if color == &t.text_secondary));
+        assert_eq!(on.content_w, off.content_w);
     }
 }
