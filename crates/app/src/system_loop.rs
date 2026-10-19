@@ -43,10 +43,19 @@ impl Loop {
         self.island_dnd_changed()
     }
 
-    /// Clique na lua: abre as configurações de notificação.
+    /// Clique na lua liga ou desliga o Não perturbe; o botão do meio abre as configurações. A lua e o
+    /// aviso da ilha seguem o WNF, como numa troca feita pelo Windows.
     pub fn dnd_action(&mut self, button: MouseButton) -> Result<()> {
-        if button == MouseButton::Left {
-            dnd::open_settings();
+        match button {
+            MouseButton::Left => {
+                let on = !dnd::active();
+                tracing::info!(on, "Não perturbe pelo chip");
+                if let Err(e) = dnd::set(on) {
+                    tracing::warn!("não consegui alternar o Não perturbe: {e}; abrindo as configurações");
+                    dnd::open_settings();
+                }
+            }
+            MouseButton::Middle => dnd::open_settings(),
         }
         Ok(())
     }

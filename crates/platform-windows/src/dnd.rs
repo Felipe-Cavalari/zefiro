@@ -1,12 +1,13 @@
 //! "Não perturbe" do Windows por evento (WNF `QUIET_HOURS_ACTIVE_PROFILE_CHANGED`), como a ilha C++.
 //! API não documentada do ntdll, carregada em tempo de execução; se faltar, o estado fica "desligado"
-//! e nada quebra (PLANNING §13).
+//! e nada quebra (PLANNING §13). Alternar usa `IQuietHoursSettings` (`set`).
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Arc, OnceLock};
+use windows::Win32::System::Com::{CLSCTX_LOCAL_SERVER, CoCreateInstance};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
-use windows::core::{s, w};
+use windows::core::{GUID, HRESULT, HSTRING, IUnknown, IUnknown_Vtbl, PCWSTR, PWSTR, interface, s, w};
 
 const WNF_QUIET_HOURS_ACTIVE_PROFILE_CHANGED: u64 = 0x0D83_063E_A3BF_1C75;
 
@@ -39,10 +40,36 @@ fn ntdll(name: windows::core::PCSTR) -> Option<unsafe extern "system" fn() -> is
     unsafe { GetProcAddress(GetModuleHandleW(w!("ntdll.dll")).ok()?, name) }
 }
 
-/// Abre as configurações de notificação do Windows (onde fica o Não perturbe). Alternar direto não
-/// foi validado (S5 incompleto; o usuário preferiu não alternar o estado dele na fase 1e).
+/// Abre as configurações de notificação do Windows (onde fica o Não perturbe).
 pub fn open_settings() {
     crate::system::open_uri("ms-settings:notifications");
+}
+
+/// `IQuietHoursSettings`: interface interna do serviço de notificações (a mesma que o Focus Assist do
+/// Windows 10 e o YASB usam), só os dois primeiros métodos.
+#[interface("6bff4732-81ec-4ffb-ae67-b6c1bc29631f")]
+unsafe trait IQuietHoursSettings: IUnknown {
+    fn get_user_selected_profile(&self, profile: *mut PWSTR) -> HRESULT;
+    fn put_user_selected_profile(&self, profile: PCWSTR) -> HRESULT;
+}
+
+const CLSID_QUIET_HOURS_SETTINGS: GUID = GUID::from_u128(0xf53321fa_34f8_4b7f_b9a3_361877cb94cf);
+
+/// Perfil que liga ou desliga. "Ligado" é o do botão do Windows 11 (deixa passar as notificações
+/// prioritárias); a regra automática de tela cheia usa `AlarmsOnly`, que também conta como ligado.
+fn profile_for(on: bool) -> &'static str {
+    if on { "Microsoft.QuietHoursProfile.PriorityOnly" } else { "Microsoft.QuietHoursProfile.Unrestricted" }
+}
+
+/// Liga ou desliga o Não perturbe. O WNF avisa a mudança (em ~1 s), e a barra e a ilha seguem o
+/// aviso, como em qualquer troca externa. Chamado na thread de UI (COM já inicializado, STA).
+pub fn set(on: bool) -> windows::core::Result<()> {
+    let profile = HSTRING::from(profile_for(on));
+    // SAFETY: servidor COM fora do processo criado pelo CLSID conhecido; a string vive até o fim da chamada.
+    unsafe {
+        let settings: IQuietHoursSettings = CoCreateInstance(&CLSID_QUIET_HOURS_SETTINGS, None, CLSCTX_LOCAL_SERVER)?;
+        settings.put_user_selected_profile(PCWSTR(profile.as_ptr())).ok()
+    }
 }
 
 pub fn active() -> bool {
@@ -88,5 +115,17 @@ pub fn unwatch() {
             let unsubscribe: Unsubscribe = std::mem::transmute(f);
             unsubscribe(sub);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn on_is_the_windows_11_toggle_and_off_lets_everything_through() {
+        // Medido: PriorityOnly publica 1 no WNF (o botão do Windows 11), AlarmsOnly 2, Unrestricted 0.
+        assert_eq!(profile_for(true), "Microsoft.QuietHoursProfile.PriorityOnly");
+        assert_eq!(profile_for(false), "Microsoft.QuietHoursProfile.Unrestricted");
     }
 }

@@ -37,7 +37,7 @@ A meta da spec (≤ +4 MB e CPU 0,0 %) foi cumprida. Pelo ADR-0010, os três chi
 
 ## Decisão
 
-Seis chips nativos no catálogo: `claude`, `codex`, `vscode`, `notifications`, `dnd` e `power`. Os de dados têm painel que nasce do chip; Notificações e Não perturbe agem direto no clique. O botão do meio é novo e só tem efeito no sino (limpar).
+Seis chips nativos no catálogo: `claude`, `codex`, `vscode`, `notifications`, `dnd` e `power`. Os de dados têm painel que nasce do chip; Notificações e Não perturbe agem direto no clique. O botão do meio é novo: no sino limpa, na lua abre as configurações.
 
 ### Arquitetura
 
@@ -65,7 +65,7 @@ Seis chips nativos no catálogo: `claude`, `codex`, `vscode`, `notifications`, `
   - O serviço saiu da ilha para a barra: liga se a ilha embutida está ativa ou se o sino está na barra.
   - O clique manda Win+N.
   - Para limpar, o `ClearNotifications` falha sem identidade de pacote (0x80070490); por isso as notificações são removidas uma a uma.
-- **Não perturbe:** a leitura (WNF) roda sempre, independente da ilha. Alternar não foi validado (o usuário preferiu não mexer no estado dele), então o clique abre `ms-settings:notifications`.
+- **Não perturbe:** a leitura (WNF) roda sempre, independente da ilha. **Ajuste (2026-10-19):** o clique alterna pelo `IQuietHoursSettings` (interface interna, a mesma do Focus Assist e do YASB): ligado é `PriorityOnly` (o botão do Windows 11, WNF = 1), desligado é `Unrestricted` (WNF = 0); `AlarmsOnly` (WNF = 2) é o da regra automática de tela cheia. Medido com o usuário. Se a interface falhar, o clique abre `ms-settings:notifications`; o botão do meio também abre.
 - **Energia:**
   - Bloquear e Suspender agem no primeiro clique. Sair, Reiniciar e Desligar pedem um segundo clique entre 0,4 s e 3 s, para que um clique duplo não confirme.
   - Nas ações destrutivas, a barra sai como no "Sair" (libera as AppBars) e só então chama `ExitWindowsEx`, sem forçar os apps.
@@ -87,7 +87,7 @@ Perfil isolado (`ZEFIRO_CONFIG_DIR`) e, no fim, o perfil do usuário. Cliques po
    - O contador sobe com uma notificação de teste e a central abre.
    - Com `[island] enabled = false`, o contador continua funcionando.
    - Limpar zera o contador.
-6. **Não perturbe:** a lua fica acesa com o modo ligado, e o clique abre as configurações.
+6. **Não perturbe:** a lua fica acesa com o modo ligado, e o clique liga e desliga (ajuste de 2026-10-19; antes abria as configurações).
 7. **Serviços:** sem o chip, o Claude não liga; ao adicionar, liga; ao remover, desliga.
 
 ## Consequências
@@ -109,4 +109,4 @@ Perfil isolado (`ZEFIRO_CONFIG_DIR`) e, no fim, o perfil do usuário. Cliques po
   - Duplicatas não vizinhas no VS Code.
   - Horário de verão nas datas.
   - `exists()` em unidade de rede offline.
-- **Se o Windows mudar a API de Não perturbe ou de notificações,** o chip continua lendo e cai para abrir as configurações.
+- **Se o Windows mudar a API de Não perturbe ou de notificações,** o chip continua lendo e o clique cai para abrir as configurações.
