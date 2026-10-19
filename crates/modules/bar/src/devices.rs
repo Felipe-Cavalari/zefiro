@@ -24,6 +24,14 @@ pub fn mic_icon(muted: bool) -> &'static str {
     if muted { ICON_MIC_OFF } else { ICON_MIC }
 }
 
+/// Chip de som (`mic = false`) ou microfone a partir de `(porcentagem, mudo)`: ícone, texto e se
+/// fica apagado. O mudo só apaga o chip; o % continua, para a largura não mudar.
+pub fn volume_level(state: Option<(u32, bool)>, mic: bool) -> (&'static str, String, bool) {
+    let (percent, muted) = state.unwrap_or((0, true));
+    let glyph = if mic { mic_icon(muted) } else { speaker_icon(percent, muted) };
+    (glyph, state.map(|_| format!("{percent}%")).unwrap_or_default(), muted)
+}
+
 fn icon_style(size: f32) -> TextStyle {
     TextStyle { size, weight: FontWeight::Regular, family: Family::Icons }
 }
@@ -40,7 +48,9 @@ pub fn level_chip(level: Level, chip_h: f32, font_px: f32, scale: f32, tokens: &
     let gap = if text.is_empty() { 0.0 } else { (5.0 * scale).round() };
     let style = TextStyle { size: font_px, weight: FontWeight::SemiBold, family: Family::Text };
     let tw = if text.is_empty() { 0.0 } else { m.measure(text, &style).w.ceil() };
-    let w = icon_w + gap + tw;
+    // A largura reserva "100%": o painel aberto nasce do chip e não pode andar quando o nível muda.
+    let slot = if text.is_empty() { 0.0 } else { tw.max(m.measure("100%", &style).w.ceil()) };
+    let w = icon_w + gap + slot;
     let color = if dim { tokens.text_secondary } else { tokens.text };
     let mut ops = vec![DrawOp::Text { rect: Rect::new(0.0, 0.0, icon_w, chip_h), text: glyph.into(), style: icon_style(font_px * 1.05), color, align: Align::Center }];
     if !text.is_empty() {
@@ -190,6 +200,22 @@ mod tests {
         let only_icon = level_chip(Level { glyph: ICON_MIC, text: "", dim: true }, 28.0, 12.0, 1.0, &tokens(), &FixedWidthMeasurer);
         assert_eq!(only_icon.list.ops.len(), 1);
         assert!(only_icon.content_w < c.content_w);
+    }
+
+    #[test]
+    fn chip_width_does_not_follow_the_level() {
+        // O painel aberto nasce do chip: se a largura mudasse com o nível, ele andaria sob o cursor.
+        let w = |text: &str| level_chip(Level { glyph: ICON_MUTE, text, dim: false }, 28.0, 12.0, 1.0, &tokens(), &FixedWidthMeasurer).content_w;
+        assert_eq!(w("9%"), w("100%"));
+        assert_eq!(w("68%"), w("100%"));
+    }
+
+    #[test]
+    fn muted_volume_keeps_its_percent() {
+        assert_eq!(volume_level(Some((94, true)), true), (ICON_MIC_OFF, "94%".to_string(), true));
+        assert_eq!(volume_level(Some((94, false)), true), (ICON_MIC, "94%".to_string(), false));
+        assert_eq!(volume_level(Some((68, true)), false), (ICON_MUTE, "68%".to_string(), true));
+        assert_eq!(volume_level(None, false), (ICON_MUTE, String::new(), true));
     }
 
     #[test]

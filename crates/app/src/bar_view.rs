@@ -6,7 +6,7 @@ use windows::Win32::Foundation::HWND;
 use windows::core::{Interface, Result};
 use windows_numerics::{Vector2, Vector3};
 use zefiro_bar::chips::{ChipContent, clock_chip, zefiro_chip};
-use zefiro_bar::devices::{ICON_BRIGHTNESS, Level, level_chip, mic_icon, speaker_icon};
+use zefiro_bar::devices::{ICON_BRIGHTNESS, Level, level_chip, volume_level};
 use zefiro_core::config::BarHeight;
 use zefiro_integration_clock::format::ClockText;
 use zefiro_integration_clock::windows::now_local;
@@ -87,18 +87,10 @@ fn chip_content(ctx: &AppCtx, id: &str, device: &str, height: BarHeight, chip_h:
             }
             clock_chip(&s, chip_h, font_px, t, &ctx.text)
         }
-        "audio" => {
-            let v = ctx.devices.speaker;
-            let p = v.map_or(0, |v| (v.level * 100.0).round() as u32);
-            let muted = v.is_some_and(|v| v.muted);
-            let text = if v.is_some() { format!("{p}%") } else { String::new() };
-            level_chip(Level { glyph: speaker_icon(p, muted), text: &text, dim: muted || v.is_none() }, chip_h, font_px, scale, t, &ctx.text)
-        }
-        "mic" => {
-            let v = ctx.devices.mic;
-            let muted = v.is_some_and(|v| v.muted);
-            let text = v.filter(|v| !v.muted).map(|v| format!("{}%", (v.level * 100.0).round() as u32)).unwrap_or_default();
-            level_chip(Level { glyph: mic_icon(muted), text: &text, dim: muted || v.is_none() }, chip_h, font_px, scale, t, &ctx.text)
+        "audio" | "mic" => {
+            let v = if id == "mic" { ctx.devices.mic } else { ctx.devices.speaker };
+            let (glyph, text, dim) = volume_level(v.map(|v| ((v.level * 100.0).round() as u32, v.muted)), id == "mic");
+            level_chip(Level { glyph, text: &text, dim }, chip_h, font_px, scale, t, &ctx.text)
         }
         "brightness" => {
             let p = ctx.devices.brightness_of(device);
