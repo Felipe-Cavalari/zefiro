@@ -1,11 +1,11 @@
-//! Projetos recentes do VS Code no laço de eventos: leitura ao abrir o painel (numa thread),
-//! rolagem pela roda e abrir o projeto no clique.
+//! Projetos recentes do VS Code no laço de eventos: leitura ao abrir o painel (numa thread), busca
+//! digitada direto no painel, rolagem pela roda, ↑ ↓ para escolher e abrir no clique ou no Enter.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use windows::core::Result;
 use zefiro_bar::controller::PanelKind;
-use zefiro_bar::vscode::{RecentRow, max_scroll, vscode_panel};
+use zefiro_bar::vscode::{RecentRow, Search, VISIBLE, edit_query, matches, max_scroll, vscode_panel};
 use zefiro_integration_usage::format::format_short;
 use zefiro_integration_vscode::{Kind, Recent, open_args, read_recents};
 use zefiro_platform::geometry::{Point, Rect};
@@ -27,7 +27,14 @@ pub struct VsCodeRuntime {
     incoming: Arc<Mutex<Option<Loaded>>>,
     code: Option<PathBuf>,
     scroll: usize,
+    /// Área de clique de cada linha e o índice do projeto em `recents`.
     hits: Vec<(Rect, usize)>,
+    query: String,
+    /// Projetos que passam na busca (índices em `recents`), na ordem mostrada.
+    shown: Vec<usize>,
+    /// Linha escolhida (posição em `shown`); só aparece depois de buscar ou usar as setas.
+    selected: usize,
+    navigated: bool,
 }
 
 fn storage_dir() -> PathBuf {
@@ -54,6 +61,9 @@ impl Loop {
         let v = &mut self.vscode;
         v.scroll = 0;
         v.recents = None;
+        v.query.clear();
+        v.selected = 0;
+        v.navigated = false;
         let incoming = v.incoming.clone();
         let spawned = std::thread::Builder::new().name("zefiro-vscode".into()).spawn(move || {
             let code = system::find_code_exe();
@@ -84,14 +94,87 @@ impl Loop {
     pub fn vscode_panel_list(&mut self, scale: f32) -> DisplayList {
         let offset = zefiro_integration_clock::windows::utc_offset_seconds();
         let v = &mut self.vscode;
+        v.shown = match &v.recents {
+            Some(list) => list.iter().enumerate().filter(|(_, r)| matches(&v.query, &r.name, &r.location)).map(|(i, _)| i).collect(),
+            None => Vec::new(),
+        };
+        v.selected = v.selected.min(v.shown.len().saturating_sub(1));
+        // A linha escolhida fica sempre à vista.
+        if v.selected < v.scroll {
+            v.scroll = v.selected;
+        } else if v.selected >= v.scroll + VISIBLE {
+            v.scroll = v.selected + 1 - VISIBLE;
+        }
         let (rows, message): (Vec<RecentRow>, Option<&str>) = match (&v.recents, &v.code) {
             (None, _) => (Vec::new(), Some("Carregando…")),
             (Some(_), None) => (Vec::new(), Some("VS Code não encontrado")),
-            (Some(list), Some(_)) => (list.iter().map(|r| row(r, offset)).collect(), None),
+            (Some(list), Some(_)) => (v.shown.iter().map(|&i| row(&list[i], offset)).collect(), None),
         };
-        let (list, hits) = vscode_panel(&rows, v.scroll, message, scale, &self.ctx.theme.tokens);
-        v.hits = hits;
+        let lit = (v.navigated || !v.query.is_empty()).then_some(v.selected);
+        let search = Search { query: &v.query, selected: lit, measure: &self.ctx.text };
+        let (list, hits, _) = vscode_panel(&rows, v.scroll, message, &search, scale, &self.ctx.theme.tokens);
+        v.hits = hits.into_iter().map(|(r, i)| (r, v.shown[i])).collect();
         list
+    }
+
+    /// Tecla digitada com o painel aberto: edita a busca, filtra e volta ao primeiro resultado.
+    pub fn vscode_char(&mut self, code: u32) -> Result<()> {
+        if !self.controller.open().is_some_and(|o| o.kind == PanelKind::VsCode) {
+            return Ok(());
+        }
+        let paste = (code == 22).then(zefiro_platform_windows::system_events::clipboard_text).flatten();
+        if edit_query(&mut self.vscode.query, code, paste.as_deref()) {
+            self.vscode.selected = 0;
+            self.vscode.scroll = 0;
+            self.redraw_open_panel()?;
+        }
+        Ok(())
+    }
+
+    /// Teclas com o painel do VS Code aberto. `true` se tratou: Esc limpa a busca (vazia, fecha o
+    /// painel como sempre), ↑ ↓ escolhem a linha e Enter abre.
+    pub fn vscode_key(&mut self, vk: u32) -> Result<bool> {
+        if !self.controller.open().is_some_and(|o| o.kind == PanelKind::VsCode) {
+            return Ok(false);
+        }
+        let v = &mut self.vscode;
+        match vk {
+            0x1B if !v.query.is_empty() => {
+                v.query.clear();
+                v.selected = 0;
+                v.scroll = 0;
+                self.redraw_open_panel()?;
+                Ok(true)
+            }
+            0x26 | 0x28 => {
+                if v.navigated || !v.query.is_empty() {
+                    v.selected = if vk == 0x26 { v.selected.saturating_sub(1) } else { (v.selected + 1).min(v.shown.len().saturating_sub(1)) };
+                }
+                v.navigated = true;
+                self.redraw_open_panel()?;
+                Ok(true)
+            }
+            0x0D => {
+                if let Some(&index) = v.shown.get(v.selected) {
+                    self.vscode_open(index)?;
+                }
+                Ok(true)
+            }
+            0x09 => Ok(true),
+            _ => Ok(false),
+        }
+    }
+
+    fn vscode_open(&mut self, index: usize) -> Result<()> {
+        let target = self.vscode.recents.as_ref().and_then(|list| list.get(index).cloned());
+        if let (Some(r), Some(code)) = (target, self.vscode.code.clone()) {
+            tracing::info!(projeto = %r.name, "abrindo projeto no VS Code");
+            if let Err(e) = system::spawn_detached(&code, &open_args(&r)) {
+                tracing::warn!("não consegui abrir o VS Code: {e}");
+            }
+            self.close_open_panel()?;
+        }
+        Ok(())
     }
 
     /// Roda sobre o painel. `true` se tratou.
@@ -99,7 +182,7 @@ impl Loop {
         if !self.controller.open().is_some_and(|o| o.kind == PanelKind::VsCode) {
             return Ok(false);
         }
-        let count = self.vscode.recents.as_ref().map_or(0, Vec::len);
+        let count = self.vscode.shown.len();
         let v = &mut self.vscode;
         v.scroll = if delta > 0 { v.scroll.saturating_sub(1) } else { (v.scroll + 1).min(max_scroll(count)) };
         self.redraw_open_panel()?;
@@ -111,14 +194,8 @@ impl Loop {
         if !self.controller.open().is_some_and(|o| o.kind == PanelKind::VsCode) {
             return Ok(false);
         }
-        let hit = self.vscode.hits.iter().find(|(r, _)| r.contains(p)).map(|(_, i)| *i);
-        let target = hit.and_then(|i| self.vscode.recents.as_ref()?.get(i).cloned());
-        if let (Some(r), Some(code)) = (target, self.vscode.code.clone()) {
-            tracing::info!(projeto = %r.name, "abrindo projeto no VS Code");
-            if let Err(e) = system::spawn_detached(&code, &open_args(&r)) {
-                tracing::warn!("não consegui abrir o VS Code: {e}");
-            }
-            self.close_open_panel()?;
+        if let Some(index) = self.vscode.hits.iter().find(|(r, _)| r.contains(p)).map(|(_, i)| *i) {
+            self.vscode_open(index)?;
         }
         Ok(true)
     }

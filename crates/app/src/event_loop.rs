@@ -226,8 +226,7 @@ impl Loop {
                         self.panels[p.monitor].clear_tabs()?;
                     }
                     self.bars[p.monitor].set_active(&self.ctx, Some(&p.chip))?;
-                    self.bars[p.monitor].fade_chip(&self.ctx, &p.chip, false)?;
-                }
+                    self.bars[p.monitor].fade_chip(&self.ctx, &p.chip, false)?;                }
             }
         }
         Ok(())
@@ -508,6 +507,9 @@ impl Loop {
                 if self.panel_index(hwnd).is_none() {
                     return Ok(true);
                 }
+                if self.vscode_key(vk)? {
+                    return Ok(true);
+                }
                 if vk == VK_ESCAPE {
                     let fx = self.controller.handle(PanelInput::Escape);
                     return self.run_effects(fx).map(|_| true);
@@ -588,6 +590,7 @@ impl Loop {
             WinEvent::User { code: USER_CODEX } => self.usage_codex_changed()?,
             WinEvent::User { code: USER_CLAUDE } => self.usage_claude_changed()?,
             WinEvent::User { code: USER_VSCODE } => self.vscode_loaded()?,
+            WinEvent::Character { code, .. } => self.vscode_char(code)?,
             WinEvent::User { code: USER_POWER } => self.power_user_loaded()?,
             WinEvent::Timer { id: TIMER_POWER } => self.power_timer()?,
             WinEvent::User { code: USER_PRIVACY } => self.island_privacy_changed()?,
