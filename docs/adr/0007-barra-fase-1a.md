@@ -31,6 +31,8 @@ Este ADR registra as decisões tomadas durante a implementação, os números me
 
 3. **Uma janela de painel por monitor, reaproveitada e do tamanho do monitor.** Como a janela de desenho deixa todo clique passar (decisão 4), cobrir o monitor inteiro não custa nada. A forma vive sempre no mesmo espaço, então trocar de painel no meio de uma animação (menu → calendário) só redireciona a mola, sem salto.
 
+   **Ajuste (2026-10-19):** a janela tem uma linha a menos que o monitor (`panel_window`). Com o tamanho exato do monitor e em primeiro plano, o Windows a tratava como app em tela cheia e, com a regra automática "Não perturbe em tela cheia" ligada, ligava o Não perturbe a cada painel aberto e desligava ao fechar. A ilha mostrava "Não perturbe desligado" toda hora. Nenhum painel chega à última linha da tela, então o desenho não muda.
+
 4. **Duas janelas por barra e por painel.**
    - A janela de desenho é `WS_EX_LAYERED | WS_EX_TRANSPARENT`, então nenhum clique para nela.
    - Uma janela de entrada invisível (`ZefiroInput`), dona-dependente da de desenho, é recortada por `SetWindowRgn` nos retângulos clicáveis. Os eventos dela chegam com o `hwnd` da janela de desenho.

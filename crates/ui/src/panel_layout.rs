@@ -22,6 +22,12 @@ pub fn panel_rect(chip: Rect, band_bottom: f32, content: Size, monitor_w: f32, s
     Rect::new(x, y, content.w, content.h)
 }
 
+/// Janela de desenho do painel: o monitor inteiro menos a última linha. Do tamanho exato do monitor,
+/// em primeiro plano, o Windows a trata como app em tela cheia e liga o Não perturbe sozinho.
+pub fn panel_window(monitor: Rect) -> Rect {
+    Rect::new(monitor.x, monitor.y, monitor.w, monitor.h - 1.0)
+}
+
 pub fn pill_radius(h: f32, radius_max_px: f32, style: ShapeStyle, scale: f32) -> f32 {
     match style {
         ShapeStyle::W11 => 8.0 * scale,
@@ -61,6 +67,17 @@ pub fn to_local(shape: Shape, window: Rect) -> Shape {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn panel_window_is_never_the_size_of_the_monitor() {
+        // Uma janela em primeiro plano do tamanho exato do monitor é "app em tela cheia" para o
+        // Windows, que liga o Não perturbe sozinho a cada painel aberto.
+        let monitor = Rect::new(-1920.0, 0.0, 1920.0, 1080.0);
+        let window = panel_window(monitor);
+        assert_ne!(window, monitor);
+        assert_eq!((window.x, window.y, window.w), (monitor.x, monitor.y, monitor.w), "mesma origem e largura: a forma não muda de lugar");
+        assert_eq!(window.h, monitor.h - 1.0);
+    }
     use zefiro_resources::theme::ShapeStyle;
 
     #[test]

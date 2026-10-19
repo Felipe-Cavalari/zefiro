@@ -10,7 +10,7 @@ use zefiro_platform_windows::monitors::Monitor;
 use zefiro_platform_windows::morph::MorphShape;
 use zefiro_platform_windows::window;
 use zefiro_ui::paint::DisplayList;
-use zefiro_ui::panel_layout::{CHIP_FADE_S, Shape, panel_radius, panel_rect, pill_radius, to_local};
+use zefiro_ui::panel_layout::{CHIP_FADE_S, Shape, panel_radius, panel_rect, panel_window, pill_radius, to_local};
 use zefiro_ui::spring::{NUDGE_DIP, SpringParams};
 use zefiro_ui::panel_lifecycle::PanelLifecycle;
 
@@ -96,8 +96,9 @@ impl PanelView {
         self.panel = Rect::new(panel_mon.x + mon.x, panel_mon.y + mon.y, panel_mon.w, panel_mon.h);
         // A janela de desenho cobre o monitor inteiro e deixa todo clique passar (só a janela de
         // entrada, recortada no painel, recebe clique). Assim a forma vive sempre no mesmo espaço
-        // e trocar de painel no meio de uma animação só redireciona a mola, sem salto.
-        self.window = mon;
+        // e trocar de painel no meio de uma animação só redireciona a mola, sem salto. Uma linha a
+        // menos que o monitor, senão o Windows a vê como tela cheia e liga o Não perturbe.
+        self.window = panel_window(mon);
         window::set_bounds(self.hwnd, self.window, true);
         self.root.SetSize(Vector2 { X: self.window.w, Y: self.window.h })?;
         self.layer.SetSize(Vector2 { X: self.window.w, Y: self.window.h })?;

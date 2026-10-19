@@ -96,6 +96,7 @@ Copy-Item island/build/zefiro-island.exe target/release/
 - **Sondas de tela sem roubar o mouse:** `PostMessage` na janela `ZefiroInput` simula cliques, mas não dá ao Zefiro o direito de trazer janelas para frente; para isso é preciso entrada real (`SendInput`).
 - **DPI:** o processo é Per-Monitor v2 (`system::enable_per_monitor_dpi`, chamado no início do `main`).
 - **Tela cheia:** com `ABN_FULLSCREENAPP`, a barra do monitor coberto some. As janelas do próprio Zefiro nunca contam como tela cheia.
+- **Nenhuma janela do Zefiro do tamanho exato do monitor:** em primeiro plano, o Windows a trata como app em tela cheia e liga o Não perturbe sozinho. A janela do painel tem uma linha a menos (`panel_window`, ADR-0007).
 - **Fork da ilha:** toda mudança no `dynamic-island-for-windows.wh.cpp` vai dentro de `#ifdef ZEFIRO_ISLAND` e é marcada com `// ZEFIRO:`, para acompanhar o upstream com diffs mínimos. A camada `wh_shim.*` substitui a API do Windhawk.
 - **Ilha embutida (padrão, ADR-0009):** a barra do primário desenha a ilha no próprio compositor; o "chip" `island` abre o painel com abas. Cada fonte de dados (SMTC, volume, privacidade, notificações, Bluetooth, clima, letras, hardware) é um serviço em `platform-windows` com thread própria que avisa a UI por `post_user`; nada consulta por quadro. O hardware só amostra com a aba aberta, e a captura de áudio só roda com mídia tocando e a barra visível.
 - **Barra ↔ ilha externa (`engine = "externa"`):**
