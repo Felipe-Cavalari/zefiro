@@ -907,6 +907,13 @@ name = "zefiro-integration-devices"
 version = "0.1.0"
 
 [[package]]
+name = "zefiro-integration-usage"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "zefiro-island"
 version = "0.1.0"
 dependencies = [
