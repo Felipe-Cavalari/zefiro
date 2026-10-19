@@ -27,6 +27,8 @@ pub struct AppCtx {
     pub devices: DeviceState,
     /// Uso do Claude e do Codex (chips e painéis).
     pub usage: UsageState,
+    /// Notificações e Não perturbe (chips).
+    pub system: SystemState,
     pub epoch: Instant,
 }
 
@@ -35,6 +37,12 @@ impl AppCtx {
     pub fn now(&self) -> f64 {
         self.epoch.elapsed().as_secs_f64()
     }
+}
+
+/// O que os chips de notificações e Não perturbe mostram.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SystemState {
+    pub notifications: usize,
 }
 
 /// O que os chips de uso mostram: o último uso do Codex lido e quando o arquivo mudou.

@@ -12,6 +12,7 @@ mod island_view;
 mod panel_view;
 mod power_loop;
 mod robustness;
+mod system_loop;
 mod tab_strip;
 mod usage_loop;
 mod vscode_loop;
@@ -61,7 +62,7 @@ fn run(started: Instant) -> windows::core::Result<()> {
     let gfx = Gfx::new()?;
     let comp = Comp::new(&gfx)?;
     let text = DWriteText::new(gfx.dwrite.clone(), &theme.theme.font.family);
-    let ctx = app::AppCtx { gfx, comp, text, theme, config, config_path, themes_dir, clock: zefiro_integration_clock::windows::WindowsClock, island: Default::default(), devices: Default::default(), usage: Default::default(), epoch: started };
+    let ctx = app::AppCtx { gfx, comp, text, theme, config, config_path, themes_dir, clock: zefiro_integration_clock::windows::WindowsClock, island: Default::default(), devices: Default::default(), usage: Default::default(), system: Default::default(), epoch: started };
 
     let mut bars = Vec::new();
     for m in monitors::list() {

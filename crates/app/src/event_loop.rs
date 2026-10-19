@@ -110,6 +110,7 @@ pub struct Loop {
     pub(crate) usage: crate::usage_loop::UsageRuntime,
     pub(crate) vscode: crate::vscode_loop::VsCodeRuntime,
     pub(crate) power: crate::power_loop::PowerRuntime,
+    pub(crate) system: crate::system_loop::SystemRuntime,
     /// Ciclos de medição: (total, feitos).
     cycles: Option<(u32, u32)>,
 }
@@ -131,7 +132,7 @@ impl Loop {
             panels.push(PanelView::create(&ctx, b.monitor())?);
         }
         let today = now_local().date;
-        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), power: Default::default(), cycles: None })
+        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), power: Default::default(), system: Default::default(), cycles: None })
     }
 
     pub(crate) fn bar_index(&self, hwnd: isize) -> Option<usize> { self.bars.iter().position(|b| b.hwnd().0 as isize == hwnd) }
@@ -285,7 +286,10 @@ impl Loop {
     /// chip e botão direito no Apps. Cada widget trata o seu caso.
     pub fn chip_action(&mut self, bar: usize, chip: &str, button: MouseButton, _x: f32, _y: f32) -> Result<()> {
         tracing::info!(bar, chip, ?button, "ação de chip");
-        Ok(())
+        match chip {
+            "notifications" => self.notifications_action(button),
+            _ => Ok(()),
+        }
     }
 
     pub fn apply_bars(&mut self, animate: bool) -> Result<()> {
@@ -579,7 +583,14 @@ impl Loop {
             WinEvent::User { code: USER_POWER } => self.power_user_loaded()?,
             WinEvent::Timer { id: TIMER_POWER } => self.power_timer()?,
             WinEvent::User { code: USER_PRIVACY } => self.island_privacy_changed()?,
-            WinEvent::User { code: USER_NOTIFICATION } => self.island_notifications()?,
+            WinEvent::User { code: USER_NOTIFICATION } => {
+                self.island_notifications()?;
+                let count = self.notification_count();
+                if count != self.ctx.system.notifications {
+                    self.ctx.system.notifications = count;
+                    self.apply_bars(true)?;
+                }
+            }
             WinEvent::User { code: USER_DND } => self.island_dnd_changed()?,
             WinEvent::User { code: USER_BLUETOOTH } => self.island_bluetooth()?,
             WinEvent::User { code: USER_WEATHER } => self.island_weather()?,
@@ -625,6 +636,7 @@ impl Loop {
                         }
                         self.apply_bars(true)?;
                         crate::island::sync(&self.ctx);
+                        self.system_services();
                         self.island_services()?;
                         self.schedule_clock();
                     }
@@ -664,6 +676,7 @@ pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
         window::set_timer(TIMER_CYCLE, 2000);
     }
     crate::island::start(&l.ctx);
+    l.system_services();
     l.island_services()?;
     l.devices_start();
     l.usage_start();

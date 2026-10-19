@@ -19,7 +19,6 @@ use zefiro_platform_windows::media::{MediaCommand, MediaService, now_unix_ms};
 use zefiro_platform_windows::audio_devices::{self, AudioDevice, Flow, RouteState};
 use zefiro_platform_windows::popup_menu;
 use zefiro_platform_windows::privacy::PrivacyWatcher;
-use zefiro_platform_windows::notifications::NotificationWatcher;
 use zefiro_platform_windows::system_events;
 use zefiro_platform_windows::dnd;
 use zefiro_platform_windows::bluetooth::BluetoothWatcher;
@@ -35,7 +34,7 @@ use zefiro_platform_windows::window;
 use zefiro_ui::paint::DisplayList;
 
 use crate::bar_view::ISLAND_CHIP;
-use crate::event_loop::{Loop, TIMER_FOCUS, TIMER_ISLAND_ANIM, TIMER_LYRICS, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_BLUETOOTH, USER_DND, USER_HARDWARE, USER_LYRICS, USER_MEDIA, USER_NOTIFICATION, USER_PRIVACY, USER_VISUALIZER, USER_WEATHER};
+use crate::event_loop::{Loop, TIMER_FOCUS, TIMER_ISLAND_ANIM, TIMER_LYRICS, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_BLUETOOTH, USER_DND, USER_HARDWARE, USER_LYRICS, USER_MEDIA, USER_PRIVACY, USER_VISUALIZER, USER_WEATHER};
 
 /// Destaque quando a capa não tem cor viva (o mesmo padrão da ilha C++).
 const DEFAULT_ACCENT: Rgba = Rgba { r: 0x4C as f32 / 255.0, g: 0xC9 as f32 / 255.0, b: 0xF0 as f32 / 255.0, a: 1.0 };
@@ -46,7 +45,6 @@ const VISUALIZER_FRAME_MS: u128 = 16;
 pub struct IslandRuntime {
     media: Option<MediaService>,
     privacy: Option<PrivacyWatcher>,
-    notifications: Option<NotificationWatcher>,
     bluetooth: Option<BluetoothWatcher>,
     weather: Option<WeatherService>,
     hardware: Option<HardwareMonitor>,
@@ -90,14 +88,6 @@ impl Loop {
             self.island_privacy_changed()?;
         } else if !embedded {
             self.island.privacy = None;
-        }
-        if embedded && self.island.notifications.is_none() {
-            match NotificationWatcher::start(Arc::new(|| window::post_user(USER_NOTIFICATION))) {
-                Ok(w) => self.island.notifications = Some(w),
-                Err(e) => tracing::warn!("notificações indisponíveis: {e}"),
-            }
-        } else if !embedded {
-            self.island.notifications = None;
         }
         if embedded && self.island.weather.is_none() {
             match WeatherService::start(String::new(), Arc::new(|| window::post_user(USER_WEATHER))) {
@@ -161,7 +151,12 @@ impl Loop {
     }
 
     pub fn island_notifications(&mut self) -> Result<()> {
-        let Some(w) = &self.island.notifications else { return Ok(()) };
+        let Some(w) = &self.system.notifications else { return Ok(()) };
+        if !self.ctx.config.island.embedded() {
+            // Só o chip usa o serviço: descarta os avisos para a fila não crescer.
+            w.take();
+            return Ok(());
+        }
         // Várias de uma vez: a mais recente fica na pílula. Com "Não perturbe", nenhuma aparece.
         if let Some(n) = w.take().pop().filter(|_| !dnd::active()) {
             let now = self.ctx.now();

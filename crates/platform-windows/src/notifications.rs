@@ -3,7 +3,7 @@
 //! por segundo, fora da thread de UI, e só avisa quando chega uma notificação nova.
 
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use windows::Foundation::Size;
@@ -21,6 +21,10 @@ pub struct Notification { pub app: String, pub text: String, pub icon: Option<Im
 
 pub struct NotificationWatcher {
     stop: Arc<AtomicBool>,
+    /// Quantas notificações há na central agora.
+    count: Arc<AtomicUsize>,
+    /// Pedido de limpar a central, atendido na thread do serviço.
+    clear: Arc<AtomicBool>,
     queue: Arc<Mutex<Vec<Notification>>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -29,17 +33,30 @@ impl NotificationWatcher {
     pub fn start(notify: Arc<dyn Fn() + Send + Sync>) -> std::io::Result<NotificationWatcher> {
         let stop = Arc::new(AtomicBool::new(false));
         let queue = Arc::new(Mutex::new(Vec::new()));
+        let count = Arc::new(AtomicUsize::new(0));
+        let clear = Arc::new(AtomicBool::new(false));
         let (flag, shared) = (stop.clone(), queue.clone());
+        let counters = Counters { count: count.clone(), clear: clear.clone() };
         let thread = std::thread::Builder::new().name("zefiro-notifications".into()).spawn(move || {
             // SAFETY: WinRT nesta thread, desfeito no fim dela.
             let inited = unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.is_ok();
-            run(&flag, &shared, notify.as_ref());
+            run(&flag, &shared, &counters, notify.as_ref());
             if inited {
                 // SAFETY: par do RoInitialize.
                 unsafe { RoUninitialize() };
             }
         })?;
-        Ok(NotificationWatcher { stop, queue, thread: Some(thread) })
+        Ok(NotificationWatcher { stop, count, clear, queue, thread: Some(thread) })
+    }
+
+    /// Quantas notificações estão na central.
+    pub fn count(&self) -> usize {
+        self.count.load(Ordering::Relaxed)
+    }
+
+    /// Limpa a central (na thread do serviço, em até 1 s).
+    pub fn clear(&self) {
+        self.clear.store(true, Ordering::Relaxed);
     }
 
     /// Notificações novas desde a última chamada.
@@ -83,7 +100,9 @@ fn process_uptime() -> Duration {
     }
 }
 
-fn run(stop: &AtomicBool, queue: &Mutex<Vec<Notification>>, notify: &(dyn Fn() + Send + Sync)) {
+struct Counters { count: Arc<AtomicUsize>, clear: Arc<AtomicBool> }
+
+fn run(stop: &AtomicBool, queue: &Mutex<Vec<Notification>>, counters: &Counters, notify: &(dyn Fn() + Send + Sync)) {
     let warmup = Duration::from_secs(30).saturating_sub(process_uptime());
     if !warmup.is_zero() && !sleep(stop, warmup) {
         return;
@@ -118,14 +137,23 @@ fn run(stop: &AtomicBool, queue: &Mutex<Vec<Notification>>, notify: &(dyn Fn() +
             }
         }
         while !stop.load(Ordering::Relaxed) {
+            if counters.clear.swap(false, Ordering::Relaxed)
+                && let Err(e) = clear_all(&listener)
+            {
+                tracing::warn!("não consegui limpar as notificações: {e}");
+            }
             match poll(&listener, &mut seen) {
-                Ok(fresh) if !fresh.is_empty() => {
-                    if let Ok(mut q) = queue.lock() {
-                        q.extend(fresh);
+                Ok((fresh, count)) => {
+                    let changed = counters.count.swap(count, Ordering::Relaxed) != count;
+                    if !fresh.is_empty()
+                        && let Ok(mut q) = queue.lock()
+                    {
+                        q.extend(fresh.iter().cloned());
                     }
-                    notify();
+                    if changed || !fresh.is_empty() {
+                        notify();
+                    }
                 }
-                Ok(_) => {}
                 Err(e) => {
                     tracing::debug!("leitura de notificações falhou: {e}; reconectando");
                     break;
@@ -138,7 +166,20 @@ fn run(stop: &AtomicBool, queue: &Mutex<Vec<Notification>>, notify: &(dyn Fn() +
     }
 }
 
-fn poll(listener: &UserNotificationListener, seen: &mut Option<HashSet<u32>>) -> Result<Vec<Notification>> {
+/// Limpa a central. Sem identidade de pacote o `ClearNotifications` falha (0x80070490); remover
+/// uma a uma funciona.
+fn clear_all(listener: &UserNotificationListener) -> Result<()> {
+    if listener.ClearNotifications().is_ok() {
+        return Ok(());
+    }
+    for n in &listener.GetNotificationsAsync(NotificationKinds::Toast)?.get()? {
+        listener.RemoveNotification(n.Id()?)?;
+    }
+    Ok(())
+}
+
+/// Notificações novas e quantas há na central.
+fn poll(listener: &UserNotificationListener, seen: &mut Option<HashSet<u32>>) -> Result<(Vec<Notification>, usize)> {
     let list = listener.GetNotificationsAsync(NotificationKinds::Toast)?.get()?;
     let mut current = HashSet::new();
     let mut fresh = Vec::new();
@@ -152,8 +193,9 @@ fn poll(listener: &UserNotificationListener, seen: &mut Option<HashSet<u32>>) ->
             fresh.push(parsed);
         }
     }
+    let count = current.len();
     *seen = Some(current);
-    Ok(fresh)
+    Ok((fresh, count))
 }
 
 fn parse(n: &UserNotification) -> Result<Notification> {
@@ -172,6 +214,19 @@ fn parse(n: &UserNotification) -> Result<Notification> {
         }
     }
     Ok(Notification { text: summary(&app, &title, &body), app, icon })
+}
+
+/// Abre a central de notificações do Windows (o mesmo que Win+N).
+pub fn open_notification_center() -> Result<()> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VIRTUAL_KEY, VK_LWIN, VK_N};
+    let key = |vk: VIRTUAL_KEY, up: bool| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk, wScan: 0, dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) }, time: 0, dwExtraInfo: 0 } },
+    };
+    let inputs = [key(VK_LWIN, false), key(VK_N, false), key(VK_N, true), key(VK_LWIN, true)];
+    // SAFETY: vetor local de entradas de teclado com o tamanho certo de INPUT.
+    let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+    if sent as usize == inputs.len() { Ok(()) } else { Err(windows::core::Error::from_win32()) }
 }
 
 /// "Título - corpo", até 120 caracteres (como a ilha C++).
