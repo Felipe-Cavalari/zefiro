@@ -10,6 +10,7 @@ mod island;
 mod island_loop;
 mod island_view;
 mod panel_view;
+mod power_loop;
 mod robustness;
 mod tab_strip;
 mod usage_loop;

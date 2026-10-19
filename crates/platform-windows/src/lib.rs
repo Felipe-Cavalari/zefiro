@@ -22,6 +22,7 @@ pub mod monitors;
 pub mod morph;
 pub mod notifications;
 pub mod painter;
+pub mod power;
 pub mod popup_menu;
 pub mod privacy;
 pub mod system;

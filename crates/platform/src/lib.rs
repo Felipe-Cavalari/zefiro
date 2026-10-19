@@ -4,4 +4,5 @@ pub mod color;
 pub mod geometry;
 pub mod image;
 pub mod monitor;
+pub mod power;
 pub mod text;

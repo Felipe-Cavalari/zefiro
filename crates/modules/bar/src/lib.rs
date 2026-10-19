@@ -8,5 +8,6 @@ pub mod catalog;
 pub mod editor;
 pub mod editor_panel;
 pub mod menu;
+pub mod power;
 pub mod usage;
 pub mod vscode;

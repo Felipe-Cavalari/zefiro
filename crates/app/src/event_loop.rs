@@ -58,6 +58,8 @@ pub const USER_CODEX: u32 = 19;
 pub const USER_CLAUDE: u32 = 20;
 /// A lista de projetos do VS Code foi lida.
 pub const USER_VSCODE: u32 = 21;
+/// Nome e foto da conta (painel Energia) foram lidos.
+pub const USER_POWER: u32 = 22;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
@@ -74,6 +76,8 @@ pub const TIMER_FOCUS: usize = 8;
 pub const TIMER_LYRICS: usize = 9;
 /// Animação de troca de fonte no painel da ilha (60 Hz por menos de meio segundo).
 pub const TIMER_ISLAND_ANIM: usize = 10;
+/// Desarma a confirmação do painel Energia depois de 3 s.
+pub const TIMER_POWER: usize = 11;
 const CYCLE_HALF_MS: u32 = 450;
 
 const VK_ESCAPE: u32 = 0x1B;
@@ -105,6 +109,7 @@ pub struct Loop {
     pub(crate) devices: crate::devices_loop::DevicesRuntime,
     pub(crate) usage: crate::usage_loop::UsageRuntime,
     pub(crate) vscode: crate::vscode_loop::VsCodeRuntime,
+    pub(crate) power: crate::power_loop::PowerRuntime,
     /// Ciclos de medição: (total, feitos).
     cycles: Option<(u32, u32)>,
 }
@@ -126,7 +131,7 @@ impl Loop {
             panels.push(PanelView::create(&ctx, b.monitor())?);
         }
         let today = now_local().date;
-        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), cycles: None })
+        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), power: Default::default(), cycles: None })
     }
 
     pub(crate) fn bar_index(&self, hwnd: isize) -> Option<usize> { self.bars.iter().position(|b| b.hwnd().0 as isize == hwnd) }
@@ -160,7 +165,7 @@ impl Loop {
             PanelKind::Audio | PanelKind::Mic | PanelKind::Brightness => self.devices_panel_list(kind, scale),
             PanelKind::Claude | PanelKind::Codex => self.usage_panel_list(kind, scale),
             PanelKind::VsCode => self.vscode_panel_list(scale),
-            PanelKind::Power => DisplayList::new(Size { w: 320.0 * scale, h: 80.0 * scale }),
+            PanelKind::Power => self.power_panel_list(scale),
         }
     }
 
@@ -186,6 +191,7 @@ impl Loop {
                     self.menu = None;
                     self.island_panel_closed();
                     self.devices_panel_closed();
+                    self.power_panel_closed();
                 }
                 PanelEffect::Open(p) => {
                     if p.kind == PanelKind::Overflow {
@@ -197,6 +203,7 @@ impl Loop {
                     self.devices_prepare(p.kind);
                     self.usage_prepare(p.kind);
                     self.vscode_prepare(p.kind);
+                    self.power_prepare(p.kind);
                     if p.kind == PanelKind::Island {
                         self.island_panel_opening();
                     }
@@ -407,6 +414,8 @@ impl Loop {
                     let hit = self.menu.as_ref().and_then(|m| m.hit(Point { x: x - ox, y: y - oy }, scale));
                     if self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) {
                         self.island_panel_click(Point { x: x - ox, y: y - oy })?;
+                    } else if self.power_click(Point { x: x - ox, y: y - oy })? {
+                        // Botão de energia (armar, confirmar ou agir).
                     } else if self.vscode_click(Point { x: x - ox, y: y - oy })? {
                         // Projeto do VS Code aberto (ou clique fora das linhas).
                     } else if self.devices_up(Point { x: x - ox, y: y - oy })? {
@@ -567,6 +576,8 @@ impl Loop {
             WinEvent::User { code: USER_CODEX } => self.usage_codex_changed()?,
             WinEvent::User { code: USER_CLAUDE } => self.usage_claude_changed()?,
             WinEvent::User { code: USER_VSCODE } => self.vscode_loaded()?,
+            WinEvent::User { code: USER_POWER } => self.power_user_loaded()?,
+            WinEvent::Timer { id: TIMER_POWER } => self.power_timer()?,
             WinEvent::User { code: USER_PRIVACY } => self.island_privacy_changed()?,
             WinEvent::User { code: USER_NOTIFICATION } => self.island_notifications()?,
             WinEvent::User { code: USER_DND } => self.island_dnd_changed()?,
@@ -666,6 +677,7 @@ pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
         }
     }
     shutdown(&mut l);
+    crate::power_loop::run_pending(&mut l);
     Ok(())
 }
 
