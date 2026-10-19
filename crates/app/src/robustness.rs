@@ -18,6 +18,8 @@ pub fn handle(l: &mut Loop, e: WinEvent) -> Result<bool> {
             for b in &mut l.bars {
                 b.register_appbar(&l.ctx);
             }
+            // A bandeja nova não conhece o ícone antigo.
+            crate::tray_loop::show_icon();
             island_zorder::raise_island();
             l.editor_topology_changed()?;
         }
@@ -47,6 +49,8 @@ pub fn handle(l: &mut Loop, e: WinEvent) -> Result<bool> {
         }
         WinEvent::SettingChanged => {
             l.ctx.theme.animations = system::animations_enabled();
+            // Tema claro/escuro da barra de tarefas: o ícone troca de cor.
+            crate::tray_loop::show_icon();
             l.apply_bars(false)?;
         }
         // App em tela cheia (vídeo, jogo, apresentação): a barra daquele monitor sai da frente,

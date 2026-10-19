@@ -138,6 +138,11 @@ pub fn spawn_detached(exe: &Path, args: &[String]) -> std::io::Result<()> {
     std::process::Command::new(exe).args(args).creation_flags(DETACHED_PROCESS).spawn().map(|_| ())
 }
 
+/// Barra de tarefas escura (o padrão do Windows 11)? Define a cor do ícone da bandeja.
+pub fn taskbar_dark() -> bool {
+    reg_dword(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "SystemUsesLightTheme").unwrap_or(0) == 0
+}
+
 /// Distros do WSL que já estão rodando (minúsculas). Consultar `\\wsl.localhost` de uma distro
 /// parada a liga, então só se confere caminho nas desta lista. Sem WSL, lista vazia.
 pub fn wsl_running_distros() -> Vec<String> {

@@ -173,7 +173,7 @@ impl Loop {
         }
     }
 
-    fn run_effects(&mut self, fx: Vec<PanelEffect>) -> Result<()> {
+    pub(crate) fn run_effects(&mut self, fx: Vec<PanelEffect>) -> Result<()> {
         self.run_effects_with_focus(fx, true)
     }
 
@@ -590,6 +590,7 @@ impl Loop {
             WinEvent::User { code: USER_CODEX } => self.usage_codex_changed()?,
             WinEvent::User { code: USER_CLAUDE } => self.usage_claude_changed()?,
             WinEvent::User { code: USER_VSCODE } => self.vscode_loaded()?,
+            WinEvent::Tray { mouse } => self.tray_event(mouse)?,
             WinEvent::Character { code, .. } => self.vscode_char(code)?,
             WinEvent::User { code: USER_POWER } => self.power_user_loaded()?,
             WinEvent::Timer { id: TIMER_POWER } => self.power_timer()?,
@@ -687,6 +688,7 @@ pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
         window::set_timer(TIMER_CYCLE, 2000);
     }
     crate::island::start(&l.ctx);
+    crate::tray_loop::show_icon();
     l.refresh_services();
     l.island_services()?;
     l.devices_start();
@@ -713,6 +715,7 @@ fn shutdown(l: &mut Loop) {
     for p in l.panels.drain(..) {
         p.destroy();
     }
+    zefiro_platform_windows::tray::remove();
     crate::island::stop();
 }
 

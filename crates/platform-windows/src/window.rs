@@ -15,6 +15,8 @@ use zefiro_platform::geometry::{Point, Rect};
 
 pub const WM_USER_BASE: u32 = WM_APP + 0x100;
 const WM_APPBAR: u32 = WM_APP + 1;
+/// Cliques no ícone da bandeja (`tray`); `lParam` é a mensagem de mouse.
+pub const WM_TRAY: u32 = WM_APP + 3;
 /// Em `Win32::UI::Controls` na crate windows; definida aqui para não puxar a feature inteira.
 const WM_MOUSELEAVE: u32 = 0x02A3;
 
@@ -48,6 +50,8 @@ pub enum WinEvent {
     DisplayChanged,
     /// Notificação da AppBar (`ABN_*`) com o seu parâmetro (ex.: ABN_FULLSCREENAPP: 1 abriu, 0 fechou).
     AppBar { hwnd: isize, notification: u32, param: isize },
+    /// Ícone da bandeja: `mouse` é WM_LBUTTONUP, WM_RBUTTONUP etc.
+    Tray { mouse: u32 },
     TaskbarCreated,
     SettingChanged,
     User { code: u32 },
@@ -205,6 +209,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         // Não repassa ao DefWindowProc: ele destruiria a janela sem a AppBar sair da tela.
         WM_CLOSE => push(WinEvent::Close { hwnd: h }),
         m if m == WM_APPBAR => push(WinEvent::AppBar { hwnd: h, notification: wp.0 as u32, param: lp.0 }),
+        m if m == WM_TRAY => push(WinEvent::Tray { mouse: (lp.0 & 0xFFFF) as u32 }),
         m if (WM_USER_BASE..WM_USER_BASE + 0x100).contains(&m) => push(WinEvent::User { code: m - WM_USER_BASE }),
         m if Some(&m) == TASKBAR_CREATED.get() => push(WinEvent::TaskbarCreated),
         m if Some(&m) == ISLAND_GEOMETRY.get() => push(WinEvent::IslandGeometryChanged),
