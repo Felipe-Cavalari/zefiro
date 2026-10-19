@@ -4,7 +4,7 @@
 
 Um ambiente de desktop nativo para Windows (barra, ilha de mídia, launcher, dock), sem WebView: leve, fluido e personalizável.
 
-> **Status:** em desenvolvimento (Fase 1a: a barra no design da ilha, com a ilha embutida). Uso pessoal, ainda sem instalador.
+> **Status:** em desenvolvimento (Fase 1 até a 1d: barra no design da ilha, modo de edição, ilha embutida em Rust, áudio e brilho; próxima: itens declarativos). Uso pessoal, ainda sem instalador.
 
 - Planejamento: [`docs/PLANNING.md`](docs/PLANNING.md)
 - Decisões de arquitetura: [`docs/adr/`](docs/adr/)
