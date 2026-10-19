@@ -7,7 +7,7 @@ use windows::core::Result;
 use zefiro_bar::controller::PanelKind;
 use zefiro_bar::usage::{UsageRow, usage_panel};
 use zefiro_integration_clock::windows::utc_offset_seconds;
-use zefiro_integration_usage::claude::{ClaudeUsage, Limit, UsageError};
+use zefiro_integration_usage::claude::{Limit, UsageError};
 use zefiro_integration_usage::codex::{CodexService, CodexUsage, Window, effective_percent, window_name};
 use zefiro_integration_usage::format::{format_absolute, format_relative, format_short, parse_iso_utc};
 use zefiro_platform_windows::claude::ClaudeService;
@@ -50,11 +50,6 @@ fn reset_detail(resets_at: i64, window_minutes: u32, now: i64, offset: i32) -> S
     }
 }
 
-/// % da janela de 5 h do Claude (sem dado em qualquer erro).
-pub fn claude_percent(result: &std::result::Result<ClaudeUsage, UsageError>) -> Option<f32> {
-    result.as_ref().ok().and_then(|u| u.five_hour).map(|l| l.percent)
-}
-
 fn claude_row(label: String, limit: &Limit, window_minutes: u32, now: i64, offset: i32) -> UsageRow {
     let detail = limit.resets_at.map(|t| reset_detail(t, window_minutes, now, offset)).unwrap_or_default();
     UsageRow { label, percent: Some(limit.percent), detail }
@@ -87,14 +82,38 @@ fn capitalized(s: &str) -> String {
 }
 
 impl Loop {
-    /// Liga a leitura do Codex (thread própria, a cada 120 s).
-    pub fn usage_start(&mut self) {
-        self.usage.claude = ClaudeService::start(home().join(".claude").join(".credentials.json"), Arc::new(|| window::post_user(USER_CLAUDE)))
-            .map_err(|e| tracing::warn!("uso do Claude indisponível: {e}"))
-            .ok();
-        self.usage.codex = CodexService::start(home().join(".codex").join("sessions"), Arc::new(|| window::post_user(USER_CODEX)))
-            .map_err(|e| tracing::warn!("uso do Codex indisponível: {e}"))
-            .ok();
+    /// Liga ou desliga o Claude e o Codex conforme os chips estão na barra: sem o chip, o token do
+    /// Claude não é lido nem enviado, e a pasta do Codex não é varrida.
+    pub fn usage_services(&mut self) {
+        let (claude, codex) = (self.ctx.config.bar.uses("claude"), self.ctx.config.bar.uses("codex"));
+        match (claude, self.usage.claude.is_some()) {
+            (true, false) => {
+                tracing::info!("uso do Claude: serviço ligado");
+                self.usage.claude = ClaudeService::start(home().join(".claude").join(".credentials.json"), Arc::new(|| window::post_user(USER_CLAUDE)))
+                    .map_err(|e| tracing::warn!("uso do Claude indisponível: {e}"))
+                    .ok();
+            }
+            (false, true) => {
+                tracing::info!("uso do Claude: serviço desligado (chip fora da barra)");
+                self.usage.claude = None;
+                self.ctx.usage.claude = None;
+            }
+            _ => {}
+        }
+        match (codex, self.usage.codex.is_some()) {
+            (true, false) => {
+                tracing::info!("uso do Codex: serviço ligado");
+                self.usage.codex = CodexService::start(home().join(".codex").join("sessions"), Arc::new(|| window::post_user(USER_CODEX)))
+                    .map_err(|e| tracing::warn!("uso do Codex indisponível: {e}"))
+                    .ok();
+            }
+            (false, true) => {
+                tracing::info!("uso do Codex: serviço desligado (chip fora da barra)");
+                self.usage.codex = None;
+                self.ctx.usage.codex = None;
+            }
+            _ => {}
+        }
     }
 
     fn usage_panel_open(&self, kind: PanelKind) -> bool {
@@ -110,9 +129,17 @@ impl Loop {
         Ok(())
     }
 
+    /// Chega a cada consulta (a cada 2 min): a barra só é refeita se o número do chip mudou; o
+    /// painel aberto é redesenhado sempre (rodapé "Atualizado há").
     pub fn usage_claude_changed(&mut self) -> Result<()> {
+        let before = self.ctx.usage.claude_chip();
         self.ctx.usage.claude = self.usage.claude.as_ref().and_then(ClaudeService::latest);
-        self.apply_bars(true)?;
+        if let Some((_, Ok(u))) = &self.ctx.usage.claude {
+            self.ctx.usage.claude_last_ok = Some(u.clone());
+        }
+        if self.ctx.usage.claude_chip() != before {
+            self.apply_bars(true)?;
+        }
         if self.usage_panel_open(PanelKind::Claude) {
             self.redraw_open_panel()?;
         }

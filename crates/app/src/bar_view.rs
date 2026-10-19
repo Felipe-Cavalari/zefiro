@@ -103,7 +103,7 @@ fn chip_content(ctx: &AppCtx, id: &str, device: &str, height: BarHeight, chip_h:
             level_chip(Level { glyph: ICON_BRIGHTNESS, text: &text, dim: p.is_none() }, chip_h, font_px, scale, t, &ctx.text)
         }
         "codex" => zefiro_bar::usage::usage_chip(crate::usage_loop::CODEX_GLYPH, ctx.usage.codex.as_ref().and_then(|(_, u)| crate::usage_loop::codex_percent(u)), chip_h, font_px, scale, t, &ctx.text),
-        "claude" => zefiro_bar::usage::usage_chip(crate::usage_loop::CLAUDE_GLYPH, ctx.usage.claude.as_ref().and_then(|(_, r)| crate::usage_loop::claude_percent(r)), chip_h, font_px, scale, t, &ctx.text),
+        "claude" => zefiro_bar::usage::usage_chip(crate::usage_loop::CLAUDE_GLYPH, ctx.usage.claude_chip(), chip_h, font_px, scale, t, &ctx.text),
         "notifications" => zefiro_bar::chips::bell_chip(ctx.system.notifications, chip_h, font_px, scale, t, &ctx.text),
         "dnd" => zefiro_bar::chips::dnd_chip(ctx.system.dnd, chip_h, font_px, t),
         "vscode" | "power" => level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text),

@@ -45,6 +45,17 @@ pub fn token_state(credentials_json: &str, now_ms: i64) -> TokenState {
     }
 }
 
+/// % do chip: o resultado atual ou, numa falha passageira (rede, HTTP), o último valor bom. Login
+/// perdido ou formato desconhecido deixam o chip sem número.
+pub fn chip_percent(result: &Result<ClaudeUsage, UsageError>, last_ok: Option<&ClaudeUsage>) -> Option<f32> {
+    let usage = match result {
+        Ok(u) => Some(u),
+        Err(UsageError::Network | UsageError::Http(_)) => last_ok,
+        Err(_) => None,
+    };
+    usage.and_then(|u| u.five_hour).map(|l| l.percent)
+}
+
 /// `Some(Ok)` se for uma janela válida, `Some(Err)` se o formato mudou, `None` se nula ou ausente.
 fn limit(v: &Value) -> Option<Result<Limit, UsageError>> {
     let obj = v.as_object()?;
@@ -131,5 +142,18 @@ mod tests {
     fn valid_token_debug_hides_secret() {
         let shown = format!("{:?}", token_state(CREDENTIALS, 0));
         assert!(!shown.contains("sk-teste-falso"), "{shown}");
+    }
+
+    #[test]
+    fn chip_keeps_last_value_on_transient_errors() {
+        let ok = parse_claude(USAGE).unwrap();
+        assert_eq!(chip_percent(&Ok(ok.clone()), None), Some(42.0));
+        assert_eq!(chip_percent(&Err(UsageError::Network), Some(&ok)), Some(42.0));
+        assert_eq!(chip_percent(&Err(UsageError::Http(503)), Some(&ok)), Some(42.0));
+        assert_eq!(chip_percent(&Err(UsageError::Network), None), None);
+        // Login perdido ou formato novo: sem número, para não enganar.
+        assert_eq!(chip_percent(&Err(UsageError::Expired), Some(&ok)), None);
+        assert_eq!(chip_percent(&Err(UsageError::Missing), Some(&ok)), None);
+        assert_eq!(chip_percent(&Err(UsageError::UnknownFormat), Some(&ok)), None);
     }
 }

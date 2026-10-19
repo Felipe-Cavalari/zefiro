@@ -10,6 +10,8 @@ use zefiro_ui::paint::{DisplayList, DrawOp};
 
 /// Janela do segundo clique.
 const CONFIRM_S: f64 = 3.0;
+/// Segundo clique antes disto é ignorado: um clique duplo não confirma.
+const MIN_CONFIRM_S: f64 = 0.4;
 
 /// Primeiro clique arma Sair/Reiniciar/Desligar; o segundo, em até 3 s, executa.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -27,6 +29,7 @@ impl ConfirmState {
             return Some(a);
         }
         match self.armed {
+            Some((armed, at)) if armed == a && now - at < MIN_CONFIRM_S => None,
             Some((armed, at)) if armed == a && now - at <= CONFIRM_S => {
                 self.armed = None;
                 Some(a)
@@ -182,6 +185,16 @@ mod tests {
         c.click(PowerAction::Shutdown, 0.0);
         assert_eq!(c.click(PowerAction::Lock, 0.5), Some(PowerAction::Lock));
         assert_eq!(c.armed(), None);
+    }
+
+    #[test]
+    fn fast_double_click_does_not_confirm() {
+        // Um clique duplo em "Desligar" não pode desligar: o segundo clique logo depois é ignorado.
+        let mut c = ConfirmState::default();
+        assert_eq!(c.click(PowerAction::Shutdown, 0.0), None);
+        assert_eq!(c.click(PowerAction::Shutdown, 0.2), None);
+        assert_eq!(c.armed(), Some(PowerAction::Shutdown));
+        assert_eq!(c.click(PowerAction::Shutdown, 0.5), Some(PowerAction::Shutdown));
     }
 
     #[test]

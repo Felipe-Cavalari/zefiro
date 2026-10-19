@@ -51,7 +51,7 @@ fn query(credentials: &PathBuf) -> Result<ClaudeUsage, UsageError> {
 
 impl ClaudeService {
     /// Consulta ao iniciar, a cada 120 s e no `refresh` (se o dado tiver mais de 60 s). `notify` é
-    /// chamado (em outra thread) quando o resultado muda.
+    /// chamado (em outra thread) depois de cada consulta.
     pub fn start(credentials: PathBuf, notify: Arc<dyn Fn() + Send + Sync>) -> std::io::Result<ClaudeService> {
         let (tx, rx) = mpsc::channel();
         let state: Shared = Default::default();
@@ -64,21 +64,21 @@ impl ClaudeService {
             while let Wake::Refresh = wake {
                 if last.is_none_or(|t| t.elapsed() >= FRESH) {
                     let result = query(&credentials);
-                    if let Err(e) = &result {
-                        tracing::info!(?e, "uso do Claude indisponível");
-                    }
                     last = Some(Instant::now());
                     let changed = shared
                         .lock()
                         .map(|mut s| {
                             let changed = s.as_ref().is_none_or(|(_, old)| *old != result);
-                            *s = Some((Instant::now(), result));
+                            *s = Some((Instant::now(), result.clone()));
                             changed
                         })
                         .unwrap_or(false);
-                    if changed {
-                        notify();
+                    // Só registra quando o erro muda (sem login, seriam 720 linhas por dia).
+                    if changed && let Err(e) = &result {
+                        tracing::info!(?e, "uso do Claude indisponível");
                     }
+                    // Avisa sempre: mesmo sem mudança, o "Atualizado há" do painel muda.
+                    notify();
                 }
                 wake = match rx.recv_timeout(INTERVAL) {
                     Ok(w) => w,

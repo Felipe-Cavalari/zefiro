@@ -16,18 +16,12 @@ pub struct SystemRuntime {
 }
 
 impl Loop {
-    /// Algum layout mostra o chip `id`?
-    fn layout_has(&self, id: &str) -> bool {
-        let bar = &self.ctx.config.bar;
-        bar.sections.ids().any(|i| i == id) || bar.monitors.values().any(|m| m.sections.ids().any(|i| i == id))
-    }
-
     /// Liga ou desliga o serviço de notificações: a ilha embutida ou o chip precisam dele. O Não
     /// perturbe é lido sempre (uma inscrição WNF por processo, sem consulta).
     pub fn system_services(&mut self) {
         dnd::watch(Arc::new(|| window::post_user(USER_DND)));
         self.ctx.system.dnd = dnd::active();
-        let wanted = self.ctx.config.island.embedded() || self.layout_has("notifications");
+        let wanted = self.ctx.config.island.embedded() || self.ctx.config.bar.uses("notifications");
         match (wanted, self.system.notifications.is_some()) {
             (true, false) => {
                 self.system.notifications = NotificationWatcher::start(Arc::new(|| window::post_user(USER_NOTIFICATION)))
@@ -55,6 +49,12 @@ impl Loop {
             dnd::open_settings();
         }
         Ok(())
+    }
+
+    /// Reavalia os serviços dos chips depois de mudar a configuração (arquivo ou modo de edição).
+    pub fn refresh_services(&mut self) {
+        self.system_services();
+        self.usage_services();
     }
 
     pub fn notification_count(&self) -> usize {

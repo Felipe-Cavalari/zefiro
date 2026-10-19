@@ -111,6 +111,12 @@ impl Sections {
 }
 
 impl BarConfig {
+    /// Algum layout (o compartilhado ou o de algum monitor) mostra o item `id`? Os serviços de cada
+    /// chip só rodam quando ele está na barra.
+    pub fn uses(&self, id: &str) -> bool {
+        self.sections.ids().any(|i| i == id) || self.monitors.values().any(|m| m.sections.ids().any(|i| i == id))
+    }
+
     pub fn sections_for(&self, monitor_id: Option<&str>) -> &Sections {
         if self.layout_mode == LayoutMode::PerMonitor
             && let Some(entry) = monitor_id.and_then(|id| self.monitors.get(id)) {

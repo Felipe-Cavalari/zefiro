@@ -14,9 +14,10 @@ use crate::devices::{Level, level_chip};
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageRow { pub label: String, pub percent: Option<f32>, pub detail: String }
 
-/// Ícone + "42%". A partir de 80 % o texto fica na cor de destaque; sem dado, só o ícone apagado.
+/// Ícone + "42%". A partir de 80 % o texto fica na cor de destaque; sem dado, "—" apagado, na mesma
+/// largura (o painel aberto nasce do chip e não pode andar).
 pub fn usage_chip(glyph: &str, percent: Option<f32>, chip_h: f32, font_px: f32, scale: f32, tokens: &Tokens, m: &dyn TextMeasurer) -> ChipContent {
-    let text = percent.map(|p| format!("{p:.0}%")).unwrap_or_default();
+    let text = percent.map_or_else(|| "—".to_string(), |p| format!("{p:.0}%"));
     let mut chip = level_chip(Level { glyph, text: &text, dim: percent.is_none() }, chip_h, font_px, scale, tokens, m);
     if percent.is_some_and(is_high) {
         for op in &mut chip.list.ops {
@@ -106,10 +107,11 @@ mod tests {
     }
 
     #[test]
-    fn chip_without_data_is_dim_and_empty() {
+    fn chip_without_data_shows_dash_at_stable_width() {
         let c = chip(None);
-        assert_eq!(c.list.ops.len(), 1);
-        assert_eq!(colors(&c.list), vec![tokens().text_secondary]);
+        assert_eq!(texts(&c.list)[1], "—");
+        assert!(colors(&c.list).iter().all(|c| *c == tokens().text_secondary));
+        assert_eq!(c.content_w, chip(Some(100.0)).content_w);
     }
 
     #[test]

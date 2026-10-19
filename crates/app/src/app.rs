@@ -52,7 +52,16 @@ pub struct SystemState {
 pub struct UsageState {
     /// Último resultado do Claude e quando chegou.
     pub claude: Option<(std::time::Instant, Result<zefiro_integration_usage::claude::ClaudeUsage, zefiro_integration_usage::claude::UsageError>)>,
+    /// Último uso do Claude lido com sucesso: o chip continua com ele numa falha de rede.
+    pub claude_last_ok: Option<zefiro_integration_usage::claude::ClaudeUsage>,
     pub codex: Option<(std::time::SystemTime, zefiro_integration_usage::codex::CodexUsage)>,
+}
+
+impl UsageState {
+    /// % do chip do Claude (o último valor bom numa falha passageira).
+    pub fn claude_chip(&self) -> Option<f32> {
+        self.claude.as_ref().and_then(|(_, r)| zefiro_integration_usage::claude::chip_percent(r, self.claude_last_ok.as_ref()))
+    }
 }
 
 /// O que os chips de som, microfone e brilho mostram.

@@ -12,7 +12,7 @@ pub const ITEMS: &[ItemDescriptor] = &[
     ItemDescriptor { id: "codex", name: "Codex", description: "Uso do Codex (janelas de uso)" },
     ItemDescriptor { id: "vscode", name: "VS Code", description: "Projetos recentes do VS Code" },
     ItemDescriptor { id: "notifications", name: "Notificações", description: "Contador; clique abre a central" },
-    ItemDescriptor { id: "dnd", name: "Não perturbe", description: "Liga e desliga o Não perturbe" },
+    ItemDescriptor { id: "dnd", name: "Não perturbe", description: "Mostra o Não perturbe; o clique abre as configurações" },
     ItemDescriptor { id: "power", name: "Energia", description: "Bloquear, suspender, sair, reiniciar e desligar" },
 ];
 

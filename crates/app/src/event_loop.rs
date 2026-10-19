@@ -634,7 +634,7 @@ impl Loop {
                         }
                         self.apply_bars(true)?;
                         crate::island::sync(&self.ctx);
-                        self.system_services();
+                        self.refresh_services();
                         self.island_services()?;
                         self.schedule_clock();
                     }
@@ -674,10 +674,9 @@ pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
         window::set_timer(TIMER_CYCLE, 2000);
     }
     crate::island::start(&l.ctx);
-    l.system_services();
+    l.refresh_services();
     l.island_services()?;
     l.devices_start();
-    l.usage_start();
     'pump: while window::pump() {
         for e in window::take_events() {
             match l.handle(e) {

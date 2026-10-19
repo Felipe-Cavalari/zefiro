@@ -67,3 +67,12 @@ fn set_value_keeps_comments_and_unknown_keys() {
     assert_eq!(c.bar.height, BarHeight::Compacta);
     assert_eq!(c.bar.format, BarFormat::Pilulas);
 }
+
+#[test]
+fn bar_uses_reports_items_in_any_layout() {
+    let c = parse_config("[bar.sections]\nstart = [\"zefiro\"]\nend = [\"claude\", \"clock\"]\n").unwrap();
+    assert!(c.bar.uses("claude"));
+    assert!(!c.bar.uses("codex"));
+    let per_monitor = parse_config("[bar]\nlayout_mode = \"per_monitor\"\n[bar.sections]\nend = [\"clock\"]\n[bar.monitors.abc.sections]\nstart = []\ncenter = []\nend = [\"codex\"]\n").unwrap();
+    assert!(per_monitor.bar.uses("codex"));
+}

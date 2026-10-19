@@ -130,6 +130,8 @@ impl Loop {
         let (id, dir) = (self.ctx.config.theme.clone(), self.ctx.themes_dir.clone());
         self.ctx.theme.reload(&id, &dir);
         self.ctx.text.set_family(&self.ctx.theme.theme.font.family);
+        // Chips adicionados ou removidos no editor ligam ou desligam os serviços deles.
+        self.refresh_services();
         self.apply_bars(true)?;
         self.schedule_clock();
         window::post_user(USER_CONFIG_CHANGED);
