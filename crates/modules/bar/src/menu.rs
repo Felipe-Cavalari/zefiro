@@ -108,6 +108,14 @@ impl MenuModel {
         self.layout(scale).into_iter().find(|b| b.rect.contains(p)).map(|b| b.action)
     }
 
+    /// O mouse leva o destaque (o mesmo do teclado) para o item sob ele. `true` se mudou.
+    pub fn hover(&mut self, p: Point, scale: f32) -> bool {
+        let Some(b) = self.layout(scale).into_iter().find(|b| b.rect.contains(p)) else { return false };
+        let changed = (b.row, b.col) != self.focus;
+        self.focus = (b.row, b.col);
+        changed
+    }
+
     pub fn key(&mut self, k: NavKey) -> Option<MenuAction> {
         let boxes = self.layout(1.0);
         let rows = boxes.iter().map(|b| b.row).max().map_or(0, |r| r + 1);
@@ -156,6 +164,9 @@ impl MenuModel {
                     let inner = b.rect.inset(s(3.0), s(3.0));
                     if self.is_selected(&b.action) {
                         list.push(DrawOp::RoundRect { rect: inner, radius: inner.h / 2.0, color: tokens.raised_strong });
+                    } else if focused {
+                        // Destaque do mouse/teclado: meio caminho até o selecionado.
+                        list.push(DrawOp::RoundRect { rect: inner, radius: inner.h / 2.0, color: tokens.raised_strong.with_alpha(tokens.raised_strong.a * 0.5) });
                     }
                     let label = match &b.action {
                         MenuAction::SetHeight(BarHeight::Completa) => "Completa",
@@ -164,23 +175,20 @@ impl MenuModel {
                         _ => "Pílulas",
                     };
                     list.push(DrawOp::Text { rect: b.rect, text: label.into(), style: body, color: tokens.text, align: Align::Center });
-                    if focused {
-                        list.push(DrawOp::RoundRectStroke { rect: inner, radius: inner.h / 2.0, color: tokens.accent, width: s(1.5) });
-                    }
                 }
                 MenuAction::SetTheme(id) => {
                     let t = self.themes.iter().find(|t| &t.id == id).expect("tema da grade");
                     let c = Point { x: b.rect.center_x(), y: b.rect.y + s(18.0) };
+                    if focused {
+                        list.push(DrawOp::RoundRect { rect: b.rect.inset(s(2.0), s(1.0)), radius: s(10.0), color: tokens.raised });
+                    }
                     if self.is_selected(&b.action) {
                         list.push(DrawOp::Circle { center: c, radius: s(16.0), color: tokens.accent });
                     }
                     list.push(DrawOp::Circle { center: c, radius: s(14.0), color: t.border.unwrap_or(tokens.hairline) });
                     list.push(DrawOp::Circle { center: c, radius: s(13.0), color: t.background.with_alpha(1.0) });
                     list.push(DrawOp::Circle { center: c, radius: s(4.0), color: t.text });
-                    list.push(DrawOp::Text { rect: Rect::new(b.rect.x, b.rect.y + s(36.0), b.rect.w, s(16.0)), text: t.name.clone(), style: small, color: tokens.text_secondary, align: Align::Center });
-                    if focused {
-                        list.push(DrawOp::RoundRectStroke { rect: b.rect.inset(s(2.0), s(2.0)), radius: s(10.0), color: tokens.accent, width: s(1.5) });
-                    }
+                    list.push(DrawOp::Text { rect: Rect::new(b.rect.x, b.rect.y + s(36.0), b.rect.w, s(16.0)), text: t.name.clone(), style: small, color: if focused { tokens.text } else { tokens.text_secondary }, align: Align::Center });
                 }
                 action => {
                     let label = actions().into_iter().find(|(_, a)| a == action).map_or("", |(l, _)| l);
@@ -207,6 +215,17 @@ mod tests {
 
     fn model() -> MenuModel {
         MenuModel::new(BarHeight::Completa, BarFormat::Faixa, "t2", swatches(8))
+    }
+
+    #[test]
+    fn hover_moves_the_highlight_and_reports_only_changes() {
+        let mut m = model();
+        let edit = m.layout(1.0).into_iter().find(|b| b.action == MenuAction::EditBar).unwrap();
+        let p = Point { x: edit.rect.center_x(), y: edit.rect.y + 2.0 };
+        assert!(m.hover(p, 1.0), "entrou em Editar barra");
+        assert_eq!(m.focus(), (edit.row, edit.col));
+        assert!(!m.hover(p, 1.0), "mesmo item: nada a redesenhar");
+        assert!(!m.hover(Point { x: -5.0, y: -5.0 }, 1.0), "fora dos itens o destaque fica onde estava");
     }
 
     #[test]

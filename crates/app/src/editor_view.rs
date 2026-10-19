@@ -2,11 +2,11 @@
 
 use windows::core::Result;
 use zefiro_bar::editor::{EditorSession, Section};
-use zefiro_bar::editor_panel::{EditorAction, EditorPage, EditorPanel};
+use zefiro_bar::editor_panel::{EditorAction, EditorContext, EditorLayout, EditorPage, EditorPanel, PanelDrag, Target, WIDTH_DIP, Zone};
 use zefiro_core::config::{LayoutMode, parse_config};
 use zefiro_core::config_edit::{PatchChoice, PatchError};
 use zefiro_integration_clock::format::ClockText;
-use zefiro_platform::geometry::{Point, Rect, Size};
+use zefiro_platform::geometry::{Point, Rect};
 use zefiro_platform_windows::window::{self, WinEvent};
 use crate::{config_worker::{ConfigWorker, SaveError}, event_loop::{Loop, USER_EDITOR_IO, USER_CONFIG_CHANGED}};
 
@@ -72,10 +72,9 @@ impl Loop {
         let Some(editor) = self.editor.as_ref() else { return Ok(()) };
         if editor.suspended { return Ok(()); }
         let Some(bar) = self.bars.get(editor.monitor) else { return Ok(()) };
-        let names = self.editor_monitor_names();
         let scale = bar.scale();
-        let size = Size { w: (480.0 * scale).min(bar.monitor().rect.w - 16.0 * scale), h: (608.0 * scale).min(bar.monitor().rect.h - 80.0 * scale) };
-        let list = editor.ui.paint(&editor.session, &names, scale, size, &self.ctx.theme.tokens);
+        let Some(layout) = self.editor_layout() else { return Ok(()) };
+        let list = editor.ui.paint(&layout, &editor.session, &self.ctx.theme.tokens);
         let anchor = Rect::new(bar.monitor().rect.x + 8.0 * scale, bar.monitor().rect.y, 40.0 * scale, bar.band_bottom() - bar.monitor().rect.y);
         if self.panels[editor.monitor].open {
             self.panels[editor.monitor].resize(&self.ctx, anchor, bar.band_bottom(), &list)?;
@@ -83,7 +82,7 @@ impl Loop {
             self.panels[editor.monitor].open(&self.ctx, anchor, bar.band_bottom(), &list)?;
         }
         let (ox, oy) = self.panels[editor.monitor].content_origin();
-        let field_rect = editor.ui.boxes(&editor.session, &names, scale, size.w, size.h).into_iter().find(|(action, _)| *action == EditorAction::EditFormat).map(|(_, rect)| Rect::new(rect.x + ox, rect.y + oy, rect.w, rect.h));
+        let field_rect = layout.buttons.iter().find(|b| b.action == EditorAction::EditFormat).map(|b| Rect::new(b.rect.x + ox, b.rect.y + oy, b.rect.w, b.rect.h));
         let owner = self.panels[editor.monitor].hwnd();
         if let Some(editor) = &mut self.editor {
             if editor.ui.editing_format && editor.ui.page == EditorPage::Options {
@@ -97,8 +96,34 @@ impl Loop {
         Ok(())
     }
 
+    /// O nome que o Windows dá é quase sempre "Generic PnP Monitor"; a posição diz mais.
     fn editor_monitor_names(&self) -> Vec<String> {
-        self.bars.iter().map(|bar| format!("{}{}", bar.monitor().identity.name, if bar.monitor().primary { " (principal)" } else { "" })).collect()
+        self.bars.iter().enumerate().map(|(i, bar)| if bar.monitor().primary { "Principal".into() } else { format!("Monitor {}", i + 1) }).collect()
+    }
+
+    /// Layout do painel do editor no monitor dele (tamanho e posição de chips, seções e botões).
+    fn editor_layout(&self) -> Option<EditorLayout> {
+        let editor = self.editor.as_ref()?;
+        let bar = self.bars.get(editor.monitor)?;
+        let scale = bar.scale();
+        let names = self.editor_monitor_names();
+        let cx = EditorContext {
+            session: &editor.session,
+            monitors: &names,
+            monitor: editor.monitor,
+            island_locked: bar.monitor().primary && editor.session.draft.island.enabled,
+            scale,
+            width: (WIDTH_DIP * scale).min(bar.monitor().rect.w - 16.0 * scale),
+        };
+        Some(editor.ui.layout(&cx, &self.ctx.text))
+    }
+
+    /// Ponto do evento na área do conteúdo do painel do editor, se o evento veio desse painel.
+    fn editor_panel_point(&self, hwnd: isize, x: f32, y: f32) -> Option<Point> {
+        let editor = self.editor.as_ref()?;
+        let index = self.panel_index(hwnd).filter(|i| *i == editor.monitor)?;
+        let (ox, oy) = self.panels[index].content_origin();
+        Some(Point { x: x - ox, y: y - oy })
     }
 
     fn apply_editor_preview(&mut self) -> Result<()> {
@@ -219,13 +244,8 @@ impl Loop {
     }
 
     pub fn editor_action(&mut self, action: EditorAction) -> Result<()> {
-        let names = self.editor_monitor_names();
-        let (_, panel_height) = self.editor_panel_size();
-        let visible = self.editor.as_ref().map_or(8, |editor| EditorPanel::visible_count(self.bars[editor.monitor].scale(), panel_height));
-        let follow_item = matches!(action, EditorAction::MoveBefore | EditorAction::MoveAfter | EditorAction::MoveSection(_) | EditorAction::Add(_));
         let Some(mut editor) = self.editor.take() else { return Ok(()) };
         if editor.session.saving { self.editor = Some(editor); return Ok(()); }
-        editor.ui.focus_action(&editor.session, &names, &action, visible);
         let connected = self.bars.iter().filter_map(|bar| bar.monitor().identity.id.clone()).collect::<Vec<_>>();
         let mut error = None;
         match action {
@@ -262,10 +282,9 @@ impl Loop {
                 editor.session.set_mode(mode, &connected);
                 editor.ui.message = if mode == LayoutMode::Shared { "O layout selecionado será usado em todos; layouts próprios preservados".into() } else { "Layouts próprios recuperados; novas telas recebem cópia do compartilhado".into() };
             }
-            EditorAction::SelectSection(section) => { editor.ui.section = Some(section); editor.ui.message = section.label().into(); }
-            EditorAction::SelectItem(id) => { editor.ui.selected = Some(id); editor.ui.message = "Espaço inicia movimento por teclado".into(); }
+            EditorAction::SelectItem(id) => { editor.ui.selected = Some(id); editor.ui.message = "Arraste para mover; Espaço move pelo teclado".into(); }
             EditorAction::Add(id) => {
-                error = editor.session.add(&id, editor.ui.section.unwrap_or(Section::Start)).err();
+                error = editor.session.add(&id, Section::End).err();
                 editor.ui.page = EditorPage::Items;
                 editor.ui.selected = Some(id);
             }
@@ -282,13 +301,11 @@ impl Loop {
                     let index = if action == EditorAction::MoveBefore { index.saturating_sub(1) } else { index + 1 };
                     error = editor.session.move_item(id, section, index).err();
             },
-            EditorAction::CopyMonitor(id) => error = editor.session.copy_monitor_layout(&id).err(),
-            EditorAction::Gallery => { editor.ui.page = EditorPage::Gallery; editor.ui.focus = 0; editor.ui.scroll = 0; }
             EditorAction::Options => {
-                editor.ui.page = EditorPage::Options; editor.ui.focus = 0; editor.ui.scroll = 0;
-                editor.ui.message = if editor.ui.selected.as_deref() == Some("clock") { "Aplica-se a todos os relógios" } else { "Este item não tem opções próprias nesta fase" }.into();
+                editor.ui.page = EditorPage::Options; editor.ui.focus = None; editor.ui.hover = None;
+                editor.ui.message = "Aplica-se a todos os relógios".into();
             }
-            EditorAction::Back => { editor.ui.page = EditorPage::Items; editor.ui.focus = 0; editor.ui.scroll = 0; editor.ui.editing_format = false; }
+            EditorAction::Back => { editor.ui.page = EditorPage::Items; editor.ui.focus = None; editor.ui.hover = None; editor.ui.editing_format = false; editor.ui.message.clear(); }
             EditorAction::ToggleSeconds => editor.session.draft.clock.seconds = !editor.session.draft.clock.seconds,
             EditorAction::EditFormat => { editor.ui.editing_format = true; editor.ui.format_select_all = true; editor.ui.message = "Digite o padrão de data do Windows; Enter confirma, Ctrl+A seleciona tudo".into(); }
             EditorAction::SystemFormat => { editor.session.draft.clock.format.clear(); editor.ui.editing_format = false; }
@@ -302,11 +319,35 @@ impl Loop {
             }
         }
         if let Some(error) = error { editor.ui.message = error; }
-        if follow_item && let Some(id) = editor.ui.selected.clone() {
-            editor.ui.focus_action(&editor.session, &names, &EditorAction::SelectItem(id), visible);
-        }
         if let Err(error) = self.ctx.clock.validate_format(&editor.session.draft.clock.format) { editor.ui.message = error; }
         self.editor = Some(editor);
+        self.apply_editor_preview()
+    }
+
+    /// Soltou um chip arrastado no painel: move entre as seções, adiciona (vindo da prateleira) ou
+    /// tira da barra (solto na prateleira). Fora das zonas, nada muda.
+    fn editor_drop(&mut self, id: &str, target: Option<(Zone, usize)>) -> Result<()> {
+        let Some(editor) = self.editor.as_mut() else { return Ok(()) };
+        let present = editor.session.sections().ids().any(|item| item == id);
+        let result = match target {
+            None => Ok(()),
+            Some((Zone::Shelf, _)) if present => editor.session.remove(id),
+            Some((Zone::Shelf, _)) => Ok(()),
+            Some((Zone::Section(section), index)) => {
+                let added = if present { Ok(()) } else { editor.session.add(id, section) };
+                added.and_then(|_| editor.session.move_item(id, section, index))
+            }
+        };
+        editor.ui.message = match (result, target) {
+            (Err(error), _) => error,
+            (Ok(()), Some((Zone::Shelf, _))) => "Item tirado da barra".into(),
+            (Ok(()), Some((Zone::Section(section), _))) => format!("Movido para {}", section.label()),
+            (Ok(()), None) => String::new(),
+        };
+        editor.ui.selected = match target {
+            Some((Zone::Section(_), _)) => Some(id.into()),
+            _ => None,
+        };
         self.apply_editor_preview()
     }
 
@@ -368,8 +409,72 @@ impl Loop {
                     self.apply_editor_preview()?;
                 }
             }
-            WinEvent::CaptureLost { .. } => { if let Some(editor) = &mut self.editor { editor.drag = None; editor.session.cancel_move(); } for bar in &mut self.bars { bar.clear_drag()?; } self.apply_editor_preview()?; }
+            WinEvent::CaptureLost { .. } => { if let Some(editor) = &mut self.editor { editor.drag = None; editor.ui.drag = None; editor.ui.pressed = None; editor.session.cancel_move(); } for bar in &mut self.bars { bar.clear_drag()?; } self.apply_editor_preview()?; }
             WinEvent::RightUp { hwnd, .. } => if let Some(index) = self.bar_index(hwnd) { self.start_editor(index)?; },
+            WinEvent::LeftDown { hwnd, x, y } if self.editor_panel_point(hwnd, x, y).is_some() => {
+                let p = self.editor_panel_point(hwnd, x, y).expect("conferido acima");
+                let Some(layout) = self.editor_layout() else { return Ok(true) };
+                let monitor = self.editor.as_ref().map_or(0, |e| e.monitor);
+                let editor = self.editor.as_mut().expect("sessão verificada");
+                if editor.session.saving { return Ok(true); }
+                match EditorPanel::hit(&layout, p) {
+                    Some(Target::Chip(id)) => {
+                        editor.ui.drag = Some(PanelDrag { id, origin: p, point: p, active: false });
+                        window::capture(self.panels[monitor].hwnd());
+                    }
+                    Some(target @ Target::Button(_)) => editor.ui.pressed = Some(target),
+                    None => return Ok(true),
+                }
+                self.redraw_editor()?;
+            }
+            WinEvent::MouseMove { hwnd, x, y } if self.editor_panel_point(hwnd, x, y).is_some() => {
+                let p = self.editor_panel_point(hwnd, x, y).expect("conferido acima");
+                let Some(layout) = self.editor_layout() else { return Ok(true) };
+                let scale = self.bars[self.editor.as_ref().map_or(0, |e| e.monitor)].scale();
+                let editor = self.editor.as_mut().expect("sessão verificada");
+                let changed = if let Some(drag) = &mut editor.ui.drag {
+                    drag.point = p;
+                    drag.active |= zefiro_ui::edit_layout::starts_drag(drag.origin, p, scale);
+                    let active = drag.active;
+                    if active {
+                        editor.ui.message = match editor.ui.drag_target(&layout) {
+                            Some((Zone::Shelf, _)) => "Solte para tirar da barra".into(),
+                            Some((Zone::Section(section), index)) => format!("Mover para {} · posição {}", section.label(), index + 1),
+                            None => "Fora das seções: solte para cancelar".into(),
+                        };
+                    }
+                    active
+                } else {
+                    let hover = EditorPanel::hit(&layout, p);
+                    let changed = hover != editor.ui.hover;
+                    editor.ui.hover = hover;
+                    changed
+                };
+                if changed { self.redraw_editor()?; }
+            }
+            WinEvent::MouseLeave { hwnd } if self.editor.as_ref().is_some_and(|e| self.panel_index(hwnd) == Some(e.monitor)) => {
+                let editor = self.editor.as_mut().expect("sessão verificada");
+                if editor.ui.hover.take().is_some() && editor.ui.drag.is_none() { self.redraw_editor()?; }
+            }
+            WinEvent::LeftUp { hwnd, x, y } if self.editor_panel_point(hwnd, x, y).is_some() => {
+                let p = self.editor_panel_point(hwnd, x, y).expect("conferido acima");
+                let Some(layout) = self.editor_layout() else { return Ok(true) };
+                let editor = self.editor.as_mut().expect("sessão verificada");
+                let pressed = editor.ui.pressed.take();
+                if let Some(drag) = editor.ui.drag.take() {
+                    window::release_capture();
+                    if !drag.active {
+                        // Clique sem arrastar: seleciona (o Relógio ganha o botão de opções).
+                        return self.editor_action(EditorAction::SelectItem(drag.id)).map(|_| true);
+                    }
+                    let target = EditorPanel::zone_at(&layout, p).map(|zone| (zone, EditorPanel::drop_index(&layout, zone, p, &drag.id)));
+                    return self.editor_drop(&drag.id, target).map(|_| true);
+                }
+                match EditorPanel::hit(&layout, p) {
+                    Some(Target::Button(action)) if pressed == Some(Target::Button(action.clone())) && layout.buttons.iter().any(|b| b.action == action && b.enabled) => self.editor_action(action)?,
+                    _ => self.redraw_editor()?,
+                }
+            }
             WinEvent::LeftDown { hwnd, x, y } => {
                 if let Some(index) = self.bar_index(hwnd) {
                     let Some(id) = self.bars[index].chip_at(x, y).filter(|id| !id.starts_with("__more")) else { return Ok(true) };
@@ -424,7 +529,7 @@ impl Loop {
                     }
                 }
             }
-            WinEvent::LeftUp { hwnd, x, y } => {
+            WinEvent::LeftUp { hwnd, .. } => {
                 if let Some(index) = self.bar_index(hwnd) {
                     let editor = self.editor.as_mut().expect("sessão verificada");
                     if editor.monitor == index {
@@ -436,25 +541,10 @@ impl Loop {
                         self.bars[index].clear_drag()?;
                         self.apply_editor_preview()?;
                     }
-                } else if let Some(index) = self.panel_index(hwnd) {
-                    let editor = self.editor.as_ref().expect("sessão verificada");
-                    if editor.monitor == index {
-                        let names = self.editor_monitor_names();
-                        let scale = self.bars[index].scale();
-                        let (ox, oy) = self.panels[index].content_origin();
-                        let (w, h) = self.editor_panel_size();
-                        let hit = editor.ui.boxes(&editor.session, &names, scale, w, h).into_iter().find(|(_, r)| r.contains(Point { x: x - ox, y: y - oy })).map(|(action, _)| action);
-                        if let Some(action) = hit {
-                            let enabled = editor.ui.rows(&editor.session, &names).iter().any(|row| row.action == action && row.enabled);
-                            if enabled { self.editor_action(action)?; }
-                        }
-                    }
                 }
             }
-            WinEvent::Wheel { delta, .. } => {
-                if let Some(editor) = &mut self.editor { editor.ui.scroll = (editor.ui.scroll as i32 + if delta > 0 { -2 } else { 2 }).max(0) as usize; }
-                self.redraw_editor()?;
-            }
+            // O painel cresce com o conteúdo; não há o que rolar.
+            WinEvent::Wheel { .. } => {}
             WinEvent::Key { vk, .. } => { self.editor_key(vk)?; }
             WinEvent::ControlChanged { control, .. } => {
                 if let Some(editor) = &mut self.editor && !editor.session.saving
@@ -482,12 +572,6 @@ impl Loop {
         Ok(true)
     }
 
-    fn editor_panel_size(&self) -> (f32, f32) {
-        let Some(editor) = &self.editor else { return (480.0, 608.0) };
-        let bar = &self.bars[editor.monitor];
-        ((480.0 * bar.scale()).min(bar.monitor().rect.w - 16.0 * bar.scale()), (608.0 * bar.scale()).min(bar.monitor().rect.h - 80.0 * bar.scale()))
-    }
-
     fn editor_key(&mut self, vk: u32) -> Result<()> {
         let Some(editor) = &self.editor else { return Ok(()) };
         if editor.session.saving { return Ok(()); }
@@ -506,20 +590,19 @@ impl Loop {
             if vk == 0x0D || vk == 0x09 { self.editor.as_mut().expect("sessão verificada").ui.editing_format = false; return self.redraw_editor(); }
             return Ok(());
         }
-        if vk == 0x20 && !editor.ui.moving {
-            let names = self.editor_monitor_names();
-            let rows = editor.ui.rows(&editor.session, &names);
-            if let Some(row) = rows.get(editor.ui.focus) && row.enabled {
-                if let EditorAction::SelectItem(id) = &row.action {
+        if (vk == 0x20 || vk == 0x0D) && !editor.ui.moving {
+            match editor.ui.focus.clone() {
+                Some(Target::Chip(id)) => {
                     let editor = self.editor.as_mut().expect("sessão verificada");
                     editor.ui.selected = Some(id.clone());
-                    editor.ui.moving = editor.session.begin_move(id).is_ok();
+                    editor.ui.moving = editor.session.begin_move(&id).is_ok();
                     editor.ui.message = "Setas movem; Enter confirma; Esc cancela o movimento".into();
                     return self.redraw_editor();
                 }
-                return self.editor_action(row.action.clone());
+                Some(Target::Button(action)) => return self.editor_action(action),
+                None if vk == 0x0D => return self.editor_action(EditorAction::Save),
+                None => return Ok(()),
             }
-            return Ok(());
         }
         if editor.ui.moving {
             match vk {
@@ -535,15 +618,10 @@ impl Loop {
                 _ => return Ok(()),
             }
         }
-        let names = self.editor_monitor_names();
-        let rows = editor.ui.rows(&editor.session, &names);
-        if vk == 0x0D {
-            if let Some(row) = rows.get(editor.ui.focus) && row.enabled { return self.editor_action(row.action.clone()); }
-        } else if matches!(vk, 0x09 | 0x26 | 0x28) {
-            let scale = self.bars[editor.monitor].scale();
-            let (_, height) = self.editor_panel_size();
-            let delta = if vk == 0x26 || (vk == 0x09 && window::shift_pressed()) { -1 } else { 1 };
-            self.editor.as_mut().expect("sessão verificada").ui.navigate(delta, rows.len(), EditorPanel::visible_count(scale, height));
+        if matches!(vk, 0x09 | 0x25 | 0x26 | 0x27 | 0x28) {
+            let Some(layout) = self.editor_layout() else { return Ok(()) };
+            let delta = if matches!(vk, 0x25 | 0x26) || (vk == 0x09 && window::shift_pressed()) { -1 } else { 1 };
+            self.editor.as_mut().expect("sessão verificada").ui.navigate(&layout, delta);
             self.redraw_editor()?;
         }
         Ok(())

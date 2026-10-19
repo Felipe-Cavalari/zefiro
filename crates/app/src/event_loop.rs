@@ -467,6 +467,13 @@ impl Loop {
                 if let Some(i) = self.panel_index(hwnd) {
                     let (ox, oy) = self.panels[i].content_origin();
                     self.devices_move(Point { x: x - ox, y: y - oy })?;
+                    // Menu do Z: o item sob o mouse ganha o destaque (só redesenha quando muda).
+                    let scale = self.bars[i].scale();
+                    if self.effective_open_kind() == Some(PanelKind::Menu)
+                        && self.menu.as_mut().is_some_and(|m| m.hover(Point { x: x - ox, y: y - oy }, scale))
+                    {
+                        self.redraw_open_panel()?;
+                    }
                 }
                 if let Some(i) = self.bar_index(hwnd) {
                     let chip = self.bars[i].chip_at(x, y);
