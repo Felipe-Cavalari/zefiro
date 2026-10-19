@@ -39,6 +39,20 @@ fn local_path(uri: &str) -> Option<PathBuf> {
     Some(PathBuf::from(format!("{drive}{}", chars.as_str().replace('/', "\\"))))
 }
 
+/// Caminho Windows de uma pasta do WSL: `vscode-remote://wsl+ubuntu/home/x` →
+/// `\\wsl.localhost\ubuntu\home\x`. Outros remotos não têm caminho local.
+pub fn wsl_path(uri: &str) -> Option<PathBuf> {
+    let rest = uri.strip_prefix("vscode-remote://")?;
+    let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+    let distro = percent_decode(authority).strip_prefix("wsl+")?.to_string();
+    Some(PathBuf::from(format!(r"\\wsl.localhost\{distro}\{}", percent_decode(path).replace('/', "\\"))))
+}
+
+/// A distro de um caminho `\\wsl.localhost\<distro>\...`, para saber se dá para conferir sem ligar o WSL.
+pub fn wsl_distro(path: &Path) -> Option<&str> {
+    path.to_str()?.strip_prefix(r"\\wsl.localhost\")?.split('\\').next().filter(|d| !d.is_empty())
+}
+
 fn capitalized(s: &str) -> String {
     let mut c = s.chars();
     c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
@@ -84,17 +98,18 @@ fn modified(dir: &Path) -> Option<SystemTime> {
     folder.max(state)
 }
 
-/// Até `max` projetos de `storage_dir`, do mais recente ao mais antigo. Pastas locais para as
-/// quais `local_exists` é falso (apagadas) ficam fora; entradas ilegíveis também.
-pub fn read_recents(storage_dir: &Path, local_exists: &dyn Fn(&Path) -> bool, max: usize) -> Vec<Recent> {
+/// Até `max` projetos de `storage_dir`, do mais recente ao mais antigo. Pastas locais e do WSL
+/// (pelo caminho `\\wsl.localhost\...`) para as quais `exists` é falso (apagadas) ficam fora;
+/// entradas ilegíveis também. Quem chama decide não acessar o WSL desligado (`wsl_distro`).
+pub fn read_recents(storage_dir: &Path, exists: &dyn Fn(&Path) -> bool, max: usize) -> Vec<Recent> {
     let Ok(entries) = std::fs::read_dir(storage_dir) else { return Vec::new() };
     let mut recents: Vec<Recent> = entries
         .flatten()
         .filter_map(|entry| {
             let dir = entry.path();
             let (uri, is_workspace) = parse_workspace_json(&std::fs::read_to_string(dir.join("workspace.json")).ok()?)?;
-            if let Some(path) = local_path(&uri)
-                && !local_exists(&path)
+            if let Some(path) = local_path(&uri).or_else(|| wsl_path(&uri))
+                && !exists(&path)
             {
                 return None;
             }
@@ -161,7 +176,10 @@ mod tests {
     }
 
     fn storage(entries: &[(&str, &str)]) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("zefiro-vscode-{}-{}", std::process::id(), entries.len()));
+        // Uma pasta por chamada: os testes rodam em paralelo.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("zefiro-vscode-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         for (hash, json) in entries {
             std::fs::create_dir_all(dir.join(hash)).unwrap();
@@ -174,6 +192,19 @@ mod tests {
     #[test]
     fn deleted_local_folder_is_skipped() {
         let dir = storage(&[("a", r#"{"folder": "file:///c%3A/existe"}"#), ("b", r#"{"folder": "file:///c%3A/apagada"}"#)]);
+        let exists = |p: &Path| p.ends_with("existe");
+        let names: Vec<String> = read_recents(&dir, &exists, 20).into_iter().map(|r| r.name).collect();
+        assert_eq!(names, vec!["existe"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn wsl_folder_is_checked_through_its_windows_path() {
+        assert_eq!(wsl_path("vscode-remote://wsl%2Bubuntu-24.04/home/felip/Projects/a%20b"), Some(PathBuf::from(r"\\wsl.localhost\ubuntu-24.04\home\felip\Projects\a b")));
+        assert_eq!(wsl_path("vscode-remote://ssh-remote%2Bdevbox/srv"), None, "só WSL tem caminho no Windows");
+        assert_eq!(wsl_distro(Path::new(r"\\wsl.localhost\ubuntu-24.04\home\x")), Some("ubuntu-24.04"));
+        assert_eq!(wsl_distro(Path::new(r"C:\x")), None);
+        let dir = storage(&[("a", r#"{"folder": "vscode-remote://wsl%2Bubuntu-24.04/home/existe"}"#), ("b", r#"{"folder": "vscode-remote://wsl%2Bubuntu-24.04/home/apagada"}"#)]);
         let exists = |p: &Path| p.ends_with("existe");
         let names: Vec<String> = read_recents(&dir, &exists, 20).into_iter().map(|r| r.name).collect();
         assert_eq!(names, vec!["existe"]);

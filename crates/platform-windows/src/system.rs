@@ -113,6 +113,20 @@ pub fn spawn_detached(exe: &Path, args: &[String]) -> std::io::Result<()> {
     std::process::Command::new(exe).args(args).creation_flags(DETACHED_PROCESS).spawn().map(|_| ())
 }
 
+/// Distros do WSL que já estão rodando (minúsculas). Consultar `\\wsl.localhost` de uma distro
+/// parada a liga, então só se confere caminho nas desta lista. Sem WSL, lista vazia.
+pub fn wsl_running_distros() -> Vec<String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let Ok(out) = std::process::Command::new("wsl.exe").args(["--list", "--running", "--quiet"]).creation_flags(CREATE_NO_WINDOW).output() else { return Vec::new() };
+    if !out.status.success() {
+        return Vec::new();
+    }
+    // O wsl.exe escreve em UTF-16LE.
+    let wide: Vec<u16> = out.stdout.as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes(*b)).collect();
+    String::from_utf16_lossy(&wide).lines().map(|l| l.trim().trim_matches('\0').to_lowercase()).filter(|l| !l.is_empty()).collect()
+}
+
 /// O `Code.exe` do VS Code: ao lado do `bin\code.cmd` que estiver no PATH, senão nas pastas padrão
 /// de instalação (do usuário e do sistema).
 pub fn find_code_exe() -> Option<PathBuf> {

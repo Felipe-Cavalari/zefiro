@@ -7,7 +7,7 @@ use windows::core::Result;
 use zefiro_bar::controller::PanelKind;
 use zefiro_bar::vscode::{RecentRow, Search, VISIBLE, edit_query, matches, max_scroll, vscode_panel};
 use zefiro_integration_usage::format::format_short;
-use zefiro_integration_vscode::{Kind, Recent, open_args, read_recents};
+use zefiro_integration_vscode::{Kind, Recent, open_args, read_recents, wsl_distro};
 use zefiro_platform::geometry::{Point, Rect};
 use zefiro_platform_windows::{system, window};
 use zefiro_ui::paint::DisplayList;
@@ -67,7 +67,13 @@ impl Loop {
         let incoming = v.incoming.clone();
         let spawned = std::thread::Builder::new().name("zefiro-vscode".into()).spawn(move || {
             let code = system::find_code_exe();
-            let list = read_recents(&storage_dir(), &|p| p.exists(), MAX);
+            // Pastas do WSL só são conferidas com a distro rodando; parada, ficam (não dá para saber).
+            let running = system::wsl_running_distros();
+            let exists = |p: &std::path::Path| match wsl_distro(p) {
+                Some(distro) if !running.iter().any(|r| r.eq_ignore_ascii_case(distro)) => true,
+                _ => p.exists(),
+            };
+            let list = read_recents(&storage_dir(), &exists, MAX);
             if let Ok(mut slot) = incoming.lock() {
                 *slot = Some((list, code));
             }
