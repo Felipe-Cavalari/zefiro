@@ -56,6 +56,8 @@ pub const USER_BRIGHTNESS: u32 = 18;
 pub const USER_CODEX: u32 = 19;
 /// O uso do Claude mudou.
 pub const USER_CLAUDE: u32 = 20;
+/// A lista de projetos do VS Code foi lida.
+pub const USER_VSCODE: u32 = 21;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
@@ -102,6 +104,7 @@ pub struct Loop {
     pub(crate) island: crate::island_loop::IslandRuntime,
     pub(crate) devices: crate::devices_loop::DevicesRuntime,
     pub(crate) usage: crate::usage_loop::UsageRuntime,
+    pub(crate) vscode: crate::vscode_loop::VsCodeRuntime,
     /// Ciclos de medição: (total, feitos).
     cycles: Option<(u32, u32)>,
 }
@@ -123,7 +126,7 @@ impl Loop {
             panels.push(PanelView::create(&ctx, b.monitor())?);
         }
         let today = now_local().date;
-        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), devices: Default::default(), usage: Default::default(), cycles: None })
+        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), cycles: None })
     }
 
     pub(crate) fn bar_index(&self, hwnd: isize) -> Option<usize> { self.bars.iter().position(|b| b.hwnd().0 as isize == hwnd) }
@@ -156,7 +159,8 @@ impl Loop {
             PanelKind::Island => self.island_panel_list(scale),
             PanelKind::Audio | PanelKind::Mic | PanelKind::Brightness => self.devices_panel_list(kind, scale),
             PanelKind::Claude | PanelKind::Codex => self.usage_panel_list(kind, scale),
-            PanelKind::VsCode | PanelKind::Power => DisplayList::new(Size { w: 320.0 * scale, h: 80.0 * scale }),
+            PanelKind::VsCode => self.vscode_panel_list(scale),
+            PanelKind::Power => DisplayList::new(Size { w: 320.0 * scale, h: 80.0 * scale }),
         }
     }
 
@@ -192,6 +196,7 @@ impl Loop {
                     tracing::info!(monitor = p.monitor, chip = %p.chip, "painel abrindo");
                     self.devices_prepare(p.kind);
                     self.usage_prepare(p.kind);
+                    self.vscode_prepare(p.kind);
                     if p.kind == PanelKind::Island {
                         self.island_panel_opening();
                     }
@@ -402,6 +407,8 @@ impl Loop {
                     let hit = self.menu.as_ref().and_then(|m| m.hit(Point { x: x - ox, y: y - oy }, scale));
                     if self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) {
                         self.island_panel_click(Point { x: x - ox, y: y - oy })?;
+                    } else if self.vscode_click(Point { x: x - ox, y: y - oy })? {
+                        // Projeto do VS Code aberto (ou clique fora das linhas).
                     } else if self.devices_up(Point { x: x - ox, y: y - oy })? {
                         // Som, microfone ou brilho: arraste terminado, mudo ou troca de dispositivo.
                     } else if let Some(a) = hit {
@@ -528,6 +535,9 @@ impl Loop {
                 if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) {
                     return self.island_wheel(delta).map(|_| true);
                 }
+                if self.panel_index(hwnd).is_some() && self.vscode_wheel(delta)? {
+                    return Ok(true);
+                }
                 if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind == PanelKind::Overflow) {
                     self.overflow_scroll = if delta > 0 { self.overflow_scroll.saturating_sub(1) } else { (self.overflow_scroll + 1).min(self.overflow_ids.len().saturating_sub(1)) };
                     self.redraw_open_panel()?;
@@ -556,6 +566,7 @@ impl Loop {
             WinEvent::User { code: USER_BRIGHTNESS } => self.devices_brightness_changed()?,
             WinEvent::User { code: USER_CODEX } => self.usage_codex_changed()?,
             WinEvent::User { code: USER_CLAUDE } => self.usage_claude_changed()?,
+            WinEvent::User { code: USER_VSCODE } => self.vscode_loaded()?,
             WinEvent::User { code: USER_PRIVACY } => self.island_privacy_changed()?,
             WinEvent::User { code: USER_NOTIFICATION } => self.island_notifications()?,
             WinEvent::User { code: USER_DND } => self.island_dnd_changed()?,

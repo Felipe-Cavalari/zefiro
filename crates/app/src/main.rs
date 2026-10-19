@@ -13,6 +13,7 @@ mod panel_view;
 mod robustness;
 mod tab_strip;
 mod usage_loop;
+mod vscode_loop;
 mod theme_state;
 
 use std::time::Instant;

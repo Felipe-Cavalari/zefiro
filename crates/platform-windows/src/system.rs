@@ -100,6 +100,25 @@ pub fn single_instance(name: &str) -> bool {
     }
 }
 
+/// Abre um programa de janela sem console e sem prender o Zefiro a ele.
+pub fn spawn_detached(exe: &Path, args: &[String]) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    std::process::Command::new(exe).args(args).creation_flags(DETACHED_PROCESS).spawn().map(|_| ())
+}
+
+/// O `Code.exe` do VS Code: ao lado do `bin\code.cmd` que estiver no PATH, senão nas pastas padrão
+/// de instalação (do usuário e do sistema).
+pub fn find_code_exe() -> Option<PathBuf> {
+    let from_path = std::env::var_os("PATH").into_iter().flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).find_map(|dir| {
+        dir.join("code.cmd").is_file().then(|| dir.parent().map(|p| p.join("Code.exe"))).flatten()
+    });
+    let defaults = [("LOCALAPPDATA", r"Programs\Microsoft VS Code\Code.exe"), ("ProgramFiles", r"Microsoft VS Code\Code.exe")]
+        .into_iter()
+        .filter_map(|(var, rel)| std::env::var_os(var).map(|base| PathBuf::from(base).join(rel)));
+    from_path.into_iter().chain(defaults).find(|p| p.is_file())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

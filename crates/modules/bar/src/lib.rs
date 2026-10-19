@@ -9,3 +9,4 @@ pub mod editor;
 pub mod editor_panel;
 pub mod menu;
 pub mod usage;
+pub mod vscode;

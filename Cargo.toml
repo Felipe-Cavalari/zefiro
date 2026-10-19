@@ -8,6 +8,7 @@ members = [
   "crates/integrations/clock",
   "crates/integrations/devices",
   "crates/integrations/usage",
+  "crates/integrations/vscode",
   "crates/modules/bar",
   "crates/modules/island-host",
   "crates/modules/island",
@@ -35,6 +36,7 @@ zefiro-ui = { path = "crates/ui" }
 zefiro-integration-clock = { path = "crates/integrations/clock" }
 zefiro-integration-devices = { path = "crates/integrations/devices" }
 zefiro-integration-usage = { path = "crates/integrations/usage" }
+zefiro-integration-vscode = { path = "crates/integrations/vscode" }
 zefiro-bar = { path = "crates/modules/bar" }
 zefiro-island-host = { path = "crates/modules/island-host" }
 zefiro-island = { path = "crates/modules/island" }

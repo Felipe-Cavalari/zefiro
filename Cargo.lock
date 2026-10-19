@@ -863,6 +863,7 @@ dependencies = [
  "zefiro-integration-clock",
  "zefiro-integration-devices",
  "zefiro-integration-usage",
+ "zefiro-integration-vscode",
  "zefiro-island",
  "zefiro-island-host",
  "zefiro-platform",
@@ -916,6 +917,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "zefiro-integration-vscode"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "zefiro-island"
 version = "0.1.0"
 dependencies = [
@@ -952,6 +960,7 @@ dependencies = [
  "windows-numerics",
  "zefiro-integration-devices",
  "zefiro-integration-usage",
+ "zefiro-integration-vscode",
  "zefiro-island",
  "zefiro-platform",
  "zefiro-resources",
