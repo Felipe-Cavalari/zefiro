@@ -75,7 +75,6 @@ impl Loop {
                     w.clear();
                 }
             }
-            MouseButton::Right => {}
         }
         Ok(())
     }

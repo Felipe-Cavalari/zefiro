@@ -276,6 +276,8 @@ Situações que a spec implica e que nenhum teste da tarefa dona cobriria sem es
 
 ### Tarefa 9: Apps
 
+> **Removida a pedido do usuário (2026-10-19).** O chip foi implementado e, ao ver na tela, o usuário pediu para tirar: misturar atalhos com apps abertos não ficou bom, e a barra de tarefas do Windows e o Raycast já cobrem. O código foi descartado e o id `apps` saiu do catálogo. O texto abaixo fica só como registro.
+
 **Arquivos:**
 - Criar: `crates/modules/bar/src/apps.rs` (modelo portável e desenho)
 - Criar: `crates/platform-windows/src/taskbar.rs` (janelas, ganchos, ações e atalhos `.lnk`)

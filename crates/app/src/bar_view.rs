@@ -72,17 +72,9 @@ fn island_content(ctx: &AppCtx, pill_h: f32) -> PillContent {
     }
 }
 
-/// Ícone dos chips da 1e enquanto o dado não chega.
-fn pending_glyph(id: &str) -> &'static str {
-    match id {
-        "claude" => "\u{E945}",
-        "codex" => "\u{E943}",
-        "vscode" => "\u{E8B7}",
-        "apps" => "\u{E71D}",
-        "notifications" => "\u{EA8F}",
-        "dnd" => "\u{E708}",
-        _ => "\u{E7E8}",
-    }
+/// Ícone dos chips de VS Code e Energia (só ícone).
+fn icon_glyph(id: &str) -> &'static str {
+    if id == "vscode" { "\u{E8B7}" } else { "\u{E7E8}" }
 }
 
 /// `device`: monitor desta barra (o chip de brilho mostra o brilho dele).
@@ -114,10 +106,7 @@ fn chip_content(ctx: &AppCtx, id: &str, device: &str, height: BarHeight, chip_h:
         "claude" => zefiro_bar::usage::usage_chip(crate::usage_loop::CLAUDE_GLYPH, ctx.usage.claude.as_ref().and_then(|(_, r)| crate::usage_loop::claude_percent(r)), chip_h, font_px, scale, t, &ctx.text),
         "notifications" => zefiro_bar::chips::bell_chip(ctx.system.notifications, chip_h, font_px, scale, t, &ctx.text),
         "dnd" => zefiro_bar::chips::dnd_chip(ctx.system.dnd, chip_h, font_px, t),
-        "vscode" | "power" => level_chip(Level { glyph: pending_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text),
-        "apps" => {
-            level_chip(Level { glyph: pending_glyph(id), text: "", dim: true }, chip_h, font_px, scale, t, &ctx.text)
-        }
+        "vscode" | "power" => level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text),
         _ => clock_chip("⋯", chip_h, font_px, t, &ctx.text),
     }
 }

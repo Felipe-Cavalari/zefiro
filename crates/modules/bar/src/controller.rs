@@ -29,9 +29,9 @@ pub fn panel_kind_for(chip: &str) -> Option<PanelKind> {
     }
 }
 
-/// Chips que agem direto no clique, sem painel (Apps, Notificações, Não perturbe).
+/// Chips que agem direto no clique, sem painel (Notificações, Não perturbe).
 pub fn action_chip(chip: &str) -> bool {
-    matches!(chip, "apps" | "notifications" | "dnd")
+    matches!(chip, "notifications" | "dnd")
 }
 
 #[derive(Debug, Default)]
@@ -85,7 +85,7 @@ mod tests {
         assert_eq!(panel_kind_for("codex"), Some(PanelKind::Codex));
         assert_eq!(panel_kind_for("vscode"), Some(PanelKind::VsCode));
         assert_eq!(panel_kind_for("power"), Some(PanelKind::Power));
-        for id in ["apps", "notifications", "dnd"] {
+        for id in ["notifications", "dnd"] {
             assert_eq!(panel_kind_for(id), None);
             assert!(action_chip(id));
         }

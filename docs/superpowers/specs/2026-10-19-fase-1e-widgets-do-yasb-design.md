@@ -1,7 +1,7 @@
 # Zefiro — Fase 1e: Widgets do YASB que faltam (spec)
 
 > **Data:** 2026-10-19
-> **Status:** proposta, aguardando aprovação do usuário.
+> **Status:** aprovada em 2026-10-19. Em 2026-10-19, durante a implementação, o usuário pediu para **remover o chip Apps** (§4.4): a barra de tarefas do Windows e o Raycast já cobrem os atalhos e os apps abertos. A fase entrega seis widgets.
 > **Base:** `~/.config/yasb/config.yaml` do usuário (a barra que o Zefiro substitui), [PLANNING](../../PLANNING.md) (§2 widgets da Fase 1, §3.4 threads, §12 roteiro), [ADR-0009](../../adr/0009-ilha-embutida-na-barra.md) (ilha embutida) e [ADR-0010](../../adr/0010-audio-e-brilho-fase-1d.md) (áudio e brilho, modelo de chip + painel).
 
 ## 1. Objetivo
@@ -28,19 +28,19 @@ Barra principal do YASB: `left: komorebi_control, komorebi_workspaces, komorebi_
 | `claude_usage` | — | **Claude** (§4.1) |
 | `codex_usage` | — | **Codex** (§4.2) |
 | `vscode` | — | **VS Code** (§4.3) |
-| `taskbar` | — | **Apps** (§4.4) |
+| `taskbar` | — | fora: removido a pedido do usuário (barra de tarefas do Windows e Raycast) |
 | `notifications` | Avisos de notificação na pílula | **Notificações** (§4.5): contador e central |
 | `dnd` | Indicador na pílula | **Não perturbe** (§4.6): alternar |
 | `power_menu` | "Sair" do menu do Zefiro só fecha a barra | **Energia** (§4.7) |
 
 ## 3. Regras comuns
 
-- **Catálogo:** sete itens novos em `crates/modules/bar/src/catalog.rs`, com ids `claude`, `codex`, `vscode`, `apps`, `notifications`, `dnd`, `power`. Aparecem na galeria do modo de edição (1b) como os outros.
-- **Configuração do usuário intocada:** a fase não grava nada no `config.toml` dele. Os itens novos só aparecem quando ele os adiciona pela galeria ou pelo arquivo. No fim da fase, a entrega oferece (e só faz com um "sim") colocar os itens na ordem do YASB: `start = ["zefiro", "apps"]`, `end = ["claude", "codex", "vscode", "brightness", "audio", "mic", "notifications", "dnd", "power", "clock"]`.
+- **Catálogo:** seis itens novos em `crates/modules/bar/src/catalog.rs`, com ids `claude`, `codex`, `vscode`, `notifications`, `dnd`, `power`. Aparecem na galeria do modo de edição (1b) como os outros.
+- **Configuração do usuário intocada:** a fase não grava nada no `config.toml` dele. Os itens novos só aparecem quando ele os adiciona pela galeria ou pelo arquivo. No fim da fase, a entrega oferece (e só faz com um "sim") colocar os itens na ordem do YASB: `end = ["claude", "codex", "vscode", "brightness", "audio", "mic", "notifications", "dnd", "power", "clock"]`.
 - **Cliques**, iguais aos chips atuais:
   - esquerdo abre ou fecha o painel do chip;
-  - direito continua abrindo o menu do Zefiro em qualquer ponto da barra, **exceto** num ícone do chip Apps, que abre o menu daquele app (§4.4);
-  - botão do meio é novo e só tem efeito no Apps (nova janela) e em Notificações (limpar). Nos outros chips não faz nada.
+  - direito continua abrindo o menu do Zefiro em qualquer ponto da barra;
+  - botão do meio é novo e só tem efeito em Notificações (limpar). Nos outros chips não faz nada.
 
   O YASB usava o botão direito para alternar o rótulo (`toggle_label`); aqui o painel mostra os dois valores, então o chip não alterna rótulo.
 - **Visual:** chip = ícone (Segoe Fluent Icons) + texto curto, no `level_chip` da 1d (largura reservada quando o texto é numérico). Painéis no estilo dos painéis de som/brilho: título, linhas, separadores, tokens do tema. Nenhum token novo no formato de tema.
@@ -98,24 +98,9 @@ O que o YASB mostrava: ícone; menu "VS Code · recentes" com até 20 pastas e 1
 - **Abrir:** `code --folder-uri <uri>` para pastas (locais e remotas) e `code --file-uri <uri>` para workspaces, sem janela de console. Se o `code` não estiver no PATH, usar o `Code.exe` instalado (`%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe`). Pastas locais que não existem mais ficam fora da lista.
 - **Ritmo:** lê a pasta ao abrir o painel, numa thread. Sem consulta periódica.
 
-### 4.4 Apps (`apps`)
+### 4.4 Apps (removido)
 
-O que o YASB mostrava (`taskbar`): ícones de 18 px dos apps abertos, agrupados por app, sem título. Clique alterna a janela e o botão direito abre o menu de contexto. O usuário descreveu este widget como "os atalhos dos apps mais usados".
-
-- **Chip:** uma fileira de ícones (18 px a 100 %, escalando com o DPI), na ordem:
-  1. **apps fixados:** por padrão, os atalhos fixados na barra de tarefas do Windows (`%APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\*.lnk`; hoje Brave, Explorador de Arquivos e VS Code);
-  2. **apps abertos** que não estão fixados.
-
-  App aberto tem um ponto de 3 px embaixo do ícone; o app em primeiro plano tem o ponto em `accent`. As janelas são agrupadas por app (AUMID quando houver, senão o executável). Passou de 12 ícones, os excedentes vão para o painel de excedentes que já existe.
-- **Cliques num ícone:**
-  - **esquerdo:** app fechado abre; app com uma janela ativa minimiza; com uma janela em segundo plano traz para frente; com várias janelas alterna entre elas a cada clique;
-  - **meio:** abre uma nova instância;
-  - **direito:** menu nativo do app com "Nova janela", "Fixar na barra" ou "Desafixar da barra" e, se estiver aberto, "Fechar janela" (ou "Fechar todas as janelas", com várias).
-- **Fixados próprios:** fixar ou desafixar grava `[apps] pinned = [...]` (caminhos de `.lnk`/exe ou AUMIDs) no `config.toml`, com `toml_edit` preservando comentários. Enquanto a chave não existe, valem os fixados do Windows. O Zefiro nunca altera a barra de tarefas do Windows.
-- **Quais janelas contam:** visíveis, sem dono, que não sejam ferramenta e não estejam "cloaked", com o mesmo critério da barra de tarefas. Ficam fora as janelas do próprio Zefiro e as janelas sem título. Todas as barras mostram as janelas de todos os monitores, como o `monitor_exclusive: false` do YASB.
-- **Fonte:** ganchos `SetWinEventHook` (criar, destruir, mostrar, esconder, primeiro plano, mudança de nome) numa thread própria, sem consulta periódica. Ícones pelo `app_icon.rs` da ilha, com cache por app.
-- **Painel:** o chip Apps não tem painel. O clique esquerdo age direto no ícone.
-- **Clique por ícone:** hoje um chip é uma área de clique só. O conteúdo do Apps devolve também o retângulo de cada ícone, e a barra resolve qual ícone foi clicado a partir disso. O realce do mouse fica no ícone, não no chip inteiro. Só o Apps usa isso.
+Implementado e removido a pedido do usuário em 2026-10-19: misturar atalhos fixados com apps abertos não ficou bom, e a barra de tarefas do Windows e o Raycast já cobrem os dois usos. Nada do chip ficou no código.
 
 ### 4.5 Notificações (`notifications`)
 
@@ -155,8 +140,8 @@ A regra de ouro continua: a crate `windows` só aparece em `platform-windows`, `
 | `crates/integrations/usage` (nova, portável) | Parser da resposta do Claude, leitura do fim do `.jsonl` do Codex, nomes das janelas, formatação de "reinicia em" (relativa) e da data absoluta a partir de um relógio injetado, e a regra de cor por faixa. Arquivos com `std::fs`. A thread que lê o Codex mora aqui. |
 | `crates/integrations/vscode` (nova, portável) | Leitura do `workspaceStorage`, decodificação de URI (`file:///c%3A/...`, `vscode-remote://wsl%2B...`), nome curto, selo e ordenação. |
 | `crates/modules/bar` | Chips e painéis dos sete itens (`DisplayList`), áreas de clique, rolagem da lista do VS Code, catálogo e `PanelKind` novos (`Claude`, `Codex`, `VsCode`, `Power`). |
-| `crates/platform-windows` | HTTP do Claude (reaproveita `http.rs`), janelas e ganchos do Apps (`taskbar.rs`), ícones (reaproveita `app_icon.rs`), abrir processos sem console, contagem e limpeza de notificações, escrita do Não perturbe, ações de energia, foto e nome da conta, tempo ligado. |
-| `crates/app` | Um `*_loop.rs` por grupo (`usage_loop.rs`, `apps_loop.rs`, `system_loop.rs`, no padrão do `devices_loop.rs`), roteamento dos cliques, inclusive o botão do meio novo. |
+| `crates/platform-windows` | HTTP do Claude (reaproveita `http.rs`), abrir processos sem console, contagem e limpeza de notificações, escrita do Não perturbe, ações de energia, foto e nome da conta, tempo ligado. |
+| `crates/app` | Um `*_loop.rs` por grupo (`usage_loop.rs`, `vscode_loop.rs`, `power_loop.rs`, `system_loop.rs`, no padrão do `devices_loop.rs`), roteamento dos cliques, inclusive o botão do meio novo. |
 | CI | As crates portáveis novas entram no `cargo check` do Linux. |
 
 ## 6. Desempenho e robustez
@@ -165,9 +150,8 @@ A regra de ouro continua: a crate `windows` só aparece em `platform-windows`, `
 - **Memória:** com os sete chips, no máximo **+4 MB privados** em relação à barra sem eles, medido do mesmo jeito que no ADR-0010. A memória que fica depois de abrir os painéis também é medida e registrada, sem meta própria.
 - **Sem consulta por quadro.**
   - Periódicas: Claude e Codex a cada 120 s; no Codex é só um `stat`.
-  - Por evento: Apps, notificações e Não perturbe.
+  - Por evento: notificações e Não perturbe.
   - Só ao abrir o painel: VS Code e o tempo ligado.
-- **Apps:** o gancho de eventos não pode travar a UI. A thread filtra e agrupa os eventos e só avisa quando o conjunto de apps ou o app em primeiro plano muda, no máximo uma vez a cada 50 ms.
 - **Fonte travada:** HTTP com tempo limite de 15 s, como o `timeout` do YASB. Leitura de arquivo nunca na thread da UI.
 
 ## 7. Validação e critérios de aceite
@@ -179,7 +163,6 @@ Seguindo o AGENTS.md: TDD em toda lógica portável e sonda que falha antes e pa
 | Claude | Parser com resposta real anonimizada, campos ausentes, formato desconhecido, token vencido; formatação de reinício. | Chip e painel com dados reais; com o token vencido simulado no perfil de teste (cópia do arquivo de credenciais **sem** token válido), mostra o aviso. |
 | Codex | Fim de `.jsonl` com e sem `rate_limits`, linha cortada no começo do bloco, janela já reiniciada, nomes de janela. | Chip e painel batendo com o último evento do arquivo. |
 | VS Code | Decodificação de URIs locais, WSL e workspace; ordenação; pasta local apagada some. | Abrir um projeto local e um do WSL pelo painel. |
-| Apps | Agrupamento por app, ordem fixados → abertos, gravação de `[apps] pinned` preservando comentários. | Abrir, alternar, minimizar, nova janela, fechar e fixar com o Bloco de notas como app de teste (nunca fechar apps do usuário). |
 | Notificações | Formatação do contador. | Contagem muda com uma notificação de teste; o clique abre a central. Limpar só com o usuário de acordo. |
 | Não perturbe | — | A sonda do §4.6 decide entre alternar e abrir as configurações. |
 | Energia | Formatação do tempo ligado; máquina de estados da confirmação (primeiro clique arma, 3 s desarma, fechar cancela). | Bloquear validado com o usuário presente. **Suspender, Sair, Reiniciar e Desligar não são executados nos testes**: valida-se até o estado "confirmar", e a chamada final é coberta por uma sonda que roda com a ação trocada por um registro. |
@@ -196,13 +179,13 @@ Esta spec muda o roteiro do PLANNING (**decisão minha**, a confirmar na aprova�
 
 | Etapa | Antes | Depois |
 |---|---|---|
-| 1e | Itens declarativos v1 + linguagem de expressões; Claude e Codex como itens | **Widgets do YASB que faltam**: Claude, Codex, VS Code, Apps, Notificações, Não perturbe e Energia, nativos |
+| 1e | Itens declarativos v1 + linguagem de expressões; Claude e Codex como itens | **Widgets do YASB que faltam**: Claude, Codex, VS Code, Notificações, Não perturbe e Energia, nativos (o Apps foi removido a pedido do usuário) |
 | 1f | VS Code, Pomodoro, Modo foco, Modo noturno, Notificações | **Itens declarativos v1** + linguagem de expressões + Modo noturno (o único da antiga 1f que não entra aqui) |
 | 1g | Tema, HUD, diagnóstico, 2 semanas de uso | igual |
 
 Claude e Codex nascem nativos. Quando os itens declarativos chegarem, eles podem ser refeitos como itens sobre os mesmos parsers, que já ficam em crate portável.
 
-Ordem sugerida de entrega dentro da 1e, da mais simples para a mais arriscada: Codex → Claude → VS Code → Energia → Notificações → Não perturbe (com a sonda) → Apps.
+Ordem sugerida de entrega dentro da 1e, da mais simples para a mais arriscada: Codex → Claude → VS Code → Energia → Notificações → Não perturbe (com a sonda).
 
 ## 9. Fora do escopo e decisões minhas
 
@@ -213,16 +196,16 @@ Ordem sugerida de entrega dentro da 1e, da mais simples para a mais arriscada: C
 - arquivos recentes soltos do VS Code e busca na lista de projetos;
 - dicas flutuantes (tooltips);
 - alternar o rótulo pelo botão direito;
-- pré-visualização de janelas no Apps;
+- o chip Apps (removido a pedido do usuário);
 - itens declarativos.
 
 **Decisões minhas, para conferir na leitura:**
 
 1. Pomodoro coberto pelo timer da ilha.
-2. Botão direito continua sendo o menu do Zefiro, exceto nos ícones do Apps.
+2. Botão direito continua sendo o menu do Zefiro.
 3. Cor por faixa só com o `accent` (≥ 80 %), sem tokens novos.
 4. VS Code pelo `workspaceStorage`, sem SQLite e sem arquivos soltos.
-5. Apps começa com os fixados do Windows e grava os próprios em `[apps] pinned`.
+5. (Apps removido.)
 6. Confirmação por segundo clique em Sair, Reiniciar e Desligar.
 7. Itens novos fora do `config.toml` do usuário até ele aceitar a ordem do YASB no fim da fase.
 8. Roteiro: declarativos passam para a 1f.

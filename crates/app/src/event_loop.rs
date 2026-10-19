@@ -88,7 +88,7 @@ const VK_RIGHT: u32 = 0x27;
 const VK_DOWN: u32 = 0x28;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MouseButton { Left, Middle, Right }
+pub enum MouseButton { Left, Middle }
 
 pub struct Loop {
     pub ctx: AppCtx,
@@ -282,9 +282,9 @@ impl Loop {
         })
     }
 
-    /// Clique num chip que age direto (Apps, Notificações, Não perturbe), botão do meio em qualquer
-    /// chip e botão direito no Apps. Cada widget trata o seu caso.
-    pub fn chip_action(&mut self, bar: usize, chip: &str, button: MouseButton, _x: f32, _y: f32) -> Result<()> {
+    /// Clique num chip que age direto (Notificações, Não perturbe) e botão do meio em qualquer chip.
+    /// Cada widget trata o seu caso.
+    pub fn chip_action(&mut self, bar: usize, chip: &str, button: MouseButton) -> Result<()> {
         tracing::info!(bar, chip, ?button, "ação de chip");
         match chip {
             "notifications" => self.notifications_action(button),
@@ -403,7 +403,7 @@ impl Loop {
                 if let Some(i) = self.bar_index(hwnd) {
                     if let Some(chip) = self.bars[i].chip_at(x, y).filter(|c| zefiro_bar::controller::action_chip(c)) {
                         self.close_open_panel()?;
-                        return self.chip_action(i, &chip, MouseButton::Left, x, y).map(|_| true);
+                        return self.chip_action(i, &chip, MouseButton::Left).map(|_| true);
                     }
                     let input = match self.bars[i].chip_at(x, y) {
                         Some(chip) => PanelInput::ChipClick { monitor: i, chip },
@@ -440,7 +440,7 @@ impl Loop {
                 if let Some(i) = self.bar_index(hwnd)
                     && let Some(chip) = self.bars[i].chip_at(x, y)
                 {
-                    self.chip_action(i, &chip, MouseButton::Middle, x, y)?;
+                    self.chip_action(i, &chip, MouseButton::Middle)?;
                 }
             }
             WinEvent::RightUp { hwnd, x, y } => {
@@ -449,9 +449,6 @@ impl Loop {
                     if self.bars[i].chip_at(x, y).as_deref() == Some(crate::bar_view::ISLAND_CHIP) {
                         self.close_open_panel()?;
                         return self.island_menu(i).map(|_| true);
-                    }
-                    if self.bars[i].chip_at(x, y).as_deref() == Some("apps") {
-                        return self.chip_action(i, "apps", MouseButton::Right, x, y).map(|_| true);
                     }
                     let already = self.controller.open().is_some_and(|o| o.chip == "zefiro" && o.monitor == i);
                     if !already {
