@@ -134,13 +134,19 @@ impl Comp {
     /// Move uma posição de `spring_offset`: com mola (parte do valor atual) ou na hora.
     pub fn move_offset(&self, props: &CompositionPropertySet, x: f32, y: f32, spring: Option<SpringParams>) -> Result<()> {
         for (k, v) in [("x", x), ("y", y)] {
-            match spring {
-                Some(p) => props.StartAnimation(&HSTRING::from(k), &self.scalar_spring(v, p)?)?,
+            let a: CompositionAnimation = match spring {
+                Some(p) => self.scalar_spring(v, p)?.cast()?,
+                // "Na hora" também é animação: `StopAnimation` + `InsertScalar` logo depois de uma mola
+                // perdia para a parada, que o compositor aplica depois e grava o valor do meio do
+                // caminho por cima do nosso (chips parados fora do lugar). Medido na 1d.
                 None => {
-                    props.StopAnimation(&HSTRING::from(k))?;
-                    props.InsertScalar(&HSTRING::from(k), v)?;
+                    let a = self.compositor.CreateScalarKeyFrameAnimation()?;
+                    a.InsertKeyFrame(1.0, v)?;
+                    a.SetDuration(TimeSpan { Duration: 10_000 })?;
+                    a.cast()?
                 }
-            }
+            };
+            props.StartAnimation(&HSTRING::from(k), &a)?;
         }
         Ok(())
     }
