@@ -83,7 +83,7 @@ pub fn newest_session(sessions_dir: &Path) -> Option<(SystemTime, PathBuf)> {
 pub fn read_codex(sessions_dir: &Path) -> Option<(PathBuf, SystemTime, CodexUsage)> {
     let mut files = Vec::new();
     collect(sessions_dir, &mut files);
-    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.sort_by_key(|f| std::cmp::Reverse(f.0));
     files.into_iter().take(MAX_FILES).find_map(|(modified, path)| {
         let usage = parse_codex_tail(&tail(&path)?)?;
         Some((path, modified, usage))
@@ -97,7 +97,7 @@ pub fn effective_percent(w: &Window, now_unix: i64) -> f32 {
 
 /// Nome da janela pelos minutos: 300 → "5 horas", 10080 → "7 dias".
 pub fn window_name(minutes: u32) -> String {
-    if minutes >= 1440 && minutes % 1440 == 0 {
+    if minutes >= 1440 && minutes.is_multiple_of(1440) {
         let d = minutes / 1440;
         format!("{d} {}", if d == 1 { "dia" } else { "dias" })
     } else {
