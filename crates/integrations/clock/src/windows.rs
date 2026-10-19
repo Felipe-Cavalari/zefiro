@@ -4,7 +4,7 @@ use crate::format::{ClockText, LocalTime};
 use crate::grid::Date;
 use windows::Win32::Foundation::SYSTEMTIME;
 use windows::Win32::Globalization::*;
-use windows::Win32::System::SystemInformation::GetLocalTime;
+use windows::Win32::System::SystemInformation::{GetLocalTime, GetSystemTime};
 use windows::core::{HSTRING, PCWSTR};
 
 /// `LOCALE_NAME_USER_DEFAULT` (NULL no SDK; a crate windows não exporta a constante).
@@ -88,6 +88,24 @@ impl ClockText for WindowsClock {
     }
 }
 
+/// Diferença entre a hora local e a UTC agora, em segundos (−10800 em Brasília), arredondada ao
+/// quarto de hora.
+pub fn utc_offset_seconds() -> i32 {
+    // SAFETY: sem parâmetros; as duas leituras são feitas em seguida.
+    let (local, utc) = unsafe { (GetLocalTime(), GetSystemTime()) };
+    let minutes = |t: SYSTEMTIME| {
+        // Dias civis (Howard Hinnant), bastam para a diferença entre as duas datas.
+        let (y, m) = (i64::from(t.wYear) - i64::from(t.wMonth <= 2), i64::from(t.wMonth));
+        let era = y.div_euclid(400);
+        let yoe = y - era * 400;
+        let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + i64::from(t.wDay) - 1;
+        let days = era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        days * 1440 + i64::from(t.wHour) * 60 + i64::from(t.wMinute)
+    };
+    let diff = minutes(local) - minutes(utc);
+    ((diff as f64 / 15.0).round() as i32) * 900
+}
+
 pub fn now_local() -> LocalTime {
     // SAFETY: sem parâmetros.
     let st = unsafe { GetLocalTime() };
@@ -112,5 +130,12 @@ mod tests {
         assert!(!c.long_date(now.date).is_empty());
         assert!(c.weekday_initials().iter().all(|s| !s.is_empty()));
         assert!(c.first_weekday() < 7);
+    }
+
+    #[test]
+    fn utc_offset_is_a_whole_quarter_hour() {
+        let o = utc_offset_seconds();
+        assert!((-14 * 3600..=14 * 3600).contains(&o));
+        assert_eq!(o % 900, 0);
     }
 }

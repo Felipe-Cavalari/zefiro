@@ -862,6 +862,7 @@ dependencies = [
  "zefiro-core",
  "zefiro-integration-clock",
  "zefiro-integration-devices",
+ "zefiro-integration-usage",
  "zefiro-island",
  "zefiro-island-host",
  "zefiro-platform",
@@ -876,6 +877,7 @@ version = "0.1.0"
 dependencies = [
  "zefiro-core",
  "zefiro-integration-clock",
+ "zefiro-integration-usage",
  "zefiro-platform",
  "zefiro-resources",
  "zefiro-ui",

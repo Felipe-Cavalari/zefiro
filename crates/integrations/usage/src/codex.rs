@@ -106,6 +106,67 @@ pub fn window_name(minutes: u32) -> String {
     }
 }
 
+/// Ritmo da leitura: só um `stat` do arquivo mais novo; relê quando ele muda.
+const INTERVAL: std::time::Duration = std::time::Duration::from_secs(120);
+
+enum Wake { Refresh, Stop }
+
+type Shared = std::sync::Arc<std::sync::Mutex<Option<(SystemTime, CodexUsage)>>>;
+
+/// Thread `zefiro-codex`: lê ao iniciar, a cada 120 s e quando pedem (`refresh`), e avisa
+/// `notify` (em outra thread) quando o uso muda.
+pub struct CodexService {
+    tx: std::sync::mpsc::Sender<Wake>,
+    state: Shared,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl CodexService {
+    pub fn start(sessions_dir: PathBuf, notify: std::sync::Arc<dyn Fn() + Send + Sync>) -> std::io::Result<CodexService> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let state: Shared = Default::default();
+        let shared = state.clone();
+        let thread = std::thread::Builder::new().name("zefiro-codex".into()).spawn(move || {
+            let mut seen: Option<(SystemTime, PathBuf)> = None;
+            loop {
+                let newest = newest_session(&sessions_dir);
+                if newest != seen {
+                    seen = newest;
+                    let usage = read_codex(&sessions_dir).map(|(_, modified, usage)| (modified, usage));
+                    let changed = shared.lock().map(|mut s| std::mem::replace(&mut *s, usage.clone()) != usage).unwrap_or(false);
+                    if changed {
+                        notify();
+                    }
+                }
+                match rx.recv_timeout(INTERVAL) {
+                    Ok(Wake::Refresh) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                    Ok(Wake::Stop) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            }
+        })?;
+        Ok(CodexService { tx, state, thread: Some(thread) })
+    }
+
+    /// O último uso lido e quando o arquivo dele foi modificado.
+    pub fn latest(&self) -> Option<(SystemTime, CodexUsage)> {
+        self.state.lock().ok().and_then(|s| s.clone())
+    }
+
+    /// Confere o arquivo agora (ao abrir o painel).
+    pub fn refresh(&self) {
+        let _ = self.tx.send(Wake::Refresh);
+    }
+}
+
+impl Drop for CodexService {
+    fn drop(&mut self) {
+        let _ = self.tx.send(Wake::Stop);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,5 +225,23 @@ mod tests {
         assert_eq!(window_name(10080), "7 dias");
         assert_eq!(window_name(2880), "2 dias");
         assert_eq!(window_name(120), "2 horas");
+    }
+    #[test]
+    fn service_reads_on_start_and_rereads_on_refresh() {
+        let dir = std::env::temp_dir().join(format!("zefiro-codex-svc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.jsonl"), SESSION).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let svc = CodexService::start(dir.clone(), std::sync::Arc::new(move || { let _ = tx.send(()); })).unwrap();
+        rx.recv_timeout(std::time::Duration::from_secs(3)).expect("aviso inicial");
+        assert_eq!(svc.latest().unwrap().1.primary.unwrap().used_percent, 80.0);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let newer = SESSION.replace("\"used_percent\": 80.0", "\"used_percent\": 42.0");
+        std::fs::write(dir.join("b.jsonl"), newer).unwrap();
+        svc.refresh();
+        rx.recv_timeout(std::time::Duration::from_secs(3)).expect("aviso depois do refresh");
+        assert_eq!(svc.latest().unwrap().1.primary.unwrap().used_percent, 42.0);
+        drop(svc);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

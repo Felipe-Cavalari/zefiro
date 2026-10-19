@@ -52,6 +52,8 @@ pub const USER_LYRICS: u32 = 16;
 pub const USER_MIC: u32 = 17;
 /// Nova leitura do brilho dos monitores.
 pub const USER_BRIGHTNESS: u32 = 18;
+/// O uso do Codex mudou.
+pub const USER_CODEX: u32 = 19;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
@@ -97,6 +99,7 @@ pub struct Loop {
     pub(crate) shown_month: (i32, u32),
     pub(crate) island: crate::island_loop::IslandRuntime,
     pub(crate) devices: crate::devices_loop::DevicesRuntime,
+    pub(crate) usage: crate::usage_loop::UsageRuntime,
     /// Ciclos de medição: (total, feitos).
     cycles: Option<(u32, u32)>,
 }
@@ -118,7 +121,7 @@ impl Loop {
             panels.push(PanelView::create(&ctx, b.monitor())?);
         }
         let today = now_local().date;
-        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), devices: Default::default(), cycles: None })
+        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), devices: Default::default(), usage: Default::default(), cycles: None })
     }
 
     pub(crate) fn bar_index(&self, hwnd: isize) -> Option<usize> { self.bars.iter().position(|b| b.hwnd().0 as isize == hwnd) }
@@ -150,7 +153,8 @@ impl Loop {
             }
             PanelKind::Island => self.island_panel_list(scale),
             PanelKind::Audio | PanelKind::Mic | PanelKind::Brightness => self.devices_panel_list(kind, scale),
-            PanelKind::Claude | PanelKind::Codex | PanelKind::VsCode | PanelKind::Power => DisplayList::new(Size { w: 320.0 * scale, h: 80.0 * scale }),
+            PanelKind::Claude | PanelKind::Codex => self.usage_panel_list(kind, scale),
+            PanelKind::VsCode | PanelKind::Power => DisplayList::new(Size { w: 320.0 * scale, h: 80.0 * scale }),
         }
     }
 
@@ -185,6 +189,7 @@ impl Loop {
                     }
                     tracing::info!(monitor = p.monitor, chip = %p.chip, "painel abrindo");
                     self.devices_prepare(p.kind);
+                    self.usage_prepare(p.kind);
                     if p.kind == PanelKind::Island {
                         self.island_panel_opening();
                     }
@@ -547,6 +552,7 @@ impl Loop {
             WinEvent::User { code: USER_VOLUME } => self.devices_volume_changed(zefiro_platform_windows::audio_devices::Flow::Output)?,
             WinEvent::User { code: USER_MIC } => self.devices_volume_changed(zefiro_platform_windows::audio_devices::Flow::Input)?,
             WinEvent::User { code: USER_BRIGHTNESS } => self.devices_brightness_changed()?,
+            WinEvent::User { code: USER_CODEX } => self.usage_codex_changed()?,
             WinEvent::User { code: USER_PRIVACY } => self.island_privacy_changed()?,
             WinEvent::User { code: USER_NOTIFICATION } => self.island_notifications()?,
             WinEvent::User { code: USER_DND } => self.island_dnd_changed()?,
@@ -635,6 +641,7 @@ pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
     crate::island::start(&l.ctx);
     l.island_services()?;
     l.devices_start();
+    l.usage_start();
     'pump: while window::pump() {
         for e in window::take_events() {
             match l.handle(e) {

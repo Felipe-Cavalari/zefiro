@@ -25,6 +25,8 @@ pub struct AppCtx {
     pub island: IslandModel,
     /// Som, microfone e brilho (chips da barra, painéis e avisos da ilha).
     pub devices: DeviceState,
+    /// Uso do Claude e do Codex (chips e painéis).
+    pub usage: UsageState,
     pub epoch: Instant,
 }
 
@@ -33,6 +35,12 @@ impl AppCtx {
     pub fn now(&self) -> f64 {
         self.epoch.elapsed().as_secs_f64()
     }
+}
+
+/// O que os chips de uso mostram: o último uso do Codex lido e quando o arquivo mudou.
+#[derive(Debug, Clone, Default)]
+pub struct UsageState {
+    pub codex: Option<(std::time::SystemTime, zefiro_integration_usage::codex::CodexUsage)>,
 }
 
 /// O que os chips de som, microfone e brilho mostram.

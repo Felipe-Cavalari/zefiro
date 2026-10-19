@@ -41,6 +41,38 @@ pub fn format_absolute(unix: i64, utc_offset_s: i32) -> String {
     format!("{} {day} {}, {:02}:{:02}", WEEKDAYS[weekday], MONTHS[month as usize - 1], secs / 3600, secs % 3600 / 60)
 }
 
+/// Dias desde 1970-01-01 de uma data civil (algoritmo `days_from_civil` de Howard Hinnant).
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
+    era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468
+}
+
+/// `2026-10-16T02:56:30.609Z` → segundos Unix. Só o formato UTC com `Z` que o Codex grava.
+pub fn parse_iso_utc(s: &str) -> Option<i64> {
+    let s = s.strip_suffix('Z')?;
+    let (date, time) = s.split_once('T')?;
+    let mut d = date.split('-').map(|p| p.parse::<i64>().ok());
+    let (year, month, day) = (d.next()??, d.next()??, d.next()??);
+    let time = time.split('.').next()?;
+    let mut t = time.split(':').map(|p| p.parse::<i64>().ok());
+    let (h, m, sec) = (t.next()??, t.next()??, t.next()??);
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || h > 23 || m > 59 || sec > 60 {
+        return None;
+    }
+    Some(days_from_civil(year, month, day) * 86_400 + h * 3600 + m * 60 + sec)
+}
+
+/// "15/10 23:56": `unix` (UTC) no fuso `utc_offset_s`.
+pub fn format_short(unix: i64, utc_offset_s: i32) -> String {
+    let local = unix + i64::from(utc_offset_s);
+    let (days, secs) = (local.div_euclid(86_400), local.rem_euclid(86_400));
+    let (month, day) = month_day(days);
+    format!("{day:02}/{month:02} {:02}:{:02}", secs / 3600, secs % 3600 / 60)
+}
+
 /// A partir de 80 % o chip e a barra do painel ficam na cor de destaque.
 pub fn is_high(percent: f32) -> bool {
     percent >= 80.0
@@ -66,5 +98,14 @@ mod tests {
     fn high_band_starts_at_80() {
         assert!(!is_high(79.9));
         assert!(is_high(80.0));
+    }
+
+    #[test]
+    fn iso_timestamps_and_short_dates() {
+        assert_eq!(parse_iso_utc("2026-10-16T02:56:30.609Z"), Some(1792119390));
+        assert_eq!(parse_iso_utc("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(parse_iso_utc("ontem"), None);
+        // 02:56 UTC do dia 16 é 23:56 do dia 15 em Brasília.
+        assert_eq!(format_short(1792119390, -10800), "15/10 23:56");
     }
 }

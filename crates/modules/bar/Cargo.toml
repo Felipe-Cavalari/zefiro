@@ -14,3 +14,4 @@ zefiro-platform.workspace = true
 zefiro-resources.workspace = true
 zefiro-ui.workspace = true
 zefiro-integration-clock.workspace = true
+zefiro-integration-usage.workspace = true
