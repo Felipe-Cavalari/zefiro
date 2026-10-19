@@ -78,6 +78,9 @@ pub const TIMER_LYRICS: usize = 9;
 pub const TIMER_ISLAND_ANIM: usize = 10;
 /// Desarma a confirmação do painel Energia depois de 3 s.
 pub const TIMER_POWER: usize = 11;
+/// Barra escondida por tela cheia: confere a cada 1 s se o app saiu (o aviso do Windows pode chegar
+/// antes de a janela encolher, ou não chegar).
+pub const TIMER_FULLSCREEN: usize = 12;
 const CYCLE_HALF_MS: u32 = 450;
 
 const VK_ESCAPE: u32 = 0x1B;

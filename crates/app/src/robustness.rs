@@ -5,7 +5,7 @@ use zefiro_platform_windows::window::{self, WinEvent};
 use zefiro_platform_windows::{island_zorder, monitors, system};
 
 use crate::bar_view::BarView;
-use crate::event_loop::{Loop, TIMER_DISPLAY};
+use crate::event_loop::{Loop, TIMER_DISPLAY, TIMER_FULLSCREEN};
 use crate::panel_view::PanelView;
 
 const ABN_POSCHANGED: u32 = 1;
@@ -67,6 +67,27 @@ pub fn handle(l: &mut Loop, e: WinEvent) -> Result<bool> {
             if param == 0 {
                 island_zorder::raise_island();
                 l.suspend_editor(false)?;
+            }
+            if l.bars.iter().any(|b| b.is_hidden()) {
+                window::set_timer(TIMER_FULLSCREEN, 1000);
+            }
+        }
+        WinEvent::Timer { id: TIMER_FULLSCREEN } => {
+            let mut revealed = false;
+            for b in l.bars.iter_mut().filter(|b| b.is_hidden()) {
+                if !system::foreground_fullscreen_on(b.monitor().rect) {
+                    tracing::info!("tela cheia acabou sem aviso do Windows: barra de volta");
+                    b.set_hidden(false);
+                    revealed = true;
+                }
+            }
+            if revealed {
+                l.island_visibility_changed();
+                island_zorder::raise_island();
+                l.suspend_editor(false)?;
+            }
+            if !l.bars.iter().any(|b| b.is_hidden()) {
+                window::kill_timer(TIMER_FULLSCREEN);
             }
         }
         WinEvent::AppBar { notification: ABN_POSCHANGED, .. } => {
