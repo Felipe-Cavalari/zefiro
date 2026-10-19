@@ -58,3 +58,9 @@ windows = { version = "=0.61.3", features = [
   "Win32_System_WinRT", "Win32_System_WinRT_Composition", "Win32_UI_HiDpi", "Win32_UI_Input", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole",
   "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging",
 ] }
+
+# Dependências (principalmente a crate `windows`) sem símbolos de depuração no
+# build de dev: o target fica bem menor e as nossas crates continuam com debug
+# completo para o depurador.
+[profile.dev.package."*"]
+debug = false
