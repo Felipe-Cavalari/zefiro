@@ -6,6 +6,16 @@
 use zefiro_platform::color::Rgba;
 use zefiro_platform::image::Image;
 
+/// Destaque quando a capa não tem cor viva (o mesmo padrão da ilha C++).
+pub const DEFAULT_ACCENT: Rgba = Rgba { r: 0x4C as f32 / 255.0, g: 0xC9 as f32 / 255.0, b: 0xF0 as f32 / 255.0, a: 1.0 };
+
+/// Destaque que a ilha publica para a mídia mostrada. `None` (sem mídia ou faixa sem capa) devolve
+/// ao tema o destaque dele, em vez de manter a cor da última capa.
+pub fn media_accent(media: Option<&crate::media::MediaSession>) -> Option<Rgba> {
+    let cover = media?.cover.as_ref()?;
+    Some(cover_accent(cover).unwrap_or(DEFAULT_ACCENT))
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 struct Bucket { count: u32, r: u32, g: u32, b: u32, sat: u32 }
 
@@ -92,6 +102,18 @@ mod tests {
         px.extend([(220, 30, 40); 3]);
         let c = cover_accent(&image(&px, 40)).unwrap();
         assert!(c.r > 0.8 && c.g < 0.2 && c.b < 0.25, "{c:?}");
+    }
+
+    #[test]
+    fn media_accent_follows_the_cover_and_clears_without_one() {
+        use crate::media::{Playback, session};
+        assert_eq!(media_accent(None), None, "sem mídia, o tema volta ao destaque dele");
+        let mut s = session("brave", Playback::Playing);
+        assert_eq!(media_accent(Some(&s)), None, "faixa sem capa não prende a cor da anterior");
+        s.cover = Some(image(&[(128, 128, 130)], 10));
+        assert_eq!(media_accent(Some(&s)), Some(DEFAULT_ACCENT), "capa sem cor viva usa o padrão da ilha");
+        s.cover = Some(image(&[(220, 30, 40)], 10));
+        assert!(media_accent(Some(&s)).is_some_and(|c| c.r > 0.8), "capa colorida dá a cor dela");
     }
 
     #[test]

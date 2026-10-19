@@ -72,6 +72,29 @@ impl IslandModel {
             .collect()
     }
 
+    /// Uma linha para o log: cada sessão (estado, título, capa) e a fonte escolhida, com o porquê.
+    /// Sem posição nem título, para não mudar a cada segundo nem expor o que se ouve.
+    pub fn describe(&self) -> String {
+        let yes_no = |on: bool, yes: &'static str, no: &'static str| if on { yes } else { no };
+        let sessions = self
+            .sessions
+            .iter()
+            .map(|s| {
+                let playback = match s.playback {
+                    Playback::Playing => "tocando",
+                    Playback::Paused => "pausado",
+                    Playback::Stopped => "parado",
+                };
+                format!("{} ({playback}, {}, {})", s.id, yes_no(s.has_track(), "título", "sem título"), yes_no(s.cover.is_some(), "capa", "sem capa"))
+            })
+            .collect::<Vec<_>>();
+        let Some(current) = &self.current else {
+            return format!("{} → nenhuma", if sessions.is_empty() { "sem sessões".to_string() } else { sessions.join(" | ") });
+        };
+        let (picked, last_started) = self.chooser.reasons();
+        format!("{} → {current} (escolhida: {}, última a começar: {})", sessions.join(" | "), picked.unwrap_or("–"), last_started.unwrap_or("–"))
+    }
+
     pub fn collapsed(&self, now: f64) -> Collapsed {
         self.state.collapsed(self.media().is_some(), now)
     }
@@ -99,6 +122,21 @@ mod tests {
         assert!(next.track && next.cover);
         assert_eq!(m.collapsed(6.0), Collapsed::Peek);
         assert!(!m.update(vec![b], 7.0).cover, "mesma capa");
+    }
+
+    #[test]
+    fn describe_lists_sessions_and_the_chosen_source() {
+        let mut m = IslandModel::default();
+        assert_eq!(m.describe(), "sem sessões → nenhuma");
+        let mut sketch = session("ScreenSketch", Playback::Paused);
+        sketch.title.clear();
+        let mut brave = session("Brave", Playback::Playing);
+        brave.cover = Image::new(1, 1, vec![0, 0, 0, 255]);
+        m.update(vec![brave, sketch], 0.0);
+        assert_eq!(
+            m.describe(),
+            "Brave (tocando, título, capa) | ScreenSketch (pausado, sem título, sem capa) → Brave (escolhida: –, última a começar: Brave)"
+        );
     }
 
     #[test]

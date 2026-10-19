@@ -66,6 +66,11 @@ impl SourceChooser {
         self.picked = Some(id.to_string());
     }
 
+    /// (escolhida na barra de fontes, última que começou a tocar), para o log.
+    pub fn reasons(&self) -> (Option<&str>, Option<&str>) {
+        (self.picked.as_deref(), self.last_started.as_deref())
+    }
+
     pub fn update(&mut self, sessions: &[MediaSession]) -> Option<String> {
         let now_playing: Vec<String> = sessions.iter().filter(|s| s.playback == Playback::Playing).map(|s| s.id.clone()).collect();
         let started: Vec<&String> = now_playing.iter().filter(|id| !self.playing.contains(id)).collect();

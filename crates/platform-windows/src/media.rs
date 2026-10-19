@@ -4,7 +4,7 @@
 //! (`Vec<MediaSession>`) a cada mudança. A thread de UI só lê o retrato e manda comandos; nenhuma
 //! chamada assíncrona do WinRT espera na thread de UI.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -97,6 +97,7 @@ fn run(rx: &Receiver<Job>, tx: &Sender<Job>, shared: &Mutex<Vec<MediaSession>>, 
     let mut covers: HashMap<(String, String, String), Option<Image>> = HashMap::new();
     let mut icons = Icons::default();
     let mut last: Vec<MediaSession> = Vec::new();
+    let mut failing: HashSet<String> = HashSet::new();
     let mut pending = Some(true);
     loop {
         if let Some(full) = pending.take() {
@@ -111,7 +112,7 @@ fn run(rx: &Receiver<Job>, tx: &Sender<Job>, shared: &Mutex<Vec<MediaSession>>, 
                     }
                 }
             }
-            let mut snapshot = snapshot(&watched, full, &last, &mut covers);
+            let mut snapshot = snapshot(&watched, full, &last, &mut covers, &mut failing);
             icons.fill(&mut snapshot);
             if snapshot != last {
                 last = snapshot.clone();
@@ -166,12 +167,20 @@ fn unix_ms(universal: i64) -> i64 {
     universal / 10_000 - 11_644_473_600_000
 }
 
-fn snapshot(watched: &[Watched], full: bool, last: &[MediaSession], covers: &mut HashMap<(String, String, String), Option<Image>>) -> Vec<MediaSession> {
+fn snapshot(watched: &[Watched], full: bool, last: &[MediaSession], covers: &mut HashMap<(String, String, String), Option<Image>>, failing: &mut HashSet<String>) -> Vec<MediaSession> {
     let mut out = Vec::new();
     for w in watched {
+        let id = w.session.SourceAppUserModelId().map_or_else(|_| "?".to_string(), |s| s.to_string());
         match read_session(&w.session, full, last, covers) {
-            Ok(s) => out.push(s),
-            Err(e) => tracing::debug!("sessão de mídia ilegível: {e}"),
+            Ok(s) => {
+                if failing.remove(&id) {
+                    tracing::info!(session = %id, "sessão de mídia legível de novo");
+                }
+                out.push(s);
+            }
+            // Uma sessão ilegível some da ilha: avisa uma vez, até ela voltar.
+            Err(e) if failing.insert(id.clone()) => tracing::warn!(session = %id, "sessão de mídia ilegível; fica fora da ilha: {e}"),
+            Err(_) => {}
         }
     }
     // Capas de faixas que já não estão em nenhuma sessão saem do cache.

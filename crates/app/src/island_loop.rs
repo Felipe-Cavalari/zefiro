@@ -5,14 +5,13 @@ use std::time::Instant;
 use windows::core::Result;
 use zefiro_bar::controller::PanelKind;
 use zefiro_integration_clock::windows::now_local;
-use zefiro_island::accent::cover_accent;
+use zefiro_island::accent::media_accent;
 use zefiro_island::view::{ExpandedView, IslandAction, dock_index, expanded, hit};
 use crate::tab_strip::LayerSpec;
 use windows::Foundation::TimeSpan;
 use windows::core::HSTRING;
 use windows_numerics::Vector2;
 use zefiro_island::waveform::Waveform;
-use zefiro_platform::color::Rgba;
 use zefiro_platform::geometry::Point;
 use zefiro_platform_windows::audio_capture::AudioCapture;
 use zefiro_platform_windows::media::{MediaCommand, MediaService, now_unix_ms};
@@ -36,8 +35,6 @@ use zefiro_ui::paint::DisplayList;
 use crate::bar_view::ISLAND_CHIP;
 use crate::event_loop::{Loop, TIMER_FOCUS, TIMER_ISLAND_ANIM, TIMER_LYRICS, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_BLUETOOTH, USER_DND, USER_HARDWARE, USER_LYRICS, USER_MEDIA, USER_PRIVACY, USER_VISUALIZER, USER_WEATHER};
 
-/// Destaque quando a capa não tem cor viva (o mesmo padrão da ilha C++).
-const DEFAULT_ACCENT: Rgba = Rgba { r: 0x4C as f32 / 255.0, g: 0xC9 as f32 / 255.0, b: 0xF0 as f32 / 255.0, a: 1.0 };
 /// O visualizador atualiza no máximo a 60 Hz.
 const VISUALIZER_FRAME_MS: u128 = 16;
 
@@ -60,6 +57,8 @@ pub struct IslandRuntime {
     capture: Option<AudioCapture>,
     waveform: Arc<Mutex<Waveform>>,
     expanded: Option<ExpandedView>,
+    /// Último resumo das sessões que foi para o log (só loga quando muda).
+    described: String,
 }
 
 impl Loop {
@@ -250,11 +249,15 @@ impl Loop {
         let sessions = service.sessions();
         let now = self.ctx.now();
         let changes = self.ctx.island.update(sessions, now);
-        if changes.cover && let Some(cover) = self.ctx.island.media().and_then(|s| s.cover.as_ref()) {
-            let accent = cover_accent(cover).unwrap_or(DEFAULT_ACCENT);
-            if self.ctx.theme.set_cover_accent(Some(accent)) {
-                self.apply_bars(true)?;
-            }
+        let described = self.ctx.island.describe();
+        if described != self.island.described {
+            tracing::info!(media = self.ctx.island.media().is_some(), "sessões de mídia: {described}");
+            self.island.described = described;
+        }
+        // Sem mídia ou sem capa, o destaque volta ao do tema (não fica preso na última capa).
+        if (changes.cover || self.ctx.island.media().is_none()) && self.ctx.theme.set_cover_accent(media_accent(self.ctx.island.media())) {
+            self.apply_bars(true)?;
+            self.redraw_open_panel()?;
         }
         self.island_request_lyrics();
         self.island_refresh()?;
@@ -339,11 +342,13 @@ impl Loop {
                     window::post_user(USER_VISUALIZER);
                 }
             });
+            tracing::info!("captura de áudio da ilha ligada");
             match AudioCapture::start(sink) {
                 Ok(c) => self.island.capture = Some(c),
                 Err(e) => tracing::warn!("não consegui iniciar a captura de áudio: {e}"),
             }
         } else if !needed && self.island.capture.is_some() {
+            tracing::info!(playing = self.ctx.island.playing(), visible, "captura de áudio da ilha desligada");
             self.island.capture = None;
             if let Ok(mut w) = self.island.waveform.lock() {
                 *w = Waveform::new();
