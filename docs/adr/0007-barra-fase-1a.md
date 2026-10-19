@@ -8,7 +8,7 @@
 
 A Fase 1a é a barra do Zefiro em Rust, feita do zero com o visual e o movimento do Dynamic Island for Windows. O pedido:
 
-- duas alturas: completa (44 DIP) e compacta (32 DIP);
+- duas alturas: completa (44 DIP) e compacta (32 DIP); **ajuste (2026-10-19):** a completa passou a 36 DIP, com chips de 28 e a pílula da ilha de 30, porque a 44 o usuário achou grande demais e a ilha (44, com contorno e sombra) parecia maior que a faixa. A ilha nunca passa de faixa − 4 DIP;
 - dois formatos: faixa (ponta a ponta) e pílulas;
 - tema Obsidian como padrão, mais os outros 7 temas da ilha, todos editáveis;
 - painéis que abrem e fecham como a ilha (a pílula vira o painel);

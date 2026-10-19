@@ -18,9 +18,9 @@ pub struct BarMetrics {
 
 pub fn metrics(height: BarHeight, format: BarFormat) -> BarMetrics {
     let (band, pill, chip_h, island_pill, group_pad, font) = match (height, format) {
-        (BarHeight::Completa, BarFormat::Faixa) => (44.0, 32.0, 32.0, 44.0, 0.0, 13.0),
+        (BarHeight::Completa, BarFormat::Faixa) => (36.0, 28.0, 28.0, 30.0, 0.0, 13.0),
         (BarHeight::Compacta, BarFormat::Faixa) => (32.0, 24.0, 24.0, 28.0, 0.0, 12.0),
-        (BarHeight::Completa, BarFormat::Pilulas) => (44.0, 36.0, 30.0, 36.0, 3.0, 13.0),
+        (BarHeight::Completa, BarFormat::Pilulas) => (36.0, 30.0, 26.0, 30.0, 2.0, 13.0),
         (BarHeight::Compacta, BarFormat::Pilulas) => (32.0, 24.0, 20.0, 24.0, 2.0, 12.0),
     };
     BarMetrics { band, pill, chip_h, island_pill, group_pad, edge: 8.0, chip_pad_x: 10.0, chip_gap: 4.0, font }
@@ -181,24 +181,35 @@ mod tests {
     #[test]
     fn metrics_table_matches_the_spec() {
         let m = metrics(BarHeight::Completa, BarFormat::Faixa);
-        assert_eq!((m.band, m.chip_h, m.island_pill, m.font), (44.0, 32.0, 44.0, 13.0));
+        assert_eq!((m.band, m.chip_h, m.island_pill, m.font), (36.0, 28.0, 30.0, 13.0));
         let m = metrics(BarHeight::Compacta, BarFormat::Faixa);
         assert_eq!((m.band, m.chip_h, m.island_pill, m.font), (32.0, 24.0, 28.0, 12.0));
         let m = metrics(BarHeight::Completa, BarFormat::Pilulas);
-        assert_eq!((m.band, m.pill, m.chip_h, m.island_pill, m.group_pad), (44.0, 36.0, 30.0, 36.0, 3.0));
+        assert_eq!((m.band, m.pill, m.chip_h, m.island_pill, m.group_pad), (36.0, 30.0, 26.0, 30.0, 2.0));
         let m = metrics(BarHeight::Compacta, BarFormat::Pilulas);
         assert_eq!((m.band, m.pill, m.chip_h, m.island_pill, m.group_pad), (32.0, 24.0, 20.0, 24.0, 2.0));
     }
 
     #[test]
+    fn island_pill_never_reaches_the_band_edges() {
+        // Do tamanho da faixa, a pílula (com contorno e sombra) parece maior que a barra.
+        for h in [BarHeight::Completa, BarHeight::Compacta] {
+            for f in [BarFormat::Faixa, BarFormat::Pilulas] {
+                let m = metrics(h, f);
+                assert!(m.island_pill <= m.band - 4.0, "{h:?}/{f:?}: ilha {} na faixa {}", m.island_pill, m.band);
+            }
+        }
+    }
+
+    #[test]
     fn strip_full_height_has_strip_and_no_groups() {
         let l = layout_bar(1920.0, 1.0, BarHeight::Completa, BarFormat::Faixa, &chips(&[("zefiro", 60.0)]), &chips(&[("clock", 80.0)]));
-        assert_eq!(l.band, Rect::new(0.0, 0.0, 1920.0, 44.0));
+        assert_eq!(l.band, Rect::new(0.0, 0.0, 1920.0, 36.0));
         assert_eq!(l.strip, Some(l.band));
         assert!(l.groups.is_empty());
-        assert_eq!(l.chips[0].rect, Rect::new(8.0, 6.0, 80.0, 32.0)); // 60 + 2×10
-        assert_eq!(l.chips[1].rect, Rect::new(1920.0 - 8.0 - 100.0, 6.0, 100.0, 32.0));
-        assert_eq!(l.island_pill_h, 44.0);
+        assert_eq!(l.chips[0].rect, Rect::new(8.0, 4.0, 80.0, 28.0)); // 60 + 2×10
+        assert_eq!(l.chips[1].rect, Rect::new(1920.0 - 8.0 - 100.0, 4.0, 100.0, 28.0));
+        assert_eq!(l.island_pill_h, 30.0);
     }
 
     #[test]
@@ -206,12 +217,12 @@ mod tests {
         let l = layout_bar(1920.0, 1.0, BarHeight::Completa, BarFormat::Pilulas, &chips(&[("zefiro", 60.0)]), &chips(&[("a", 20.0), ("b", 30.0)]));
         assert_eq!(l.strip, None);
         assert_eq!(l.groups.len(), 2);
-        assert_eq!(l.groups[0], Rect::new(8.0, 4.0, 86.0, 36.0)); // 80 + 2×3
-        assert_eq!(l.chips[0].rect, Rect::new(11.0, 7.0, 80.0, 30.0));
-        // fim: 40 + 4 + 50 + 2×3 = 100, encostado a 8 da direita
-        assert_eq!(l.groups[1], Rect::new(1812.0, 4.0, 100.0, 36.0));
-        assert_eq!(l.chips[1].rect, Rect::new(1815.0, 7.0, 40.0, 30.0));
-        assert_eq!(l.chips[2].rect, Rect::new(1859.0, 7.0, 50.0, 30.0));
+        assert_eq!(l.groups[0], Rect::new(8.0, 3.0, 84.0, 30.0)); // 80 + 2×2
+        assert_eq!(l.chips[0].rect, Rect::new(10.0, 5.0, 80.0, 26.0));
+        // fim: 40 + 4 + 50 + 2×2 = 98, encostado a 8 da direita
+        assert_eq!(l.groups[1], Rect::new(1814.0, 3.0, 98.0, 30.0));
+        assert_eq!(l.chips[1].rect, Rect::new(1816.0, 5.0, 40.0, 26.0));
+        assert_eq!(l.chips[2].rect, Rect::new(1860.0, 5.0, 50.0, 26.0));
     }
 
     #[test]
