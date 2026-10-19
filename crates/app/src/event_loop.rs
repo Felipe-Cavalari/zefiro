@@ -54,6 +54,8 @@ pub const USER_MIC: u32 = 17;
 pub const USER_BRIGHTNESS: u32 = 18;
 /// O uso do Codex mudou.
 pub const USER_CODEX: u32 = 19;
+/// O uso do Claude mudou.
+pub const USER_CLAUDE: u32 = 20;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
@@ -553,6 +555,7 @@ impl Loop {
             WinEvent::User { code: USER_MIC } => self.devices_volume_changed(zefiro_platform_windows::audio_devices::Flow::Input)?,
             WinEvent::User { code: USER_BRIGHTNESS } => self.devices_brightness_changed()?,
             WinEvent::User { code: USER_CODEX } => self.usage_codex_changed()?,
+            WinEvent::User { code: USER_CLAUDE } => self.usage_claude_changed()?,
             WinEvent::User { code: USER_PRIVACY } => self.island_privacy_changed()?,
             WinEvent::User { code: USER_NOTIFICATION } => self.island_notifications()?,
             WinEvent::User { code: USER_DND } => self.island_dnd_changed()?,

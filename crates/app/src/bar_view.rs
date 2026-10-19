@@ -111,7 +111,8 @@ fn chip_content(ctx: &AppCtx, id: &str, device: &str, height: BarHeight, chip_h:
             level_chip(Level { glyph: ICON_BRIGHTNESS, text: &text, dim: p.is_none() }, chip_h, font_px, scale, t, &ctx.text)
         }
         "codex" => zefiro_bar::usage::usage_chip(crate::usage_loop::CODEX_GLYPH, ctx.usage.codex.as_ref().and_then(|(_, u)| crate::usage_loop::codex_percent(u)), chip_h, font_px, scale, t, &ctx.text),
-        "claude" | "vscode" | "apps" | "notifications" | "dnd" | "power" => {
+        "claude" => zefiro_bar::usage::usage_chip(crate::usage_loop::CLAUDE_GLYPH, ctx.usage.claude.as_ref().and_then(|(_, r)| crate::usage_loop::claude_percent(r)), chip_h, font_px, scale, t, &ctx.text),
+        "vscode" | "apps" | "notifications" | "dnd" | "power" => {
             level_chip(Level { glyph: pending_glyph(id), text: "", dim: true }, chip_h, font_px, scale, t, &ctx.text)
         }
         _ => clock_chip("⋯", chip_h, font_px, t, &ctx.text),

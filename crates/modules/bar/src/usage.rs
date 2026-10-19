@@ -36,13 +36,17 @@ const ROW_H: f32 = 58.0;
 pub fn usage_panel(title: &str, rows: &[UsageRow], message: Option<&str>, footer: &str, scale: f32, tokens: &Tokens) -> DisplayList {
     let px = |v: f32| (v * scale).round();
     let text = |size: f32, weight: FontWeight| TextStyle { size: size * scale, weight, family: Family::Text };
-    let body_h = if message.is_some() { 44.0 } else { rows.len().max(1) as f32 * ROW_H };
+    let message_lines: Vec<&str> = message.map(|m| m.lines().collect()).unwrap_or_default();
+    let body_h = if message.is_some() { 20.0 + message_lines.len().max(1) as f32 * 20.0 } else { rows.len().max(1) as f32 * ROW_H };
     let footer_h = if footer.is_empty() { 0.0 } else { 26.0 };
     let size = Size { w: px(WIDTH), h: px(44.0 + body_h + footer_h + 10.0) };
     let mut list = DisplayList::new(size);
     list.push(DrawOp::Text { rect: Rect::new(px(20.0), px(14.0), size.w - px(40.0), px(22.0)), text: title.into(), style: text(13.0, FontWeight::SemiBold), color: tokens.text_secondary, align: Align::Leading });
-    if let Some(message) = message {
-        list.push(DrawOp::Text { rect: Rect::new(px(20.0), px(48.0), size.w - px(40.0), px(36.0)), text: message.into(), style: text(12.5, FontWeight::Regular), color: tokens.text, align: Align::Leading });
+    if message.is_some() {
+        // Uma linha por quebra de linha: o texto do painel não quebra sozinho.
+        for (i, line) in message_lines.iter().enumerate() {
+            list.push(DrawOp::Text { rect: Rect::new(px(20.0), px(48.0 + i as f32 * 20.0), size.w - px(40.0), px(20.0)), text: (*line).into(), style: text(12.5, FontWeight::Regular), color: tokens.text, align: Align::Leading });
+        }
     } else {
         for (i, row) in rows.iter().enumerate() {
             let top = px(44.0 + i as f32 * ROW_H);
@@ -134,5 +138,13 @@ mod tests {
         let t = texts(&l);
         assert!(t.contains(&"Nenhum uso do Codex encontrado".to_string()));
         assert!(!t.contains(&"5 horas".to_string()));
+    }
+
+    #[test]
+    fn panel_message_breaks_lines() {
+        let l = usage_panel("Claude", &[], Some("Login do Claude Code expirado.\nAbra o Claude Code para renovar."), "", 1.0, &tokens());
+        let t = texts(&l);
+        assert!(t.contains(&"Login do Claude Code expirado.".to_string()));
+        assert!(t.contains(&"Abra o Claude Code para renovar.".to_string()));
     }
 }

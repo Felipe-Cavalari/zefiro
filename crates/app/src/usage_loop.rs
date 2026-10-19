@@ -7,18 +7,22 @@ use windows::core::Result;
 use zefiro_bar::controller::PanelKind;
 use zefiro_bar::usage::{UsageRow, usage_panel};
 use zefiro_integration_clock::windows::utc_offset_seconds;
+use zefiro_integration_usage::claude::{ClaudeUsage, Limit, UsageError};
 use zefiro_integration_usage::codex::{CodexService, CodexUsage, Window, effective_percent, window_name};
 use zefiro_integration_usage::format::{format_absolute, format_relative, format_short, parse_iso_utc};
+use zefiro_platform_windows::claude::ClaudeService;
 use zefiro_platform_windows::window;
 use zefiro_ui::paint::DisplayList;
 
-use crate::event_loop::{Loop, USER_CODEX};
+use crate::event_loop::{Loop, USER_CLAUDE, USER_CODEX};
 
 pub const CODEX_GLYPH: &str = "\u{E943}";
+pub const CLAUDE_GLYPH: &str = "\u{E945}";
 
 #[derive(Default)]
 pub struct UsageRuntime {
     codex: Option<CodexService>,
+    claude: Option<ClaudeService>,
 }
 
 pub fn now_unix() -> i64 {
@@ -46,6 +50,33 @@ fn reset_detail(resets_at: i64, window_minutes: u32, now: i64, offset: i32) -> S
     }
 }
 
+/// % da janela de 5 h do Claude (sem dado em qualquer erro).
+pub fn claude_percent(result: &std::result::Result<ClaudeUsage, UsageError>) -> Option<f32> {
+    result.as_ref().ok().and_then(|u| u.five_hour).map(|l| l.percent)
+}
+
+fn claude_row(label: String, limit: &Limit, window_minutes: u32, now: i64, offset: i32) -> UsageRow {
+    let detail = limit.resets_at.map(|t| reset_detail(t, window_minutes, now, offset)).unwrap_or_default();
+    UsageRow { label, percent: Some(limit.percent), detail }
+}
+
+fn claude_message(e: UsageError) -> String {
+    match e {
+        UsageError::Expired => "Login do Claude Code expirado.\nAbra o Claude Code para renovar.".into(),
+        UsageError::Missing => "Faça login no Claude Code".into(),
+        UsageError::Network => "Sem conexão.\nTento de novo em 2 min.".into(),
+        UsageError::UnknownFormat => "Formato de resposta desconhecido".into(),
+        UsageError::Http(status) => format!("O serviço respondeu {status}.\nTento de novo em 2 min."),
+    }
+}
+
+fn updated_ago(at: std::time::Instant) -> String {
+    match at.elapsed().as_secs() / 60 {
+        0 => "Atualizado agora".into(),
+        m => format!("Atualizado há {m} min"),
+    }
+}
+
 fn codex_row(w: &Window, now: i64, offset: i32) -> UsageRow {
     UsageRow { label: window_name(w.window_minutes), percent: Some(effective_percent(w, now)), detail: reset_detail(w.resets_at, w.window_minutes, now, offset) }
 }
@@ -58,6 +89,9 @@ fn capitalized(s: &str) -> String {
 impl Loop {
     /// Liga a leitura do Codex (thread própria, a cada 120 s).
     pub fn usage_start(&mut self) {
+        self.usage.claude = ClaudeService::start(home().join(".claude").join(".credentials.json"), Arc::new(|| window::post_user(USER_CLAUDE)))
+            .map_err(|e| tracing::warn!("uso do Claude indisponível: {e}"))
+            .ok();
         self.usage.codex = CodexService::start(home().join(".codex").join("sessions"), Arc::new(|| window::post_user(USER_CODEX)))
             .map_err(|e| tracing::warn!("uso do Codex indisponível: {e}"))
             .ok();
@@ -76,10 +110,24 @@ impl Loop {
         Ok(())
     }
 
+    pub fn usage_claude_changed(&mut self) -> Result<()> {
+        self.ctx.usage.claude = self.usage.claude.as_ref().and_then(ClaudeService::latest);
+        self.apply_bars(true)?;
+        if self.usage_panel_open(PanelKind::Claude) {
+            self.redraw_open_panel()?;
+        }
+        Ok(())
+    }
+
     /// Ao abrir o painel: confere o dado agora.
     pub fn usage_prepare(&self, kind: PanelKind) {
         if kind == PanelKind::Codex
             && let Some(s) = &self.usage.codex
+        {
+            s.refresh();
+        }
+        if kind == PanelKind::Claude
+            && let Some(s) = &self.usage.claude
         {
             s.refresh();
         }
@@ -89,7 +137,23 @@ impl Loop {
         let tokens = &self.ctx.theme.tokens;
         let (now, offset) = (now_unix(), utc_offset_seconds());
         if kind == PanelKind::Claude {
-            return usage_panel("Claude", &[], Some("Carregando…"), "", scale, tokens);
+            return match &self.ctx.usage.claude {
+                None => usage_panel("Claude", &[], Some("Carregando…"), "", scale, tokens),
+                Some((at, Err(e))) => usage_panel("Claude", &[], Some(&claude_message(*e)), &updated_ago(*at), scale, tokens),
+                Some((at, Ok(u))) => {
+                    let mut rows = Vec::new();
+                    if let Some(l) = &u.five_hour {
+                        rows.push(claude_row("5 horas".into(), l, 300, now, offset));
+                    }
+                    if let Some(l) = &u.seven_day {
+                        rows.push(claude_row("7 dias".into(), l, 10080, now, offset));
+                    }
+                    for (name, l) in &u.extra {
+                        rows.push(claude_row(format!("{name} (7 dias)"), l, 10080, now, offset));
+                    }
+                    usage_panel("Claude", &rows, None, &updated_ago(*at), scale, tokens)
+                }
+            };
         }
         match &self.ctx.usage.codex {
             Some((_, u)) => {

@@ -14,7 +14,11 @@ zefiro-resources.workspace = true
 zefiro-ui.workspace = true
 zefiro-island.workspace = true
 zefiro-integration-devices.workspace = true
+zefiro-integration-usage.workspace = true
 windows.workspace = true
 windows-core.workspace = true
 windows-numerics.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

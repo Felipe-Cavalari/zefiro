@@ -40,6 +40,8 @@ impl AppCtx {
 /// O que os chips de uso mostram: o último uso do Codex lido e quando o arquivo mudou.
 #[derive(Debug, Clone, Default)]
 pub struct UsageState {
+    /// Último resultado do Claude e quando chegou.
+    pub claude: Option<(std::time::Instant, Result<zefiro_integration_usage::claude::ClaudeUsage, zefiro_integration_usage::claude::UsageError>)>,
     pub codex: Option<(std::time::SystemTime, zefiro_integration_usage::codex::CodexUsage)>,
 }
 

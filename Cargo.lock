@@ -945,11 +945,13 @@ version = "0.1.0"
 name = "zefiro-platform-windows"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "tracing",
  "windows",
  "windows-core",
  "windows-numerics",
  "zefiro-integration-devices",
+ "zefiro-integration-usage",
  "zefiro-island",
  "zefiro-platform",
  "zefiro-resources",

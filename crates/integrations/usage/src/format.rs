@@ -50,10 +50,20 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468
 }
 
-/// `2026-10-16T02:56:30.609Z` → segundos Unix. Só o formato UTC com `Z` que o Codex grava.
+/// `2026-10-16T02:56:30.609Z` ou `…+00:00`/`…-03:00` → segundos Unix. Frações de segundo são
+/// ignoradas.
 pub fn parse_iso_utc(s: &str) -> Option<i64> {
-    let s = s.strip_suffix('Z')?;
-    let (date, time) = s.split_once('T')?;
+    let (date, rest) = s.split_once('T')?;
+    // Fuso: "Z" ou "±HH:MM" no fim.
+    let (time, offset) = if let Some(t) = rest.strip_suffix('Z') {
+        (t, 0)
+    } else {
+        let at = rest.rfind(['+', '-'])?;
+        let (t, zone) = rest.split_at(at);
+        let sign = if zone.starts_with('-') { -1 } else { 1 };
+        let (zh, zm) = zone[1..].split_once(':')?;
+        (t, sign * (zh.parse::<i64>().ok()? * 3600 + zm.parse::<i64>().ok()? * 60))
+    };
     let mut d = date.split('-').map(|p| p.parse::<i64>().ok());
     let (year, month, day) = (d.next()??, d.next()??, d.next()??);
     let time = time.split('.').next()?;
@@ -62,7 +72,7 @@ pub fn parse_iso_utc(s: &str) -> Option<i64> {
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) || h > 23 || m > 59 || sec > 60 {
         return None;
     }
-    Some(days_from_civil(year, month, day) * 86_400 + h * 3600 + m * 60 + sec)
+    Some(days_from_civil(year, month, day) * 86_400 + h * 3600 + m * 60 + sec - offset)
 }
 
 /// "15/10 23:56": `unix` (UTC) no fuso `utc_offset_s`.
@@ -105,6 +115,9 @@ mod tests {
         assert_eq!(parse_iso_utc("2026-10-16T02:56:30.609Z"), Some(1792119390));
         assert_eq!(parse_iso_utc("1970-01-01T00:00:00Z"), Some(0));
         assert_eq!(parse_iso_utc("ontem"), None);
+        // Formato da API do Claude: microssegundos e fuso explícito.
+        assert_eq!(parse_iso_utc("2026-10-16T02:56:30.043079+00:00"), Some(1792119390));
+        assert_eq!(parse_iso_utc("2026-10-15T23:56:30-03:00"), Some(1792119390));
         // 02:56 UTC do dia 16 é 23:56 do dia 15 em Brasília.
         assert_eq!(format_short(1792119390, -10800), "15/10 23:56");
     }
