@@ -30,7 +30,10 @@ impl IslandModel {
     /// Novo retrato das sessões. `now` em segundos de um relógio monotônico qualquer.
     pub fn update(&mut self, sessions: Vec<MediaSession>, now: f64) -> Changes {
         let old_cover = self.current().and_then(|s| s.cover.as_ref().map(|c| c.id()));
-        self.current = self.chooser.update(&sessions);
+        // Sessões sem faixa (o Recorte do Windows publica uma depois de gravar a tela) não têm o que
+        // mostrar: escolhê-las deixaria a ilha vazia. Ficam só no `describe`, para o log.
+        let tracked: Vec<MediaSession> = sessions.iter().filter(|s| s.has_track()).cloned().collect();
+        self.current = self.chooser.update(&tracked);
         self.sessions = sessions;
         let key = self.current().filter(|s| s.has_track()).map(MediaSession::track_key);
         let track = self.state.track(key, now);
@@ -61,13 +64,16 @@ impl IslandModel {
 
     /// (id, nome) de todas as sessões, na ordem do Windows.
     pub fn sources(&self) -> Vec<(String, String)> {
-        self.sessions.iter().map(|s| (s.id.clone(), s.app_name.clone())).collect()
+        self.tracked().map(|s| (s.id.clone(), s.app_name.clone())).collect()
+    }
+
+    fn tracked(&self) -> impl Iterator<Item = &MediaSession> {
+        self.sessions.iter().filter(|s| s.has_track())
     }
 
     /// Fontes para a barra de fontes do painel (com ícone e se está tocando).
     pub fn source_slots(&self) -> Vec<crate::view::SourceSlot> {
-        self.sessions
-            .iter()
+        self.tracked()
             .map(|s| crate::view::SourceSlot { id: s.id.clone(), name: s.app_name.clone(), icon: s.app_icon.clone(), playing: s.playback == Playback::Playing })
             .collect()
     }
@@ -137,6 +143,25 @@ mod tests {
             m.describe(),
             "Brave (tocando, título, capa) | ScreenSketch (pausado, sem título, sem capa) → Brave (escolhida: –, última a começar: Brave)"
         );
+    }
+
+    #[test]
+    fn sessions_without_a_track_are_not_sources() {
+        // O Recorte do Windows publica uma sessão pausada e sem título depois de gravar a tela.
+        let mut m = IslandModel::default();
+        let mut sketch = session("sketch", Playback::Paused);
+        sketch.title.clear();
+        m.update(vec![session("brave", Playback::Paused), sketch.clone()], 0.0);
+        assert_eq!(m.sources().len(), 1, "o menu não oferece a sessão vazia");
+        assert_eq!(m.source_slots().len(), 1, "a barra de fontes também não");
+        m.pick("sketch", 1.0);
+        assert_eq!(m.media().map(|s| s.id.as_str()), Some("brave"), "escolher a sessão vazia não apaga a ilha");
+        // Mesmo tendo sido a última a começar a tocar, ela não vira a fonte.
+        sketch.playback = Playback::Playing;
+        m.update(vec![session("brave", Playback::Paused), sketch.clone()], 2.0);
+        sketch.playback = Playback::Paused;
+        m.update(vec![session("brave", Playback::Paused), sketch], 3.0);
+        assert_eq!(m.media().map(|s| s.id.as_str()), Some("brave"));
     }
 
     #[test]
