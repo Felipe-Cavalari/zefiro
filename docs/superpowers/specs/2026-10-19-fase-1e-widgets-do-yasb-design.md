@@ -139,15 +139,15 @@ A regra de ouro continua: a crate `windows` só aparece em `platform-windows`, `
 |---|---|
 | `crates/integrations/usage` (nova, portável) | Parser da resposta do Claude, leitura do fim do `.jsonl` do Codex, nomes das janelas, formatação de "reinicia em" (relativa) e da data absoluta a partir de um relógio injetado, e a regra de cor por faixa. Arquivos com `std::fs`. A thread que lê o Codex mora aqui. |
 | `crates/integrations/vscode` (nova, portável) | Leitura do `workspaceStorage`, decodificação de URI (`file:///c%3A/...`, `vscode-remote://wsl%2B...`), nome curto, selo e ordenação. |
-| `crates/modules/bar` | Chips e painéis dos sete itens (`DisplayList`), áreas de clique, rolagem da lista do VS Code, catálogo e `PanelKind` novos (`Claude`, `Codex`, `VsCode`, `Power`). |
+| `crates/modules/bar` | Chips e painéis dos seis itens (`DisplayList`), áreas de clique, rolagem da lista do VS Code, catálogo e `PanelKind` novos (`Claude`, `Codex`, `VsCode`, `Power`). |
 | `crates/platform-windows` | HTTP do Claude (reaproveita `http.rs`), abrir processos sem console, contagem e limpeza de notificações, escrita do Não perturbe, ações de energia, foto e nome da conta, tempo ligado. |
 | `crates/app` | Um `*_loop.rs` por grupo (`usage_loop.rs`, `vscode_loop.rs`, `power_loop.rs`, `system_loop.rs`, no padrão do `devices_loop.rs`), roteamento dos cliques, inclusive o botão do meio novo. |
 | CI | As crates portáveis novas entram no `cargo check` do Linux. |
 
 ## 6. Desempenho e robustez
 
-- **Repouso:** CPU **0,0 %** com os sete chips na barra e nenhum painel aberto (`perf.ps1`, 60 s, YASB fechado).
-- **Memória:** com os sete chips, no máximo **+4 MB privados** em relação à barra sem eles, medido do mesmo jeito que no ADR-0010. A memória que fica depois de abrir os painéis também é medida e registrada, sem meta própria.
+- **Repouso:** CPU **0,0 %** com os seis chips na barra e nenhum painel aberto (`perf.ps1`, 60 s, YASB fechado).
+- **Memória:** com os seis chips, no máximo **+4 MB privados** em relação à barra sem eles, medido do mesmo jeito que no ADR-0010. A memória que fica depois de abrir os painéis também é medida e registrada, sem meta própria.
 - **Sem consulta por quadro.**
   - Periódicas: Claude e Codex a cada 120 s; no Codex é só um `stat`.
   - Por evento: notificações e Não perturbe.

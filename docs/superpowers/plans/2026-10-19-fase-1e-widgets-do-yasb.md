@@ -2,7 +2,7 @@
 
 > **Para agentes:** SUB-SKILL OBRIGATÓRIA: use superpowers:subagent-driven-development (recomendado) ou superpowers:executing-plans para executar este plano tarefa por tarefa. Os passos usam caixas (`- [ ]`) para acompanhamento.
 
-**Objetivo:** sete chips novos no catálogo (`codex`, `claude`, `vscode`, `power`, `notifications`, `dnd`, `apps`) que trazem para o Zefiro os widgets do YASB que faltam, sem mudar nada da barra atual.
+**Objetivo:** seis chips novos no catálogo (`codex`, `claude`, `vscode`, `power`, `notifications`, `dnd`; o `apps` do plano original foi removido a pedido do usuário, ver Tarefa 9) que trazem para o Zefiro os widgets do YASB que faltam, sem mudar nada da barra atual.
 
 **Arquitetura:** a lógica que dá para testar (parsers, formatação, agrupamento, máquinas de estado) fica em crates portáveis: `integrations/usage`, `integrations/vscode` e `modules/bar`. A `platform-windows` traz as chamadas do sistema: HTTP com cabeçalhos, janelas, energia, processos e Não perturbe. A `app` liga tudo em `*_loop.rs`, no padrão do `devices_loop.rs` da 1d. Cada fonte de dados tem sua thread e avisa a UI por `window::post_user`.
 
@@ -19,7 +19,7 @@
 - Tokens e conteúdo de credenciais nunca vão para log, teste, fixture ou saída de sonda.
 - Nenhuma consulta por quadro. Ritmos: Claude e Codex a cada 120 s; Apps, notificações e Não perturbe por evento; VS Code, foto da conta e tempo ligado ao abrir o painel.
 - HTTP com tempo limite de 15 s. Erro de rede repete no próximo ciclo de 120 s, sem rajadas.
-- Repouso com os sete chips: CPU 0,0 % e no máximo +4 MB privados em relação à barra sem eles (medido no fim).
+- Repouso com os chips novos: CPU 0,0 % e no máximo +4 MB privados em relação à barra sem eles (medido no fim).
 - Antes de testes que movem o mouse ou mandam teclas, pedir um momento ao usuário. Nunca fechar apps do usuário: o app de teste do Apps é o Bloco de notas aberto pelo próprio teste. Suspender, Sair, Reiniciar e Desligar nunca são executados de verdade.
 - Ledger em `.superpowers/sdd/2026-10-19-fase-1e-widgets-do-yasb/progress.md`: uma linha `Task N: complete (commits …, tests: … → …)` por tarefa e `Task N: Ruling: <decisão> — <por quê> — <custo se errado>` para cada desvio.
 

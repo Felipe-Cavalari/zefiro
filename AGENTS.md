@@ -6,7 +6,7 @@ Leia antes de mudar qualquer coisa:
 
 | Documento | Quando ler |
 | --- | --- |
-| `docs/PLANNING.md` | Sempre. É a visão, o roteiro de fases (1a a 1d feitas: barra, modo de edição, ilha embutida em Rust, áudio e brilho; próxima: 1e itens declarativos v1, depois 1f e 1g) e as metas de performance. |
+| `docs/PLANNING.md` | Sempre. É a visão, o roteiro de fases (1a a 1e feitas: barra, modo de edição, ilha embutida em Rust, áudio e brilho, widgets do YASB; próxima: 1f itens declarativos v1 e modo noturno, depois 1g) e as metas de performance. |
 | `docs/adr/` | Antes de mexer em desenho, animação, janelas ou na ilha. Registra as decisões tomadas e o motivo. Não desfaça uma decisão de um ADR sem escrever outro ADR que a substitua. |
 | `docs/superpowers/specs/` e `docs/superpowers/plans/` | Antes de começar uma fase. Mostra como as fases 0, 1a e 1b foram especificadas e planejadas; as próximas seguem o mesmo modelo. |
 | `docs/superpowers/handoff/` | Para saber o estado da última passagem e o que ficou pendente. |
@@ -41,7 +41,9 @@ Leia antes de mudar qualquer coisa:
 | `crates/ui` | Molas (constantes da ilha), `DisplayList`, layout da barra e regras do painel (pílula → painel) |
 | `crates/integrations/clock` | Grade do mês e formatação de data (pt-BR e Windows) |
 | `crates/integrations/devices` | Brilho e níveis, portável: escrita agrupada do DDC/CI (`Coalescer`), passo da roda e posição no slider (ADR-0010) |
-| `crates/modules/bar` | Chips, menu do Zefiro, calendário, chips e painéis de som, microfone e brilho (`devices.rs`) e o controlador de painéis |
+| `crates/integrations/usage` | Uso do Claude (resposta do endpoint, token) e do Codex (fim dos `.jsonl`, thread `CodexService`) e datas em pt-BR, portável (ADR-0011) |
+| `crates/integrations/vscode` | Projetos recentes do VS Code pelo `workspaceStorage`, portável (ADR-0011) |
+| `crates/modules/bar` | Chips, menu do Zefiro, calendário, chips e painéis de som, microfone e brilho (`devices.rs`), uso (`usage.rs`), VS Code (`vscode.rs`), energia (`power.rs`), sino e lua (`chips.rs`) e o controlador de painéis |
 | `crates/modules/island` (`zefiro-island`) | Ilha embutida, portável: mídia e escolha da fonte, estados, avisos, visões em `DisplayList`, abas (clima, hardware, letras), menu, visualizador e cor da capa (ADR-0009) |
 | `crates/modules/island-host` | Ilha externa (`engine = "externa"`): gravação do `island.ini`/`island-state.ini`, política de reinício e o processo |
 | `crates/platform-windows` | Janelas, AppBar, compositor (Windows.UI.Composition), `MorphShape`, Direct2D/DirectWrite em WARP, monitores, preferências do sistema e os serviços (mídia, volume de saída e entrada, dispositivos de áudio, brilho por DDC/CI…) |
@@ -67,7 +69,7 @@ Copy-Item island/build/zefiro-island.exe target/release/
 - A configuração fica em `%APPDATA%\zefiro\config.toml` e é recarregada ao salvar.
   - `[bar] height = completa | compacta`
   - `[bar] format = faixa | pilulas`
-  - `[bar.sections] start/center/end`: ids do catálogo (`zefiro`, `clock`, `audio`, `mic`, `brightness`)
+  - `[bar.sections] start/center/end`: ids do catálogo (`zefiro`, `clock`, `audio`, `mic`, `brightness`, `claude`, `codex`, `vscode`, `notifications`, `dnd`, `power`)
 - `ZEFIRO_CONFIG_DIR=<pasta>` troca a pasta da configuração: use um perfil isolado para testes, sem mexer no do usuário.
 - Os temas do usuário ficam em `%APPDATA%\zefiro\themes\`.
 - Os logs ficam em `%LOCALAPPDATA%\zefiro\logs`.
@@ -88,6 +90,10 @@ Copy-Item island/build/zefiro-island.exe target/release/
 - **Mover "na hora" no compositor é animação:** `StopAnimation` + `InsertScalar` logo depois de uma mola perde para a parada, que grava o valor do meio do caminho por cima. `Comp::move_offset` usa um quadro-chave de 1 ms (ADR-0010).
 - **Chips de nível com largura fixa:** o painel aberto nasce do chip; se o chip mudar de largura com o nível, o painel anda sob o cursor. Os chips de som, microfone e brilho reservam "100%" (ADR-0010).
 - **Brilho por DDC/CI:** ~60 ms por chamada. Tudo na thread `zefiro-brightness`; a interface é otimista e só o último valor de cada monitor é gravado.
+- **Serviços seguem a barra:** Claude, Codex e notificações só rodam com o chip em algum layout (`BarConfig::uses`); `refresh_services()` roda ao salvar o config e ao concluir o modo de edição.
+- **Claude:** o Zefiro só lê `~/.claude/.credentials.json` (a cada consulta) e nunca renova nem grava o token, porque isso derrubaria o login do Claude Code. O token nunca vai para log, teste ou sonda (ADR-0011).
+- **Notificações:** sem identidade de pacote o `ClearNotifications` falha (0x80070490); limpar remove uma a uma. A central abre com Win+N por `SendInput`.
+- **Sondas de tela sem roubar o mouse:** `PostMessage` na janela `ZefiroInput` simula cliques, mas não dá ao Zefiro o direito de trazer janelas para frente; para isso é preciso entrada real (`SendInput`).
 - **DPI:** o processo é Per-Monitor v2 (`system::enable_per_monitor_dpi`, chamado no início do `main`).
 - **Tela cheia:** com `ABN_FULLSCREENAPP`, a barra do monitor coberto some. As janelas do próprio Zefiro nunca contam como tela cheia.
 - **Fork da ilha:** toda mudança no `dynamic-island-for-windows.wh.cpp` vai dentro de `#ifdef ZEFIRO_ISLAND` e é marcada com `// ZEFIRO:`, para acompanhar o upstream com diffs mínimos. A camada `wh_shim.*` substitui a API do Windhawk.
