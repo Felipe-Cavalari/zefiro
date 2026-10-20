@@ -5,7 +5,7 @@
 pub mod jsonc;
 
 use serde_json::{Map, Value};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// De onde vem o ícone de um perfil.
 #[derive(Debug, Clone, PartialEq)]
@@ -78,6 +78,94 @@ pub fn parse_profiles(settings: &str, fragments: &[(&str, &str)], env: &dyn Fn(&
             Some(Profile { guid, name, icon, default })
         })
         .collect())
+}
+
+/// (visíveis na ordem escolhida, ocultos na ordem do Terminal), índices em `profiles`. Perfis fora
+/// de `order` vão para o fim dos visíveis; perfil novo aparece sozinho.
+pub fn arrange(profiles: &[Profile], order: &[String], hidden: &[String]) -> (Vec<usize>, Vec<usize>) {
+    let has = |list: &[String], guid: &str| list.iter().any(|g| g.eq_ignore_ascii_case(guid));
+    let (mut visible, hidden): (Vec<usize>, Vec<usize>) = (0..profiles.len()).partition(|&i| !has(hidden, &profiles[i].guid));
+    let rank = |i: &usize| order.iter().position(|g| g.eq_ignore_ascii_case(&profiles[*i].guid)).unwrap_or(usize::MAX);
+    visible.sort_by_key(rank);
+    (visible, hidden)
+}
+
+/// (`order`, `hidden`) para gravar. Os `guid`s de `previous_hidden` que `profiles` não conhece (distro
+/// desinstalada) continuam ocultos, para a escolha voltar com o perfil.
+pub fn saved_lists(profiles: &[Profile], visible: &[usize], hidden: &[usize], previous_hidden: &[String]) -> (Vec<String>, Vec<String>) {
+    let guids = |list: &[usize]| list.iter().map(|&i| profiles[i].guid.clone()).collect::<Vec<_>>();
+    let mut hidden = guids(hidden);
+    let unknown = previous_hidden.iter().map(|g| g.to_lowercase()).filter(|g| !profiles.iter().any(|p| p.guid == *g));
+    for guid in unknown {
+        if !hidden.contains(&guid) {
+            hidden.push(guid);
+        }
+    }
+    (guids(visible), hidden)
+}
+
+/// Arquivos a tentar para o ícone, em ordem; vazio = glifo de terminal.
+pub fn icon_candidates(profile: &Profile, package_dir: Option<&Path>) -> Vec<PathBuf> {
+    // `ProfileIcons/pwsh.png` → as variantes de escala que o pacote traz e depois o nome puro.
+    let scaled = |dir: &Path, relative: &str| -> Vec<PathBuf> {
+        let (stem, ext) = relative.rsplit_once('.').unwrap_or((relative, "png"));
+        vec![dir.join(format!("{stem}.scale-200.{ext}")), dir.join(format!("{stem}.scale-100.{ext}")), dir.join(relative)]
+    };
+    let mut out = match (&profile.icon, package_dir) {
+        (IconSource::File(path), _) => vec![path.clone()],
+        (IconSource::Package(relative), Some(dir)) => scaled(dir, relative),
+        _ => Vec::new(),
+    };
+    if let Some(dir) = package_dir {
+        out.extend(scaled(dir, &format!("ProfileIcons/{}.png", profile.guid)));
+    }
+    out
+}
+
+/// Argumentos do `wt.exe` para abrir o perfil.
+pub fn open_args(profile: &Profile) -> Vec<String> {
+    vec!["-p".into(), profile.guid.clone()]
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LoadError {
+    NotInstalled,
+    Unreadable(String),
+}
+
+/// Lê o primeiro `settings.json` que existir (Stable, Preview, instalação sem pacote) e os
+/// fragmentos de `<local>` e `<program_data>`. Bloqueante: fora da thread de UI.
+pub fn read_profiles(local_app_data: &Path, program_data: &Path) -> Result<Vec<Profile>, LoadError> {
+    let packaged = |family: &str| local_app_data.join("Packages").join(family).join("LocalState").join("settings.json");
+    let candidates = [packaged("Microsoft.WindowsTerminal_8wekyb3d8bbwe"), packaged("Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe"), terminal_dir(local_app_data).join("settings.json")];
+    let path = candidates.iter().find(|p| p.is_file()).ok_or(LoadError::NotInstalled)?;
+    let settings = std::fs::read_to_string(path).map_err(|e| LoadError::Unreadable(e.to_string()))?;
+    let fragments: Vec<(String, String)> = [local_app_data, program_data].iter().flat_map(|root| read_fragments(&terminal_dir(root).join("Fragments"))).collect();
+    let borrowed: Vec<(&str, &str)> = fragments.iter().map(|(s, t)| (s.as_str(), t.as_str())).collect();
+    parse_profiles(&settings, &borrowed, &|name| std::env::var(name).ok()).map_err(LoadError::Unreadable)
+}
+
+fn terminal_dir(root: &Path) -> PathBuf {
+    root.join("Microsoft").join("Windows Terminal")
+}
+
+/// (nome da pasta, texto) de cada `Fragments\<fonte>\*.json`, em ordem de caminho.
+fn read_fragments(root: &Path) -> Vec<(String, String)> {
+    let sorted = |dir: &Path| -> Vec<PathBuf> {
+        let mut paths: Vec<PathBuf> = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
+        paths.sort();
+        paths
+    };
+    let mut out = Vec::new();
+    for source in sorted(root).into_iter().filter(|p| p.is_dir()) {
+        let name = source.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        for file in sorted(&source).into_iter().filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("json"))) {
+            if let Ok(text) = std::fs::read_to_string(&file) {
+                out.push((name.clone(), text));
+            }
+        }
+    }
+    out
 }
 
 /// Troca cada `%VAR%` conhecida pelo valor; as desconhecidas ficam como estão.
@@ -174,5 +262,81 @@ mod tests {
     #[test]
     fn broken_json_is_an_error() {
         assert!(parse_profiles("{", &[], &no_env).is_err());
+    }
+
+    fn p(guid: &str) -> Profile {
+        Profile { guid: guid.into(), name: guid.into(), icon: IconSource::None, default: false }
+    }
+
+    fn strings(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn new_profiles_go_last_and_hidden_follow_terminal_order() {
+        let ps = [p("{a}"), p("{b}"), p("{c}"), p("{d}")];
+        let arranged = arrange(&ps, &strings(&["{C}", "{a}"]), &strings(&["{d}", "{b}"]));
+        assert_eq!(arranged, (vec![2, 0], vec![1, 3]));
+        let ps = [p("{a}"), p("{b}"), p("{c}")];
+        assert_eq!(arrange(&ps, &strings(&["{c}"]), &[]), (vec![2, 0, 1], vec![]), "perfis novos no fim, na ordem do Terminal");
+    }
+
+    #[test]
+    fn no_section_shows_everything() {
+        assert_eq!(arrange(&[p("{a}"), p("{b}")], &[], &[]), (vec![0, 1], vec![]));
+    }
+
+    #[test]
+    fn unknown_hidden_guids_survive_saving() {
+        let ps = [p("{a}"), p("{b}")];
+        let (order, hidden) = saved_lists(&ps, &[1], &[0], &strings(&["{gone}", "{A}"]));
+        assert_eq!(order, ["{b}"]);
+        assert_eq!(hidden, ["{a}", "{gone}"]);
+    }
+
+    #[test]
+    fn icon_candidates_in_order() {
+        let dir = Path::new(r"C:\WT");
+        let mut q = p("{x}");
+        q.icon = IconSource::Package("ProfileIcons/pwsh.png".into());
+        let expected: Vec<PathBuf> = ["ProfileIcons/pwsh.scale-200.png", "ProfileIcons/pwsh.scale-100.png", "ProfileIcons/pwsh.png", "ProfileIcons/{x}.scale-200.png", "ProfileIcons/{x}.scale-100.png", "ProfileIcons/{x}.png"]
+            .iter()
+            .map(|f| dir.join(f))
+            .collect();
+        assert_eq!(icon_candidates(&q, Some(dir)), expected);
+        let mut f = p("{x}");
+        f.icon = IconSource::File(r"C:\i.ico".into());
+        assert_eq!(icon_candidates(&f, None), [PathBuf::from(r"C:\i.ico")]);
+        assert!(icon_candidates(&p("{x}"), None).is_empty(), "emoji ou nada, sem pacote: glifo");
+    }
+
+    #[test]
+    fn opens_by_guid() {
+        assert_eq!(open_args(&p("{a}")), ["-p", "{a}"]);
+    }
+
+    #[test]
+    fn reads_stable_settings_and_fragments_from_disk() {
+        let local = tempfile::tempdir().unwrap();
+        let program = tempfile::tempdir().unwrap();
+        let state = local.path().join("Packages").join("Microsoft.WindowsTerminal_8wekyb3d8bbwe").join("LocalState");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::write(state.join("settings.json"), SETTINGS).unwrap();
+        let wsl = terminal_dir(local.path()).join("Fragments").join("Microsoft.WSL");
+        std::fs::create_dir_all(&wsl).unwrap();
+        std::fs::write(wsl.join("ubuntu.json"), WSL).unwrap();
+        let p = read_profiles(local.path(), program.path()).unwrap();
+        assert_eq!(names(&p), ["PowerShell", "Windows PowerShell", "Prompt de comando", "Ubuntu-24.04"]);
+        assert!(matches!(p[3].icon, IconSource::File(_)), "o ícone do Ubuntu vem do fragmento");
+    }
+
+    #[test]
+    fn missing_terminal_and_unreadable_settings() {
+        let local = tempfile::tempdir().unwrap();
+        assert_eq!(read_profiles(local.path(), local.path()), Err(LoadError::NotInstalled));
+        let plain = terminal_dir(local.path());
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::write(plain.join("settings.json"), "{").unwrap();
+        assert!(matches!(read_profiles(local.path(), local.path()), Err(LoadError::Unreadable(_))));
     }
 }

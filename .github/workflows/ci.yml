@@ -12,4 +12,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: cargo check -p zefiro-core -p zefiro-platform -p zefiro-resources -p zefiro-ui -p zefiro-integration-clock -p zefiro-integration-devices -p zefiro-integration-usage -p zefiro-integration-vscode -p zefiro-integration-update -p zefiro-bar -p zefiro-island-host -p zefiro-island
+      - run: cargo check -p zefiro-core -p zefiro-platform -p zefiro-resources -p zefiro-ui -p zefiro-integration-clock -p zefiro-integration-devices -p zefiro-integration-usage -p zefiro-integration-vscode -p zefiro-integration-terminal -p zefiro-integration-update -p zefiro-bar -p zefiro-island-host -p zefiro-island
