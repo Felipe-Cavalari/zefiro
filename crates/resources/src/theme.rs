@@ -3,7 +3,7 @@
 use serde::Deserialize;
 use zefiro_platform::color::Rgba;
 
-pub const BUILTIN: [(&str, &str); 8] = [
+pub const BUILTIN: [(&str, &str); 9] = [
     ("obsidian", include_str!("../themes/obsidian.toml")),
     ("graphite", include_str!("../themes/graphite.toml")),
     ("slate", include_str!("../themes/slate.toml")),
@@ -12,6 +12,7 @@ pub const BUILTIN: [(&str, &str); 8] = [
     ("espresso", include_str!("../themes/espresso.toml")),
     ("plum", include_str!("../themes/plum.toml")),
     ("porcelain", include_str!("../themes/porcelain.toml")),
+    ("cobalto", include_str!("../themes/cobalto.toml")),
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -215,6 +216,20 @@ mod tests {
         assert_eq!(t.colors.accent, Accent::Auto);
         assert_eq!(t.material.backdrop, Backdrop::None);
         assert_eq!(t.animation.spring, SpringStyle::Default);
+    }
+
+    #[test]
+    fn cobalto_uses_acrylic_and_a_fixed_blue_accent() {
+        let (_, text) = BUILTIN.iter().find(|(id, _)| *id == "cobalto").expect("cobalto embutido");
+        let t = parse_theme("cobalto", "cobalto", text).unwrap();
+        assert_eq!(t.name, "Cobalto");
+        assert_eq!(t.material.backdrop, Backdrop::Acrylic);
+        assert_eq!(t.colors.accent, Accent::Color(Rgba::rgb(0x3B, 0x82, 0xF6)));
+        // A capa do álbum não muda o destaque deste tema.
+        let cover = Rgba::rgb(0xD4, 0x8F, 0x36);
+        let blue = crate::tokens::ensure_contrast(Rgba::rgb(0x3B, 0x82, 0xF6), t.colors.background);
+        assert_eq!(crate::tokens::derive_tokens(&t, Rgba::rgb(0, 120, 215), Some(cover)).accent, blue);
+        assert_eq!(crate::tokens::derive_tokens(&t, Rgba::rgb(0, 120, 215), None).accent, blue);
     }
 
     #[test]

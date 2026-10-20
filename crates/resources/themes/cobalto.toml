@@ -1,0 +1,29 @@
+# Cobalto — azul-marinho com o acrílico do Windows e destaque azul fixo (#3B82F6).
+name = "Cobalto"
+
+[colors]
+background     = "#0F1A2E"
+text           = "#E8EEF9"
+text_secondary = "#93A4C3"
+border         = "#1E2B45"   # "none" = sem contorno
+accent         = "#3B82F6"   # fixo: não segue a capa do álbum
+
+[material]
+opacity        = 0.96
+depth          = true
+shadow         = true
+backdrop       = "acrylic"   # desfoque do Windows; sem "Efeitos de transparência", fundo sólido
+backdrop_fill  = 0.55
+
+[shape]
+style          = "pill"      # pill | w11
+radius_max     = 44
+panel_radius   = 24
+
+[font]
+family         = "Segoe UI Variable"
+scale          = 1.0
+
+[animation]
+spring         = "default"   # smooth | default | bouncy | snappy
+speed          = 1.0

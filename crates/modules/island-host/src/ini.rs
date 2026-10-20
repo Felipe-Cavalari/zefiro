@@ -32,8 +32,12 @@ pub fn island_pill_height(height: BarHeight, format: BarFormat) -> u32 {
     }
 }
 
+/// A ilha C++ tem 8 paletas (`ColorThemeV2` 0 a 7, os 8 primeiros temas embutidos); o 8 é o
+/// personalizado. Temas embutidos depois deles (o Cobalto) vão como personalizados.
+const ISLAND_PRESETS: usize = 8;
+
 pub fn settings_for(theme: &Theme, height: BarHeight, format: BarFormat) -> IslandSettings {
-    let builtin = BUILTIN.iter().position(|(id, _)| *id == theme.id);
+    let builtin = BUILTIN.iter().take(ISLAND_PRESETS).position(|(id, _)| *id == theme.id);
     // Um tema embutido sobrescrito pelo usuário deixa de bater com a paleta da ilha: vira custom.
     let pristine = builtin.is_some_and(|i| parse_theme(BUILTIN[i].0, BUILTIN[i].0, BUILTIN[i].1).ok().is_some_and(|b| b.colors == theme.colors));
     let island_theme = match builtin {
@@ -153,7 +157,7 @@ pub fn apply_ini(text: &str, s: &IslandSettings) -> String {
 pub fn apply_state(text: &str, s: &IslandSettings) -> String {
     let index = match &s.theme {
         IslandTheme::Preset { index, .. } => *index,
-        IslandTheme::Custom { .. } => BUILTIN.len(),
+        IslandTheme::Custom { .. } => ISLAND_PRESETS,
     };
     let mut l: Vec<String> = text.lines().map(str::to_string).collect();
     set(&mut l, "Values", "ColorThemeV2", &index.to_string());
@@ -208,6 +212,15 @@ mod tests {
         assert!(out.contains("ThemePreset=nord"));
         assert!(out.contains("PillBgColor=#08080A"));
         assert!(out.contains("[Animations]\r\nAnimationStyle=default\r\nAnimationSpeed=normal"), "{out}");
+    }
+
+    #[test]
+    fn themes_beyond_the_island_palettes_are_custom_and_custom_stays_at_8() {
+        let s = settings_for(&theme("cobalto"), BarHeight::Compacta, BarFormat::Faixa);
+        assert!(matches!(s.theme, IslandTheme::Custom { .. }), "a ilha C++ só tem 8 paletas");
+        assert!(apply_state("", &s).contains("ColorThemeV2=8"));
+        let nord = settings_for(&theme("nord"), BarHeight::Compacta, BarFormat::Faixa);
+        assert!(matches!(nord.theme, IslandTheme::Preset { index: 3, .. }));
     }
 
     #[test]

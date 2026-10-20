@@ -103,7 +103,7 @@ mod tests {
     fn builtins_only_without_user_dir() {
         let (r, errors) = ThemeRegistry::load(None);
         assert!(errors.is_empty());
-        assert_eq!(r.list().len(), 8);
+        assert_eq!(r.list().len(), 9);
         assert_eq!(r.list()[0].theme.id, "obsidian");
         assert!(r.get("porcelain").is_some());
         assert!(r.get("nao-existe").is_none());
@@ -117,7 +117,7 @@ mod tests {
         std::fs::write(dir.path().join("leia-me.txt"), "ignorado").unwrap();
         let (r, errors) = ThemeRegistry::load(Some(dir.path()));
         assert!(errors.is_empty(), "{errors:?}");
-        assert_eq!(r.list().len(), 9);
+        assert_eq!(r.list().len(), 10);
         assert_eq!(r.get("obsidian").unwrap().name, "Obsidian do usuário");
         assert!(r.list().iter().any(|e| e.user && e.theme.id == "meu"));
     }
