@@ -1,5 +1,6 @@
-//! Layout da barra nas 2 alturas × 2 formatos (spec §5.1).
+//! Layout da barra nas 2 alturas × 3 formatos (spec §5.1; ilhas no ADR-0016).
 
+use crate::panel_layout::Shape;
 use zefiro_core::config::{BarFormat, BarHeight};
 use zefiro_platform::geometry::{Point, Rect};
 
@@ -14,6 +15,10 @@ pub struct BarMetrics {
     pub chip_pad_x: f32,
     pub chip_gap: f32,
     pub font: f32,
+    /// Ilhas: altura do trilho no topo, canto de baixo das ilhas e concordância com o trilho. 0 nos outros formatos.
+    pub rail: f32,
+    pub island_radius: f32,
+    pub fillet: f32,
 }
 
 pub fn metrics(height: BarHeight, format: BarFormat) -> BarMetrics {
@@ -22,9 +27,31 @@ pub fn metrics(height: BarHeight, format: BarFormat) -> BarMetrics {
         (BarHeight::Compacta, BarFormat::Faixa) => (32.0, 24.0, 24.0, 28.0, 0.0, 12.0),
         (BarHeight::Completa, BarFormat::Pilulas) => (36.0, 30.0, 26.0, 30.0, 2.0, 13.0),
         (BarHeight::Compacta, BarFormat::Pilulas) => (32.0, 24.0, 20.0, 24.0, 2.0, 12.0),
+        // A ilha tem a altura da barra; números do YASB: railheight 4, islandradius 16, edgeradius 8, grouppadding 12.
+        (BarHeight::Completa, BarFormat::Ilhas) => (36.0, 36.0, 28.0, 28.0, 12.0, 13.0),
+        (BarHeight::Compacta, BarFormat::Ilhas) => (32.0, 32.0, 24.0, 24.0, 12.0, 12.0),
     };
-    BarMetrics { band, pill, chip_h, island_pill, group_pad, edge: 8.0, chip_pad_x: 10.0, chip_gap: 4.0, font }
+    let base = BarMetrics { band, pill, chip_h, island_pill, group_pad, edge: 8.0, chip_pad_x: 10.0, chip_gap: 4.0, font, rail: 0.0, island_radius: 0.0, fillet: 0.0 };
+    match format {
+        // As ilhas das pontas encostam na borda do monitor.
+        BarFormat::Ilhas => BarMetrics { edge: 0.0, rail: 4.0, island_radius: 16.0, fillet: 8.0, ..base },
+        _ => base,
+    }
 }
+
+/// Lado da ilha em que fica a concordância (o canto côncavo entre o trilho e a ilha).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilletSide { Left, Right }
+
+/// Quadrado da concordância, logo abaixo do trilho e encostado na ilha. O preenchido é o canto junto
+/// dos dois (em cima, do lado da ilha); o resto é um quarto de círculo vazio.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fillet { pub rect: Rect, pub side: FilletSide }
+
+/// Formato ilhas, em px. O trilho só existe nos vãos entre as ilhas: nada se sobrepõe, então o
+/// acrílico e a opacidade do tema não fazem emenda mais escura.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Islands { pub rail_h: f32, pub radius: f32, pub fillet: f32, pub rails: Vec<Rect>, pub fillets: Vec<Fillet> }
 
 /// `wide`: o chip não tem o teto de 160 DIP (o player, que tem a largura da pílula da ilha).
 #[derive(Debug, Clone, PartialEq)]
@@ -48,6 +75,73 @@ pub struct BarLayout {
     pub chip_h_px: f32,
     pub overflow: Vec<OverflowGroup>,
     pub regions: [Rect; 3],
+    /// Só no formato ilhas; aí `groups` são as ilhas visíveis (do topo ao pé da barra).
+    pub islands: Option<Islands>,
+}
+
+impl BarLayout {
+    /// Forma de um grupo. Nas ilhas, o retângulo sobe um raio acima da tela (os cantos de cima somem) e
+    /// passa um raio da borda do monitor quando encosta nela (o canto de fora fica reto).
+    pub fn group_shape(&self, r: Rect, pill_radius: f32) -> Shape {
+        let Some(islands) = &self.islands else { return Shape { rect: r, radius: pill_radius } };
+        let radius = islands.radius;
+        let left = if r.x <= 0.0 { radius } else { 0.0 };
+        let right = if r.right() >= self.band.w { radius } else { 0.0 };
+        Shape { rect: Rect::new(r.x - left, r.y - radius, r.w + left + right, r.h + radius), radius }
+    }
+
+    /// Topo da pílula da ilha de mídia: centrada na barra, ou abaixo do trilho nas ilhas.
+    pub fn island_pill_y(&self) -> f32 {
+        let top = self.islands.as_ref().map_or(0.0, |i| i.rail_h);
+        (top + (self.band.h - top - self.island_pill_h) / 2.0).round()
+    }
+
+    /// Seção do grupo (0 início, 1 centro, 2 fim): a região que contém o meio dele, ou a mais próxima.
+    /// Assim cada pílula ou ilha nasce e some no próprio lugar quando outra seção aparece ou some.
+    pub fn group_slot(&self, r: Rect) -> usize {
+        let x = r.center_x();
+        let distance = |reg: &Rect| if x < reg.x { reg.x - x } else if x > reg.right() { x - reg.right() } else { 0.0 };
+        (0..3).min_by(|&a, &b| distance(&self.regions[a]).total_cmp(&distance(&self.regions[b]))).unwrap_or(0)
+    }
+
+    /// A ilha de mídia se funde à barra (sem contorno nem sombra): na faixa e nas ilhas.
+    pub fn merges_island(&self) -> bool {
+        self.strip.is_some() || self.islands.is_some()
+    }
+}
+
+/// Trilho nos vãos entre as ilhas e concordâncias nos lados que não encostam na borda. Um vão estreito
+/// demais para as duas concordâncias fica sem elas.
+fn island_parts(groups: &[Rect], monitor_w: f32, rail: f32, fillet: f32) -> (Vec<Rect>, Vec<Fillet>) {
+    let mut sorted = groups.to_vec();
+    sorted.sort_by(|a, b| a.x.total_cmp(&b.x));
+    let (mut rails, mut fillets) = (Vec::new(), Vec::new());
+    let room = |gap: f32, shared: bool| gap >= if shared { 2.0 * fillet } else { fillet };
+    let mut cursor = 0.0f32;
+    for (i, g) in sorted.iter().enumerate() {
+        if g.x > cursor {
+            rails.push(Rect::new(cursor, 0.0, g.x - cursor, rail));
+        }
+        if g.x > 0.0 && room(g.x - cursor, i > 0) {
+            fillets.push(Fillet { rect: Rect::new(g.x - fillet, rail, fillet, fillet), side: FilletSide::Left });
+        }
+        let next = sorted.get(i + 1).map_or(monitor_w, |n| n.x);
+        if g.right() < monitor_w && room(next - g.right(), i + 1 < sorted.len()) {
+            fillets.push(Fillet { rect: Rect::new(g.right(), rail, fillet, fillet), side: FilletSide::Right });
+        }
+        cursor = cursor.max(g.right());
+    }
+    if cursor < monitor_w {
+        rails.push(Rect::new(cursor, 0.0, monitor_w - cursor, rail));
+    }
+    (rails, fillets)
+}
+
+fn finish_islands(layout: &mut BarLayout, m: &BarMetrics, monitor_w: f32, scale: f32) {
+    let px = |dip: f32| (dip * scale).round();
+    let (rail, fillet) = (px(m.rail), px(m.fillet));
+    let (rails, fillets) = island_parts(&layout.groups, monitor_w, rail, fillet);
+    layout.islands = Some(Islands { rail_h: rail, radius: px(m.island_radius), fillet, rails, fillets });
 }
 
 fn rounded(r: Rect) -> Rect {
@@ -94,7 +188,7 @@ pub fn layout_bar(monitor_w: f32, scale: f32, height: BarHeight, format: BarForm
     BarLayout {
         scale,
         band,
-        strip: if pills { None } else { Some(band) },
+        strip: (format == BarFormat::Faixa).then_some(band),
         groups,
         chips,
         island_pill_h: px(m.island_pill),
@@ -102,6 +196,7 @@ pub fn layout_bar(monitor_w: f32, scale: f32, height: BarHeight, format: BarForm
         chip_h_px: chip_h,
         overflow: Vec::new(),
         regions: [Rect::default(); 3],
+        islands: None,
     }
 }
 
@@ -112,9 +207,14 @@ pub fn layout_sections(monitor_w: f32, scale: f32, height: BarHeight, format: Ba
     let edge = (m.edge * scale).round().min(monitor_w.max(0.0) / 2.0);
     let available = (monitor_w - 2.0 * edge).max(0.0);
     let gap = (m.chip_gap * scale).round();
-    let pad = if format == BarFormat::Pilulas { (m.group_pad * scale).round() } else { 0.0 };
+    let islands = format == BarFormat::Ilhas;
+    let pad = if format == BarFormat::Faixa { 0.0 } else { (m.group_pad * scale).round() };
+    let top = (m.rail * scale).round();
+    let chip_y = (top + (layout.band.h - top - layout.chip_h_px) / 2.0).round();
     let width = |chip: &ChipSpec| (chip.content_w.min(if chip.wide { f32::MAX } else { 160.0 * scale }).max(0.0) + 2.0 * (m.chip_pad_x * scale).round()).ceil();
     let total = |items: &[ChipSpec]| items.iter().map(&width).sum::<f32>() + gap * items.len().saturating_sub(1) as f32 + if items.is_empty() { 0.0 } else { 2.0 * pad };
+    // Nas ilhas, a ilha do centro envolve a reserva da ilha de mídia com a margem dos dois lados.
+    let island_width = island_width.map(|w| if islands && w > 0.0 { w + 2.0 * pad } else { w });
     let center = island_width.unwrap_or_else(|| total(sections[1]).min(available / 2.0)).max(0.0).min(available);
     let separation = if center > 0.0 { (8.0 * scale).round() } else { 0.0 };
     let side = ((available - center - 2.0 * separation) / 2.0).max(0.0);
@@ -131,12 +231,28 @@ pub fn layout_sections(monitor_w: f32, scale: f32, height: BarHeight, format: Ba
         let ids = sections.iter().enumerate().filter(|(i, _)| *i != 1 || island_width.is_none()).flat_map(|(_, items)| items.iter().map(|c| c.id.clone())).collect();
         layout.overflow.push(OverflowGroup { id: "__more_all".into(), ids });
         if available > 0.0 {
-            layout.chips.push(ChipBox { id: "__more_all".into(), rect: Rect::new(edge, (layout.band.h - layout.chip_h_px) / 2.0, available.min(more_width), layout.chip_h_px) });
+            let (x, w) = if islands { (edge + pad, (available - 2.0 * pad).max(1.0).min(more_width)) } else { (edge, available.min(more_width)) };
+            layout.chips.push(ChipBox { id: "__more_all".into(), rect: Rect::new(x, chip_y, w, layout.chip_h_px) });
+            if islands {
+                layout.groups.push(Rect::new(edge, 0.0, w + 2.0 * pad, layout.band.h));
+                if center > 0.0 && island_width.is_some() {
+                    layout.groups.push(rounded(Rect::new(layout.regions[1].x, 0.0, center, layout.band.h)));
+                }
+            }
+        }
+        if islands {
+            finish_islands(&mut layout, &m, monitor_w, scale);
         }
         return layout;
     }
     for (index, items) in sections.into_iter().enumerate() {
-        if items.is_empty() || (index == 1 && island_width.is_some()) { continue; }
+        if index == 1 && island_width.is_some() {
+            if islands && center > 0.0 {
+                layout.groups.push(rounded(Rect::new(layout.regions[1].x, 0.0, center, layout.band.h)));
+            }
+            continue;
+        }
+        if items.is_empty() { continue; }
         let region = layout.regions[index];
         let mut count = items.len();
         let mut used = total(items);
@@ -146,11 +262,13 @@ pub fn layout_sections(monitor_w: f32, scale: f32, height: BarHeight, format: Ba
         }
         let has_more = count < items.len();
         let x = match index { 0 => region.x, 1 => region.x + (region.w - used) / 2.0, _ => region.right() - used };
-        if format == BarFormat::Pilulas {
-            layout.groups.push(rounded(Rect::new(x, (layout.band.h - m.pill * scale) / 2.0, used, m.pill * scale)));
+        match format {
+            BarFormat::Pilulas => layout.groups.push(rounded(Rect::new(x, (layout.band.h - m.pill * scale) / 2.0, used, m.pill * scale))),
+            BarFormat::Ilhas => layout.groups.push(rounded(Rect::new(x, 0.0, used, layout.band.h))),
+            BarFormat::Faixa => {}
         }
         let mut cursor = x + pad;
-        let y = ((layout.band.h - layout.chip_h_px) / 2.0).round();
+        let y = chip_y;
         for item in &items[..count] {
             let w = width(item);
             layout.chips.push(ChipBox { id: item.id.clone(), rect: rounded(Rect::new(cursor, y, w, layout.chip_h_px)) });
@@ -161,6 +279,9 @@ pub fn layout_sections(monitor_w: f32, scale: f32, height: BarHeight, format: Ba
             layout.chips.push(ChipBox { id: id.clone(), rect: rounded(Rect::new(cursor, y, more_width, layout.chip_h_px)) });
             layout.overflow.push(OverflowGroup { id, ids: items[count..].iter().map(|item| item.id.clone()).collect() });
         }
+    }
+    if islands {
+        finish_islands(&mut layout, &m, monitor_w, scale);
     }
     layout
 }
@@ -195,9 +316,9 @@ mod tests {
     fn island_pill_never_reaches_the_band_edges() {
         // Do tamanho da faixa, a pílula (com contorno e sombra) parece maior que a barra.
         for h in [BarHeight::Completa, BarHeight::Compacta] {
-            for f in [BarFormat::Faixa, BarFormat::Pilulas] {
+            for f in [BarFormat::Faixa, BarFormat::Pilulas, BarFormat::Ilhas] {
                 let m = metrics(h, f);
-                assert!(m.island_pill <= m.band - 4.0, "{h:?}/{f:?}: ilha {} na faixa {}", m.island_pill, m.band);
+                assert!(m.island_pill <= m.band - m.rail - 4.0, "{h:?}/{f:?}: ilha {} na faixa {}", m.island_pill, m.band);
             }
         }
     }

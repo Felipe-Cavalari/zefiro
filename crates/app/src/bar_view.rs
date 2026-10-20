@@ -1,4 +1,4 @@
-//! Uma barra por monitor: faixa ou pílulas, chips e transições.
+//! Uma barra por monitor: faixa, pílulas ou ilhas, chips e transições.
 
 use windows::UI::Composition::Desktop::DesktopWindowTarget;
 use windows::UI::Composition::{CompositionDrawingSurface, ContainerVisual, SpriteVisual, Visual};
@@ -14,9 +14,10 @@ use zefiro_integration_clock::windows::now_local;
 use zefiro_platform::geometry::{Point, Rect};
 use zefiro_platform_windows::compositor::ui_color;
 use zefiro_platform_windows::monitors::Monitor;
+use zefiro_platform_windows::fillet::FilletShape;
 use zefiro_platform_windows::morph::MorphShape;
 use zefiro_platform_windows::{appbar, island_zorder, window};
-use zefiro_ui::bar_layout::{BarLayout, ChipSpec, layout_sections, metrics};
+use zefiro_ui::bar_layout::{BarLayout, ChipSpec, FilletSide, layout_sections, metrics};
 use zefiro_ui::panel_layout::{CHIP_FADE_S, SHADOW_MARGIN_DIP, Shape, pill_radius};
 use zefiro_ui::spring::SpringParams;
 use zefiro_ui::paint::{DisplayList, DrawOp};
@@ -35,6 +36,9 @@ pub const PLAYER_CHIP: &str = "player";
 
 struct ChipView { id: String, hover: MorphShape, content: SpriteVisual, surface: CompositionDrawingSurface, rect: Rect, pos: windows::UI::Composition::CompositionPropertySet }
 
+/// Grupo de uma seção: pílula, ou ilha com as duas concordâncias (criadas no primeiro uso das ilhas).
+struct GroupView { shape: MorphShape, fillets: Vec<FilletShape> }
+
 pub struct BarView {
     hwnd: HWND,
     monitor: Monitor,
@@ -43,7 +47,10 @@ pub struct BarView {
     root: ContainerVisual,
     strip: MorphShape,
     divider: SpriteVisual,
-    groups: Vec<MorphShape>,
+    /// Início, centro e fim, nesta ordem (`BarLayout::group_slot`).
+    groups: Vec<GroupView>,
+    /// Pedaços do trilho do formato ilhas, da esquerda para a direita.
+    rails: Vec<MorphShape>,
     chips: Vec<ChipView>,
     layout: Option<BarLayout>,
     appbar: bool,
@@ -158,7 +165,7 @@ impl BarView {
         let divider = ctx.comp.compositor.CreateSpriteVisual()?;
         root.Children()?.InsertAtTop(&divider)?;
         let groups = Vec::new();
-        let mut view = BarView { hwnd, monitor: monitor.clone(), scale, _target: target, root, strip, divider, groups, chips: Vec::new(), layout: None, appbar: false, hover: None, active: None, guides: None, drag_ghost: None, drag_marker: None, island: None, player: None, player_hover: false, hidden: false, interactive_base: Vec::new() };
+        let mut view = BarView { hwnd, monitor: monitor.clone(), scale, _target: target, root, strip, divider, groups, rails: Vec::new(), chips: Vec::new(), layout: None, appbar: false, hover: None, active: None, guides: None, drag_ghost: None, drag_marker: None, island: None, player: None, player_hover: false, hidden: false, interactive_base: Vec::new() };
         view.apply(ctx, false)?;
         window::set_bounds(hwnd, bounds, true);
         Ok(view)
@@ -214,11 +221,29 @@ impl BarView {
             (self.monitor.primary && ctx.config.island.external()).then(|| window::island_reservation().unwrap_or(self.monitor.rect.w))
         };
         let layout = layout_sections(self.monitor.rect.w, self.scale, cfg.height, cfg.format, [&specs[0], &specs[1], &specs[2]], reservation);
-        while self.groups.len() < layout.groups.len() {
-            let group = MorphShape::new(&ctx.comp, &self.root, &ctx.theme.morph_style(self.scale, SurfaceKind::Pill))?;
-            ctx.comp.place_background(&self.root, &group.root().cast()?, &self.divider.cast()?)?;
-            group.set_opacity(0.0)?;
-            self.groups.push(group);
+        // Um grupo por seção (início, centro, fim) e um pedaço do trilho por vão entre as ilhas.
+        while self.groups.len() < 3 {
+            let shape = MorphShape::new(&ctx.comp, &self.root, &ctx.theme.morph_style(self.scale, SurfaceKind::Pill))?;
+            ctx.comp.place_background(&self.root, &shape.root().cast()?, &self.divider.cast()?)?;
+            shape.set_opacity(0.0)?;
+            self.groups.push(GroupView { shape, fillets: Vec::new() });
+        }
+        let island_style = ctx.theme.morph_style(self.scale, SurfaceKind::Island);
+        if let Some(islands) = &layout.islands {
+            while self.rails.len() < islands.rails.len() {
+                let rail = MorphShape::new(&ctx.comp, &self.root, &island_style)?;
+                ctx.comp.place_background(&self.root, &rail.root().cast()?, &self.divider.cast()?)?;
+                rail.set_opacity(0.0)?;
+                self.rails.push(rail);
+            }
+            for g in self.groups.iter_mut().filter(|g| g.fillets.is_empty()) {
+                for side in [FilletSide::Left, FilletSide::Right] {
+                    let fillet = FilletShape::new(&ctx.comp, &self.root, side, islands.fillet, &island_style)?;
+                    ctx.comp.place_background(&self.root, &fillet.root().cast()?, &self.divider.cast()?)?;
+                    fillet.set_opacity(0.0)?;
+                    g.fillets.push(fillet);
+                }
+            }
         }
         for group in &layout.overflow {
             contents.push((group.id.clone(), chip_content(ctx, &group.id, &self.monitor.device, cfg.height, chip_h, font_px, self.scale)));
@@ -235,8 +260,15 @@ impl BarView {
         }
 
         self.strip.set_style(&ctx.comp, &ctx.theme.morph_style(self.scale, SurfaceKind::Strip))?;
+        let group_style = if layout.islands.is_some() { island_style.clone() } else { ctx.theme.morph_style(self.scale, SurfaceKind::Pill) };
         for g in &self.groups {
-            g.set_style(&ctx.comp, &ctx.theme.morph_style(self.scale, SurfaceKind::Pill))?;
+            g.shape.set_style(&ctx.comp, &group_style)?;
+            for f in &g.fillets {
+                f.set_style(&ctx.comp, &island_style)?;
+            }
+        }
+        for rail in &self.rails {
+            rail.set_style(&ctx.comp, &island_style)?;
         }
         self.divider.SetBrush(&ctx.comp.compositor.CreateColorBrushWithColor(ui_color(ctx.theme.tokens.hairline))?)?;
 
@@ -244,18 +276,25 @@ impl BarView {
         let spring = ctx.theme.spring(SpringParams::SETTLE);
         let place = |shape: &MorphShape, s: Shape| if animate { shape.animate(&ctx.comp, s, spring) } else { shape.set(s) };
         let fade = |shape: &MorphShape, v: f32| if animate { shape.animate_opacity(&ctx.comp, v, spring) } else { shape.set_opacity(v) };
+        // "Na hora" também é animação (1 ms), senão uma mola de opacidade em andamento grava por cima.
+        let at_once = |visual: &ContainerVisual, v: f32| ctx.comp.fade(&visual.cast::<Visual>()?, v, 0.001);
         let style = ctx.theme.theme.shape.style;
         let radius_max = ctx.theme.theme.shape.radius_max * self.scale;
+        // Da faixa para as pílulas ou ilhas, os grupos e o trilho nascem do retângulo da faixa.
+        let was_strip = self.layout.as_ref().is_none_or(|l| l.groups.is_empty());
+        let band_rect = |r: Rect| Shape { rect: Rect::new(r.x, layout.band.y, r.w, layout.band.h), radius: 0.0 };
 
-        // Faixa, ou o "resto" dela encolhido no centro quando o formato é pílulas.
+        // Faixa; nas pílulas, o "resto" dela encolhe no centro; nas ilhas, ilhas e trilho nascem
+        // cobrindo a faixa inteira, então ela some na hora.
         let pill_h = layout.island_pill_h;
         let center = Rect::new(((self.monitor.rect.w - pill_h * 4.0) / 2.0).round(), layout.band.y + ((layout.band.h - pill_h) / 2.0).round(), pill_h * 4.0, pill_h);
-        match layout.strip {
-            Some(band) => {
+        match (layout.strip, &layout.islands) {
+            (Some(band), _) => {
                 place(&self.strip, Shape { rect: band, radius: 0.0 })?;
                 fade(&self.strip, 1.0)?;
             }
-            None => {
+            (None, Some(_)) => at_once(self.strip.root(), 0.0)?,
+            (None, None) => {
                 place(&self.strip, Shape { rect: center, radius: pill_h / 2.0 })?;
                 fade(&self.strip, 0.0)?;
             }
@@ -265,18 +304,62 @@ impl BarView {
         self.divider.SetSize(Vector2 { X: self.monitor.rect.w, Y: line })?;
         self.divider.SetOpacity(if layout.strip.is_some() { 1.0 } else { 0.0 })?;
 
-        // Grupos: nascem do retângulo da faixa nas pontas.
-        let was_strip = self.layout.as_ref().is_none_or(|l| l.groups.is_empty());
-        for (i, g) in self.groups.iter().enumerate() {
-            match layout.groups.get(i) {
+        // Grupos, cada um no lugar da sua seção. Um grupo que não existia nasce no lugar final.
+        let mut targets: [Option<Rect>; 3] = [None; 3];
+        for r in &layout.groups {
+            targets[layout.group_slot(*r)] = Some(*r);
+        }
+        let mut before: [bool; 3] = [false; 3];
+        if let Some(prev) = &self.layout {
+            for r in &prev.groups {
+                before[prev.group_slot(*r)] = true;
+            }
+        }
+        for (slot, g) in self.groups.iter_mut().enumerate() {
+            match targets[slot] {
                 Some(r) => {
+                    let target = layout.group_shape(r, pill_radius(r.h, radius_max, style, self.scale));
                     if was_strip {
-                        g.set(Shape { rect: Rect::new(r.x, layout.band.y, r.w, layout.band.h), radius: 0.0 })?;
+                        g.shape.set(band_rect(r))?;
+                    } else if !before[slot] {
+                        g.shape.set(target)?;
                     }
-                    place(g, Shape { rect: *r, radius: pill_radius(r.h, radius_max, style, self.scale) })?;
-                    fade(g, 1.0)?;
+                    place(&g.shape, target)?;
+                    if was_strip && layout.islands.is_some() { at_once(g.shape.root(), 1.0)? } else { fade(&g.shape, 1.0)? }
                 }
-                None => fade(g, 0.0)?,
+                None => fade(&g.shape, 0.0)?,
+            }
+            for f in &mut g.fillets {
+                let shown = match (&layout.islands, targets[slot]) {
+                    (Some(islands), Some(r)) => {
+                        f.resize(&ctx.comp, islands.fillet)?;
+                        g.shape.bind_offset(&ctx.comp, &f.root().cast()?, f.side(), islands.fillet, islands.rail_h)?;
+                        islands.fillets.iter().any(|x| x.side == f.side() && if x.side == FilletSide::Left { x.rect.right() == r.x } else { x.rect.x == r.right() })
+                    }
+                    _ => false,
+                };
+                let v = if shown { 1.0 } else { 0.0 };
+                if animate { f.animate_opacity(&ctx.comp, v, spring)? } else { f.set_opacity(v)? }
+            }
+        }
+
+        // Trilho: um pedaço por vão; vindo da faixa, cada pedaço nasce da altura dela e encolhe.
+        let rails = layout.islands.as_ref().map_or(&[][..], |i| &i.rails[..]);
+        let rails_before = self.layout.as_ref().and_then(|l| l.islands.as_ref()).map_or(0, |i| i.rails.len());
+        for (i, rail) in self.rails.iter().enumerate() {
+            match rails.get(i) {
+                Some(r) => {
+                    let target = Shape { rect: *r, radius: 0.0 };
+                    if was_strip {
+                        rail.set(band_rect(*r))?;
+                        at_once(rail.root(), 1.0)?;
+                    } else if i >= rails_before {
+                        rail.set(target)?;
+                    }
+                    place(rail, target)?;
+                    fade(rail, 1.0)?;
+                }
+                None => fade(rail, 0.0)?,
             }
         }
 
@@ -314,6 +397,7 @@ impl BarView {
         let mut interactive: Vec<Rect> = layout.chips.iter().map(|c| c.rect).collect();
         interactive.extend(layout.strip);
         interactive.extend(layout.groups.iter().copied());
+        interactive.extend(layout.islands.iter().flat_map(|i| i.rails.iter().copied()));
         self.interactive_base = interactive;
         zefiro_platform_windows::bar_context::set_zone(self.hwnd, Rect::new(self.monitor.rect.x, self.monitor.rect.y, layout.band.w, layout.band.h));
 
@@ -389,9 +473,9 @@ impl BarView {
         };
         let pill_h = layout.island_pill_h;
         let content = island_content(ctx, pill_h);
-        let rect = Rect::new(((self.monitor.rect.w - content.size.w) / 2.0).round(), ((layout.band.h - pill_h) / 2.0).round(), content.size.w, pill_h);
-        // Na faixa, a ilha se funde à barra (sem contorno nem sombra); nas pílulas, é uma pílula.
-        let kind = if layout.strip.is_some() { SurfaceKind::Strip } else { SurfaceKind::Pill };
+        let rect = Rect::new(((self.monitor.rect.w - content.size.w) / 2.0).round(), layout.island_pill_y(), content.size.w, pill_h);
+        // Na faixa e nas ilhas, a ilha se funde à barra (sem contorno nem sombra); nas pílulas, é uma pílula.
+        let kind = if layout.islands.is_some() { SurfaceKind::Island } else if layout.merges_island() { SurfaceKind::Strip } else { SurfaceKind::Pill };
         let style = ctx.theme.morph_style(self.scale, kind);
         let radius = pill_radius(pill_h, ctx.theme.theme.shape.radius_max * self.scale, ctx.theme.theme.shape.style, self.scale);
         view.update(ctx, content, rect, radius, &style, animate && ctx.theme.animations)?;
@@ -408,7 +492,7 @@ impl BarView {
         let Some(chip) = layout.chips.iter().find(|c| c.id == PLAYER_CHIP) else { return Ok(()) };
         let content = player_content(ctx, chip.rect.h, self.player_hover);
         let rect = Rect::new(chip.rect.x, chip.rect.y, content.size.w, chip.rect.h);
-        let style = ctx.theme.morph_style(self.scale, SurfaceKind::Strip);
+        let style = ctx.theme.morph_style(self.scale, if layout.islands.is_some() { SurfaceKind::Island } else { SurfaceKind::Strip });
         let radius = pill_radius(rect.h, ctx.theme.theme.shape.radius_max * self.scale, ctx.theme.theme.shape.style, self.scale);
         view.update(ctx, content, rect, radius, &style, animate && ctx.theme.animations)
     }

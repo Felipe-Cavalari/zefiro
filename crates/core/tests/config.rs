@@ -35,6 +35,15 @@ fn missing_keys_take_defaults() {
 }
 
 #[test]
+fn islands_format_parses_and_round_trips() {
+    let c = parse_config("[bar]
+format = \"ilhas\"
+").unwrap();
+    assert_eq!(c.bar.format, BarFormat::Ilhas);
+    assert_eq!(BarFormat::Ilhas.as_str(), "ilhas");
+}
+
+#[test]
 fn invalid_value_reports_line() {
     let e = parse_config("theme = \"nord\"\n[bar]\nheight = \"enorme\"\n").unwrap_err();
     assert_eq!(e.line, Some(3));

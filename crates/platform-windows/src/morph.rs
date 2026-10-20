@@ -13,6 +13,7 @@ use windows::UI::Composition::*;
 use windows::core::{HSTRING, Interface, Result};
 use windows_numerics::{Vector2, Vector3};
 use zefiro_platform::color::Rgba;
+use zefiro_ui::bar_layout::FilletSide;
 use zefiro_ui::panel_layout::{CONTENT_ALPHA_EXPRESSION, Shape};
 use zefiro_ui::spring::SpringParams;
 
@@ -191,6 +192,20 @@ impl MorphShape {
         let g = comp.compositor.CreateRoundedRectangleGeometry()?;
         bind_geometry(comp, &self.props, &g)?;
         child.SetClip(&comp.compositor.CreateGeometricClipWithGeometry(&g)?)
+    }
+
+    /// Prende uma concordância (`fillet`, de lado `size`) na lateral da forma, logo abaixo do trilho
+    /// (`rail`): segue `x` e `w` por expressão, então acompanha a mola da ilha sem a CPU.
+    pub fn bind_offset(&self, comp: &Comp, fillet: &Visual, side: FilletSide, size: f32, rail: f32) -> Result<()> {
+        let expr = match side {
+            FilletSide::Left => "Vector3(p.x - S, R, 0)",
+            FilletSide::Right => "Vector3(p.x + p.w, R, 0)",
+        };
+        let e = comp.compositor.CreateExpressionAnimationWithExpression(&HSTRING::from(expr))?;
+        e.SetReferenceParameter(&HSTRING::from("p"), &self.props.cast::<CompositionObject>()?)?;
+        e.SetScalarParameter(&HSTRING::from("S"), size)?;
+        e.SetScalarParameter(&HSTRING::from("R"), rail)?;
+        fillet.StartAnimation(&HSTRING::from("Offset"), &e)
     }
 
     /// Opacidade de `child` = regra da ilha sobre a altura atual da forma.

@@ -10,7 +10,7 @@ use zefiro_resources::tokens::{Tokens, derive_tokens};
 use zefiro_ui::spring::SpringParams;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SurfaceKind { Strip, Pill, Panel, Hover }
+pub enum SurfaceKind { Strip, Pill, Panel, Hover, Island }
 
 pub struct ThemeState {
     pub registry: ThemeRegistry,
@@ -65,6 +65,9 @@ impl ThemeState {
         match kind {
             SurfaceKind::Strip => MorphStyle { fill, depth: self.theme.material.depth, border: None, border_px: 0.0, shadow: None, backdrop },
             SurfaceKind::Pill | SurfaceKind::Panel => MorphStyle { fill, depth: self.theme.material.depth, border: self.tokens.border, border_px: scale, shadow, backdrop },
+            // Ilhas, trilho e concordâncias são peças da mesma superfície: sem profundidade (o
+            // degradê de cada peça faria emenda com a vizinha), sem contorno e sem sombra.
+            SurfaceKind::Island => MorphStyle { fill, depth: false, border: None, border_px: 0.0, shadow: None, backdrop },
             SurfaceKind::Hover => MorphStyle { fill: self.tokens.raised, depth: false, border: None, border_px: 0.0, shadow: None, backdrop: false },
         }
     }

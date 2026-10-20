@@ -17,7 +17,7 @@ pub struct IslandSettings {
     pub theme: IslandTheme,
     pub spring: SpringStyle,
     pub speed: f32,
-    /// Formato faixa: a ilha se funde à barra (sem contorno nem sombra). Nas pílulas ela é uma pílula como as outras.
+    /// Faixa e ilhas: a ilha se funde à barra (sem contorno nem sombra). Nas pílulas ela é uma pílula como as outras.
     pub merged: bool,
     /// Sombra do tema (`material.shadow`), usada quando a ilha não está fundida.
     pub shadow: bool,
@@ -29,6 +29,8 @@ pub fn island_pill_height(height: BarHeight, format: BarFormat) -> u32 {
         (BarHeight::Compacta, BarFormat::Faixa) => 28,
         (BarHeight::Completa, BarFormat::Pilulas) => 36,
         (BarHeight::Compacta, BarFormat::Pilulas) => 24,
+        (BarHeight::Completa, BarFormat::Ilhas) => 36,
+        (BarHeight::Compacta, BarFormat::Ilhas) => 24,
     }
 }
 
@@ -55,7 +57,7 @@ pub fn settings_for(theme: &Theme, height: BarHeight, format: BarFormat) -> Isla
         theme: island_theme,
         spring: theme.animation.spring,
         speed: theme.animation.speed,
-        merged: format == BarFormat::Faixa,
+        merged: format != BarFormat::Pilulas,
         shadow: theme.material.shadow,
     }
 }
@@ -196,6 +198,14 @@ mod tests {
         assert_eq!(island_pill_height(BarHeight::Compacta, BarFormat::Faixa), 28);
         assert_eq!(island_pill_height(BarHeight::Completa, BarFormat::Pilulas), 36);
         assert_eq!(island_pill_height(BarHeight::Compacta, BarFormat::Pilulas), 24);
+        assert_eq!(island_pill_height(BarHeight::Completa, BarFormat::Ilhas), 36);
+        assert_eq!(island_pill_height(BarHeight::Compacta, BarFormat::Ilhas), 24);
+    }
+
+    #[test]
+    fn islands_merge_the_external_island_like_the_strip() {
+        assert!(settings_for(&theme("obsidian"), BarHeight::Completa, BarFormat::Ilhas).merged, "a ilha fica dentro da ilha do centro, sem contorno");
+        assert!(!settings_for(&theme("obsidian"), BarHeight::Completa, BarFormat::Pilulas).merged);
     }
 
     #[test]

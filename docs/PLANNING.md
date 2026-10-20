@@ -291,7 +291,7 @@ speed          = 1.0
 
 - Os embutidos ficam em `resources/themes/<id>.toml`; os do usuário em `%APPDATA%\zefiro\themes\<id>.toml` (mesmo id substitui o embutido). **Abrir pasta de temas** no menu do Zefiro copia o tema atual para lá.
 - Erro no arquivo: a barra mantém o tema anterior e o log mostra o arquivo, a linha e o motivo.
-- No `config.toml`: `bar.height = completa | compacta` (44 ou 32 DIP) e `bar.format = faixa | pilulas` (ponta a ponta ou pílulas flutuantes). A ilha embutida segue a altura, o formato e o tema.
+- No `config.toml`: `bar.height = completa | compacta` (44 ou 32 DIP) e `bar.format = faixa | pilulas | ilhas` (ponta a ponta, pílulas flutuantes ou ilhas penduradas num trilho, ADR-0016). A ilha embutida segue a altura, o formato e o tema.
 - O `cavalaridev.toml` saiu do plano (2026-10-20); no lugar dele, o tema embutido **Cobalto**, com acrílico e destaque `#3B82F6` (ADR-0013).
 
 ### 4.2 Configuração do layout
@@ -473,6 +473,7 @@ Depois dos spikes: workspace Rust, CI, logs e esqueleto de `core`/`ui`/`platform
 | **1e** | **Widgets do YASB que faltam**: chips `claude`, `codex` (uso), `vscode` (projetos recentes), `notifications` (contador, central, limpar), `dnd` (Não perturbe) e `power` (energia com confirmação). O chip de apps fixados/abertos foi feito e removido a pedido do usuário (barra de tarefas do Windows e Raycast cobrem). [Spec](superpowers/specs/2026-10-19-fase-1e-widgets-do-yasb-design.md), [ADR-0011](adr/0011-widgets-do-yasb-fase-1e.md) |
 | **1e+** | **Chips da ilha**: `player` (a pílula de mídia da ilha, idêntica, sem os avisos), `weather` (temperatura e cidade) e `hardware` (CPU, GPU, RAM ao clicar), em qualquer seção de qualquer monitor; a ilha continua fixa no centro do principal. [Spec](superpowers/specs/2026-10-20-chips-da-ilha-design.md), [ADR-0012](adr/0012-chips-da-ilha.md) |
 | **1e++** | **Chip Terminal**: `terminal` com os perfis do Windows Terminal (ícones de verdade, selo do padrão) e edição no próprio painel (lápis → arrastar para ordenar, olho para esconder → Concluir), gravada em `[terminal]`. [Spec](superpowers/specs/2026-10-20-chip-terminal-design.md), [ADR-0015](adr/0015-chip-terminal.md) |
+| **1e+++** | **Formato ilhas** (Adaptive Islands do YASB): trilho de 4 px no topo e ilhas de início, centro e fim com cantos de 16 e concordâncias de 8; a ilha do centro envolve a ilha de mídia. Primeiro dos formatos novos de barra. [ADR-0016](adr/0016-formato-ilhas.md) |
 | ~~1f~~ | **Removida em 2026-10-20.** Os itens declarativos e a linguagem de expressões foram para a Fase 5. O modo noturno saiu do plano: uma rotina do usuário já liga a luz noturna às 18h e desliga às 9h. O Pomodoro ficou coberto pelo timer de foco da ilha |
 | **1g** | Tema **Cobalto** (acrílico, destaque `#3B82F6`) no lugar do `cavalaridev.toml`, **HUD de debug** (`Ctrl+Alt+Shift+D`) e **exportar diagnóstico** feitos ([Spec](superpowers/specs/2026-10-20-fase-1g-design.md), [ADR-0013](adr/0013-fase-1g-cobalto-hud-diagnostico.md)); falta **2 semanas de uso diário** substituindo o YASB |
 

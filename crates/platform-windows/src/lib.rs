@@ -12,6 +12,7 @@ pub mod bar_context;
 pub mod compositor;
 pub mod diagnostics;
 pub mod dnd;
+pub mod fillet;
 pub mod gfx;
 pub mod hardware;
 pub mod http;

@@ -38,7 +38,7 @@ Leia antes de mudar qualquer coisa:
 | `crates/core` (`zefiro-core`) | Config (`config.toml`, gravação com `toml_edit` que preserva comentários), observador de arquivos, logs e panic hook |
 | `crates/platform` | Tipos portáveis: `Rgba`, `Rect`, `TextStyle` e medição de texto |
 | `crates/resources` | Os 9 temas embutidos (`themes/*.toml`, padrão Obsidian; o Cobalto usa acrílico), o parser de tema com erros por linha, os tokens e o registro de temas com os do usuário |
-| `crates/ui` | Molas (constantes da ilha), `DisplayList`, layout da barra e regras do painel (pílula → painel) |
+| `crates/ui` | Molas (constantes da ilha), `DisplayList`, layout da barra (faixa, pílulas e ilhas com trilho e concordâncias) e regras do painel (pílula → painel) |
 | `crates/integrations/clock` | Grade do mês e formatação de data (pt-BR e Windows) |
 | `crates/integrations/devices` | Brilho e níveis, portável: escrita agrupada do DDC/CI (`Coalescer`), passo da roda e posição no slider (ADR-0010) |
 | `crates/integrations/usage` | Uso do Claude (resposta do endpoint, token) e do Codex (fim dos `.jsonl`, thread `CodexService`) e datas em pt-BR, portável (ADR-0011) |
@@ -77,7 +77,7 @@ pwsh -NoProfile -File scripts/package.ps1      # -BuildIsland recompila a ilha C
 
 - A configuração fica em `%APPDATA%\zefiro\config.toml` e é recarregada ao salvar.
   - `[bar] height = completa | compacta`
-  - `[bar] format = faixa | pilulas`
+  - `[bar] format = faixa | pilulas | ilhas`
   - `[bar.sections] start/center/end`: ids do catálogo (`zefiro`, `clock`, `audio`, `mic`, `brightness`, `claude`, `codex`, `vscode`, `terminal`, `notifications`, `dnd`, `player`, `weather`, `hardware`, `power`)
   - `[terminal] order/hidden`: `guid`s dos perfis do Windows Terminal, gravados pelo painel do chip (lápis → Concluir)
 - `ZEFIRO_CONFIG_DIR=<pasta>` troca a pasta da configuração: use um perfil isolado para testes, sem mexer no do usuário.
@@ -98,6 +98,7 @@ pwsh -NoProfile -File scripts/package.ps1      # -BuildIsland recompila a ilha C
 - **Clique atravessando:** `HTTRANSPARENT` só repassa o clique para janelas da mesma thread. Por isso barra e painel têm uma janela de desenho que deixa todo clique passar (`WS_EX_LAYERED | WS_EX_TRANSPARENT`) e uma janela de entrada invisível (`ZefiroInput`) recortada por região nas áreas clicáveis.
 - **Sombra:** `DropShadow` num `LayerVisual` deixa a janela preta. A sombra usa 7 retângulos concêntricos, como a ilha (`DrawSoftShadow`).
 - **Mover "na hora" no compositor é animação:** `StopAnimation` + `InsertScalar` logo depois de uma mola perde para a parada, que grava o valor do meio do caminho por cima. `Comp::move_offset` usa um quadro-chave de 1 ms (ADR-0010).
+- **Formato ilhas (ADR-0016):** as peças não se sobrepõem, senão a opacidade do tema e o acrílico fazem emenda mais escura. Cada ilha é um `MorphShape` que começa um raio acima da tela (e passa da borda nas pontas), o trilho são retângulos só nos vãos e as concordâncias são `CompositionPath` (`platform-windows/src/fillet.rs`) presas à ilha por expressão. `CompositionMaskBrush` não aceita o fundo do Windows como fonte. Os grupos ficam por seção (`BarLayout::group_slot`).
 - **Chips de nível com largura fixa:** o painel aberto nasce do chip; se o chip mudar de largura com o nível, o painel anda sob o cursor. Os chips de som, microfone e brilho mostram só o ícone (a % fica no painel); qualquer chip de nível com texto precisa reservar "100%" (ADR-0010).
 - **Brilho por DDC/CI:** ~60 ms por chamada. Tudo na thread `zefiro-brightness`; a interface é otimista e só o último valor de cada monitor é gravado.
 - **Chip Terminal (ADR-0015):** lê os perfis do Terminal ao abrir o painel e nunca grava nos arquivos dele. A edição (arrastar, olho) é no próprio painel e grava só `[terminal]`; mudança só nessa seção não fecha o painel (`Config::same_except_terminal`). O `wt.exe` é um alias de execução: `Path::exists` dá `false`, use `symlink_metadata`.

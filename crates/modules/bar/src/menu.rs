@@ -132,12 +132,12 @@ impl MenuModel {
         match self.page {
             MenuPage::Main => {
                 for (title, opts) in [
-                    ("Altura", [MenuAction::SetHeight(BarHeight::Completa), MenuAction::SetHeight(BarHeight::Compacta)]),
-                    ("Formato", [MenuAction::SetFormat(BarFormat::Faixa), MenuAction::SetFormat(BarFormat::Pilulas)]),
+                    ("Altura", vec![MenuAction::SetHeight(BarHeight::Completa), MenuAction::SetHeight(BarHeight::Compacta)]),
+                    ("Formato", [BarFormat::Faixa, BarFormat::Pilulas, BarFormat::Ilhas].map(MenuAction::SetFormat).to_vec()),
                 ] {
                     titles.push((title, y));
                     y += s(TITLE_H);
-                    let w = inner / 2.0;
+                    let w = inner / opts.len() as f32;
                     for (col, action) in opts.into_iter().enumerate() {
                         out.push(MenuItemBox { rect: Rect::new(s(PAD) + w * col as f32, y, w, s(ROW_H)), row, col, action });
                     }
@@ -249,6 +249,7 @@ impl MenuModel {
                         MenuAction::SetHeight(BarHeight::Completa) => "Completa",
                         MenuAction::SetHeight(BarHeight::Compacta) => "Compacta",
                         MenuAction::SetFormat(BarFormat::Faixa) => "Faixa",
+                        MenuAction::SetFormat(BarFormat::Ilhas) => "Ilhas",
                         _ => "Pílulas",
                     };
                     list.push(DrawOp::Text { rect: b.rect, text: label.into(), style: body, color: tokens.text, align: Align::Center });
@@ -379,6 +380,20 @@ mod tests {
             m.key(NavKey::Up);
         }
         assert_eq!(m.focus().0, 0);
+    }
+
+    #[test]
+    fn format_row_offers_strip_pills_and_islands() {
+        let mut m = MenuModel::new(BarHeight::Completa, BarFormat::Ilhas, "t2", swatches(8));
+        let row: Vec<_> = m.layout(1.0).into_iter().filter(|b| matches!(b.action, MenuAction::SetFormat(_))).collect();
+        assert_eq!(row.iter().map(|b| b.action.clone()).collect::<Vec<_>>(), [BarFormat::Faixa, BarFormat::Pilulas, BarFormat::Ilhas].map(MenuAction::SetFormat));
+        assert!(row.windows(2).all(|w| w[0].rect.right() <= w[1].rect.x + 0.01 && w[0].rect.w == w[1].rect.w), "três colunas iguais");
+        let texts = texts(&m.paint(1.0, &tokens()));
+        assert!(["Faixa", "Pílulas", "Ilhas"].iter().all(|t| texts.contains(&t.to_string())), "{texts:?}");
+        m.key(NavKey::Down);
+        m.key(NavKey::Right);
+        m.key(NavKey::Right);
+        assert_eq!(m.key(NavKey::Enter), Some(MenuAction::SetFormat(BarFormat::Ilhas)));
     }
 
     #[test]
