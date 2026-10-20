@@ -518,13 +518,16 @@ impl Loop {
             WinEvent::LeftDown { hwnd, x, y } => {
                 if let Some(i) = self.panel_index(hwnd) {
                     let (ox, oy) = self.panels[i].content_origin();
-                    self.devices_down(i, Point { x: x - ox, y: y - oy })?;
+                    if !self.terminal_down(i, Point { x: x - ox, y: y - oy })? {
+                        self.devices_down(i, Point { x: x - ox, y: y - oy })?;
+                    }
                 }
             }
             WinEvent::MouseMove { hwnd, x, y } => {
                 if let Some(i) = self.panel_index(hwnd) {
                     let (ox, oy) = self.panels[i].content_origin();
                     self.devices_move(Point { x: x - ox, y: y - oy })?;
+                    self.terminal_move(Point { x: x - ox, y: y - oy })?;
                     // Menu do Z: o item sob o mouse ganha o destaque (só redesenha quando muda).
                     let scale = self.bars[i].scale();
                     if self.effective_open_kind() == Some(PanelKind::Menu)
@@ -546,6 +549,9 @@ impl Loop {
                 }
             }
             WinEvent::MouseLeave { hwnd } => {
+                if self.panel_index(hwnd).is_some() {
+                    self.terminal_leave()?;
+                }
                 if let Some(i) = self.bar_index(hwnd) {
                     self.bars[i].set_hover(&self.ctx, None)?;
                     if self.bars[i].has_island() {
@@ -698,6 +704,11 @@ impl Loop {
             WinEvent::User { code: USER_CONFIG_CHANGED } => {
                 let text = std::fs::read_to_string(&self.ctx.config_path).unwrap_or_default();
                 match zefiro_core::config::parse_config(&text) {
+                    // Só `[terminal]` mudou (o próprio painel gravou): atualiza sem fechar o painel.
+                    Ok(new) if new != self.ctx.config && new.same_except_terminal(&self.ctx.config) => {
+                        self.ctx.config = new;
+                        self.terminal_config_changed()?;
+                    }
                     Ok(new) if new != self.ctx.config => {
                         let fx = self.controller.handle(PanelInput::ConfigChanged);
                         self.run_effects(fx)?;

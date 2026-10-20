@@ -6,7 +6,7 @@ use windows::Win32::Foundation::{HANDLE, HGLOBAL, HWND, LPARAM};
 use windows::Win32::System::DataExchange::{AddClipboardFormatListener, CloseClipboard, GetClipboardData, OpenClipboard, RemoveClipboardFormatListener};
 use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
 use windows::Win32::System::Ole::CF_UNICODETEXT;
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CAPITAL, VK_NUMLOCK};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CAPITAL, VK_CONTROL, VK_NUMLOCK};
 use windows::Win32::UI::Input::{GetRawInputData, HRAWINPUT, RAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RID_INPUT, RIDEV_INPUTSINK, RIDEV_REMOVE, RIM_TYPEKEYBOARD, RegisterRawInputDevices};
 use windows::Win32::UI::WindowsAndMessaging::RI_KEY_BREAK;
 use windows::core::Result;
@@ -56,6 +56,13 @@ pub(crate) fn lock_key(lp: LPARAM) -> Option<bool> {
 pub fn lock_on(caps: bool) -> bool {
     // SAFETY: consulta de estado de tecla.
     unsafe { GetKeyState(if caps { VK_CAPITAL.0 } else { VK_NUMLOCK.0 } as i32) & 1 != 0 }
+}
+
+/// Ctrl apertado agora (para Ctrl+setas no painel).
+pub fn ctrl_down() -> bool {
+    // SAFETY: consulta de estado de tecla.
+    let state = unsafe { GetKeyState(VK_CONTROL.0 as i32) };
+    state < 0
 }
 
 /// Texto da área de transferência, se houver (limitado a 200 caracteres).
