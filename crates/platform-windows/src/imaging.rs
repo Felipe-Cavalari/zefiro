@@ -32,3 +32,11 @@ pub fn decode_stream(stream: &IRandomAccessStream, side: u32, square: bool) -> R
         .get()?;
     Ok(Image::new(ow, oh, data.DetachPixelData()?.to_vec()))
 }
+
+/// Imagem de um arquivo (`.png`, `.ico`, `.jpg`, `.bmp`) em `side` px, ou `None` se não abrir.
+/// Chamada bloqueante: use fora da thread de UI.
+pub fn decode_file(path: &std::path::Path, side: u32) -> Option<zefiro_platform::image::Image> {
+    let file = windows::Storage::StorageFile::GetFileFromPathAsync(&windows::core::HSTRING::from(path.as_os_str())).ok()?.get().ok()?;
+    let stream = file.OpenReadAsync().ok()?.get().ok()?;
+    decode_stream(&stream.cast().ok()?, side, false).ok().flatten()
+}
