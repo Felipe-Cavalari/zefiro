@@ -57,7 +57,13 @@ impl BarFormat {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
-pub struct Config { pub theme: String, pub bar: BarConfig, pub island: IslandConfig, pub clock: ClockConfig, pub update: UpdateConfig }
+pub struct Config { pub theme: String, pub bar: BarConfig, pub island: IslandConfig, pub clock: ClockConfig, pub update: UpdateConfig, pub terminal: TerminalConfig }
+
+/// Perfis do Windows Terminal no painel do chip `terminal`, por `guid`: os visíveis nesta ordem (os
+/// que faltam vão para o fim) e os ocultos. Escrita pelo próprio painel (lápis → Concluir).
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+#[serde(default)]
+pub struct TerminalConfig { pub order: Vec<String>, pub hidden: Vec<String> }
 
 /// Atualização pelo GitHub Releases (ADR-0014).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -141,6 +147,11 @@ impl BarConfig {
 }
 
 impl Config {
+    /// Só a seção `[terminal]` mudou? O painel do Terminal grava nela e não deve se fechar.
+    pub fn same_except_terminal(&self, other: &Config) -> bool {
+        Config { terminal: other.terminal.clone(), ..self.clone() } == *other
+    }
+
     pub fn validate(&self) -> Result<(), ConfigError> {
         self.bar.sections.validate("bar.sections")?;
         if self.bar.monitors.len() > 128 {
@@ -179,7 +190,7 @@ pub struct ClockConfig { pub format: String, pub seconds: bool }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { theme: "obsidian".into(), bar: BarConfig::default(), island: IslandConfig::default(), clock: ClockConfig::default(), update: UpdateConfig::default() }
+        Config { theme: "obsidian".into(), bar: BarConfig::default(), island: IslandConfig::default(), clock: ClockConfig::default(), update: UpdateConfig::default(), terminal: TerminalConfig::default() }
     }
 }
 
@@ -244,6 +255,19 @@ pub fn set_value(path: &Path, keys: &[&str], value: &str) -> std::io::Result<()>
         None => {
             table.insert(last, toml_edit::value(value));
         }
+    }
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, doc.to_string())?;
+    std::fs::rename(&tmp, path)
+}
+
+/// Grava `[terminal] order` e `hidden` de uma vez, mantendo comentários e o resto do arquivo.
+pub fn set_terminal(path: &Path, terminal: &TerminalConfig) -> std::io::Result<()> {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let mut doc: toml_edit::DocumentMut = text.parse().map_err(std::io::Error::other)?;
+    let table = doc.entry("terminal").or_insert(toml_edit::table()).as_table_mut().ok_or_else(|| std::io::Error::other("`terminal` não é uma tabela"))?;
+    for (key, values) in [("order", &terminal.order), ("hidden", &terminal.hidden)] {
+        table.insert(key, toml_edit::value(values.iter().map(String::as_str).collect::<toml_edit::Array>()));
     }
     let tmp = path.with_extension("toml.tmp");
     std::fs::write(&tmp, doc.to_string())?;

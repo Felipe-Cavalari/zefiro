@@ -83,3 +83,35 @@ fn update_check_is_on_by_default_and_can_be_turned_off() {
     assert!(parse_config("").unwrap().update.check, "configs antigas, sem a seção");
     assert!(!parse_config("[update]\ncheck = false\n").unwrap().update.check);
 }
+
+#[test]
+fn terminal_section_is_optional_and_parsed() {
+    assert_eq!(parse_config(DEFAULT_CONFIG).unwrap().terminal, TerminalConfig::default());
+    let c = parse_config("[terminal]\norder = [\"{a}\"]\nhidden = [\"{b}\"]\n").unwrap();
+    assert_eq!(c.terminal, TerminalConfig { order: vec!["{a}".into()], hidden: vec!["{b}".into()] });
+}
+
+#[test]
+fn set_terminal_keeps_comments_and_other_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, DEFAULT_CONFIG).unwrap();
+    set_terminal(&path, &TerminalConfig { order: vec!["{a}".into()], hidden: vec![] }).unwrap();
+    let second = TerminalConfig { order: vec!["{b}".into(), "{a}".into()], hidden: vec!["{c}".into()] };
+    set_terminal(&path, &second).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("# completa | compacta"), "{text}");
+    let c = parse_config(&text).unwrap();
+    assert_eq!(c.terminal, second);
+    assert_eq!(c.theme, "obsidian");
+}
+
+#[test]
+fn only_terminal_changed() {
+    let a = Config::default();
+    let mut b = a.clone();
+    b.terminal.hidden.push("{x}".into());
+    assert!(a.same_except_terminal(&b));
+    b.theme = "cobalto".into();
+    assert!(!a.same_except_terminal(&b));
+}
