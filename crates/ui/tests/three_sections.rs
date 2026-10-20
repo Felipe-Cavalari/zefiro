@@ -1,7 +1,16 @@
 use zefiro_core::config::{BarFormat, BarHeight};
 use zefiro_ui::bar_layout::{ChipSpec, layout_sections};
 
-fn chip(id: &str, width: f32) -> ChipSpec { ChipSpec { id: id.into(), content_w: width } }
+fn chip(id: &str, width: f32) -> ChipSpec { ChipSpec { id: id.into(), content_w: width, wide: false } }
+
+#[test]
+fn wide_chips_skip_the_160_dip_cap() {
+    let start = [ChipSpec { id: "player".into(), content_w: 300.0, wide: true }, chip("clock", 300.0)];
+    let layout = layout_sections(1920.0, 1.0, BarHeight::Completa, BarFormat::Faixa, [&start, &[], &[]], None);
+    let w = |id: &str| layout.chips.iter().find(|c| c.id == id).unwrap().rect.w;
+    assert_eq!(w("player"), 320.0, "300 + 2×10");
+    assert_eq!(w("clock"), 180.0, "teto de 160 + 2×10");
+}
 
 #[test]
 fn center_is_geometrically_centered_and_pills_do_not_overlap() {

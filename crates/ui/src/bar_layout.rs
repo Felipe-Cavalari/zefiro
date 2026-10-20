@@ -26,8 +26,9 @@ pub fn metrics(height: BarHeight, format: BarFormat) -> BarMetrics {
     BarMetrics { band, pill, chip_h, island_pill, group_pad, edge: 8.0, chip_pad_x: 10.0, chip_gap: 4.0, font }
 }
 
+/// `wide`: o chip não tem o teto de 160 DIP (o player, que tem a largura da pílula da ilha).
 #[derive(Debug, Clone, PartialEq)]
-pub struct ChipSpec { pub id: String, pub content_w: f32 }
+pub struct ChipSpec { pub id: String, pub content_w: f32, pub wide: bool }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChipBox { pub id: String, pub rect: Rect }
@@ -112,7 +113,7 @@ pub fn layout_sections(monitor_w: f32, scale: f32, height: BarHeight, format: Ba
     let available = (monitor_w - 2.0 * edge).max(0.0);
     let gap = (m.chip_gap * scale).round();
     let pad = if format == BarFormat::Pilulas { (m.group_pad * scale).round() } else { 0.0 };
-    let width = |chip: &ChipSpec| (chip.content_w.min(160.0 * scale).max(0.0) + 2.0 * (m.chip_pad_x * scale).round()).ceil();
+    let width = |chip: &ChipSpec| (chip.content_w.min(if chip.wide { f32::MAX } else { 160.0 * scale }).max(0.0) + 2.0 * (m.chip_pad_x * scale).round()).ceil();
     let total = |items: &[ChipSpec]| items.iter().map(&width).sum::<f32>() + gap * items.len().saturating_sub(1) as f32 + if items.is_empty() { 0.0 } else { 2.0 * pad };
     let center = island_width.unwrap_or_else(|| total(sections[1]).min(available / 2.0)).max(0.0).min(available);
     let separation = if center > 0.0 { (8.0 * scale).round() } else { 0.0 };
@@ -175,7 +176,7 @@ mod tests {
     use zefiro_platform::geometry::{Point, Rect};
 
     fn chips(ids: &[(&str, f32)]) -> Vec<ChipSpec> {
-        ids.iter().map(|(id, w)| ChipSpec { id: id.to_string(), content_w: *w }).collect()
+        ids.iter().map(|(id, w)| ChipSpec { id: id.to_string(), content_w: *w, wide: false }).collect()
     }
 
     #[test]
