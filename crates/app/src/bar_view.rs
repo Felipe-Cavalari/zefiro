@@ -6,7 +6,8 @@ use windows::Win32::Foundation::HWND;
 use windows::core::{Interface, Result};
 use windows_numerics::{Vector2, Vector3};
 use zefiro_bar::chips::{ChipContent, clock_chip, weather_chip, zefiro_chip};
-use zefiro_bar::devices::{ICON_BRIGHTNESS, Level, level_chip, volume_level};
+use zefiro_bar::devices::{ICON_BRIGHTNESS, Level, level_chip, volume_level, with_svg_icon};
+use zefiro_resources::icons;
 use zefiro_core::config::BarHeight;
 use zefiro_integration_clock::format::ClockText;
 use zefiro_integration_clock::windows::now_local;
@@ -132,12 +133,14 @@ fn chip_content(ctx: &AppCtx, id: &str, device: &str, height: BarHeight, chip_h:
             let p = ctx.devices.brightness_of(device);
             level_chip(Level { glyph: ICON_BRIGHTNESS, text: "", dim: p.is_none() }, chip_h, font_px, scale, t, &ctx.text)
         }
-        "codex" => zefiro_bar::usage::usage_chip(crate::usage_loop::CODEX_GLYPH, ctx.usage.codex.as_ref().and_then(|(_, u)| crate::usage_loop::codex_percent(u)), chip_h, font_px, scale, t, &ctx.text),
-        "claude" => zefiro_bar::usage::usage_chip(crate::usage_loop::CLAUDE_GLYPH, ctx.usage.claude_chip(), chip_h, font_px, scale, t, &ctx.text),
+        // Claude, Codex e VS Code: o ícone da marca (SVG) no lugar do glifo.
+        "codex" => with_svg_icon(zefiro_bar::usage::usage_chip(crate::usage_loop::CODEX_GLYPH, ctx.usage.codex.as_ref().and_then(|(_, u)| crate::usage_loop::codex_percent(u)), chip_h, font_px, scale, t, &ctx.text), icons::CODEX),
+        "claude" => with_svg_icon(zefiro_bar::usage::usage_chip(crate::usage_loop::CLAUDE_GLYPH, ctx.usage.claude_chip(), chip_h, font_px, scale, t, &ctx.text), icons::CLAUDE_CODE),
+        "vscode" => with_svg_icon(level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text), icons::VSCODE),
         "notifications" => zefiro_bar::chips::bell_chip(ctx.system.notifications, chip_h, font_px, scale, t, &ctx.text),
         "dnd" => zefiro_bar::chips::dnd_chip(ctx.system.dnd, chip_h, font_px, t),
         "weather" => weather_chip(ctx.island.weather.as_ref().map(|w| (zefiro_island::weather::icon(w.code), w.temp_c, w.city.as_str())), chip_h, font_px, scale, t, &ctx.text),
-        "vscode" | "hardware" | "power" => level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text),
+        "hardware" | "power" => level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text),
         _ => clock_chip("⋯", chip_h, font_px, t, &ctx.text),
     }
 }

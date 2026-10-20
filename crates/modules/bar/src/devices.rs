@@ -58,6 +58,17 @@ pub fn level_chip(level: Level, chip_h: f32, font_px: f32, scale: f32, tokens: &
     ChipContent { content_w: w, list: DisplayList { size: Size { w, h: chip_h }, ops } }
 }
 
+/// Troca o glifo do chip (a primeira operação) por um ícone SVG quadrado, centrado no mesmo lugar e
+/// na mesma cor: a largura do chip não muda.
+pub fn with_svg_icon(mut chip: ChipContent, svg: &'static str) -> ChipContent {
+    if let Some(DrawOp::Text { rect, color, .. }) = chip.list.ops.first().cloned() {
+        let side = (rect.w * 0.88).min(rect.h).round();
+        let icon = Rect::new(rect.x + (rect.w - side) / 2.0, rect.y + (rect.h - side) / 2.0, side, side);
+        chip.list.ops[0] = DrawOp::Svg { rect: icon, svg, color };
+    }
+    chip
+}
+
 /// Uma linha com slider: o volume do dispositivo padrão ou o brilho de um monitor.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SliderRow {
@@ -190,6 +201,23 @@ mod tests {
         assert_eq!(speaker_icon(10, false), ICON_VOLUME[1]);
         assert_eq!(speaker_icon(100, false), ICON_VOLUME[3]);
         assert_eq!(mic_icon(true), ICON_MIC_OFF);
+    }
+
+    #[test]
+    fn svg_icon_takes_the_glyph_place_color_and_width() {
+        const SVG: &str = "<svg viewBox=\"0 0 1 1\"></svg>";
+        let t = tokens();
+        let glyph = level_chip(Level { glyph: ICON_MIC, text: "42%", dim: true }, 28.0, 12.0, 1.0, &t, &FixedWidthMeasurer);
+        let icon = with_svg_icon(glyph.clone(), SVG);
+        assert_eq!(icon.content_w, glyph.content_w, "mesma largura: o painel não anda");
+        assert_eq!(texts(&icon.list), vec!["42%".to_string()], "o texto continua");
+        let DrawOp::Text { rect: slot, color, .. } = &glyph.list.ops[0] else { panic!("glifo primeiro") };
+        let DrawOp::Svg { rect, svg, color: svg_color } = &icon.list.ops[0] else { panic!("svg no lugar do glifo") };
+        assert_eq!(*svg, SVG);
+        assert_eq!(svg_color, color);
+        assert_eq!(rect.w, rect.h, "quadrado");
+        assert!((rect.center_x() - slot.center_x()).abs() < 0.01 && (rect.y + rect.h / 2.0 - slot.h / 2.0).abs() < 0.01, "centrado no lugar do glifo");
+        assert!(rect.w <= slot.w);
     }
 
     #[test]
