@@ -17,6 +17,7 @@ const EDIT: u32 = 2;
 const ISLAND: u32 = 3;
 const LOGS: u32 = 4;
 const EXIT: u32 = 5;
+const AUTOSTART: u32 = 6;
 
 /// Põe (ou repõe, depois de o Explorer reiniciar ou o tema mudar) o ícone na bandeja.
 pub fn show_icon() {
@@ -27,6 +28,15 @@ pub fn show_icon() {
 
 fn item(label: &str, id: u32) -> MenuEntry {
     MenuEntry { label: label.into(), id, enabled: true, ..Default::default() }
+}
+
+/// Liga ou desliga o início com o Windows (menu do Z e da bandeja).
+pub fn toggle_autostart() {
+    let on = !system::autostart_enabled();
+    match system::set_autostart(on) {
+        Ok(()) => tracing::info!(on, "iniciar com o Windows"),
+        Err(e) => tracing::warn!("não consegui mudar o início com o Windows: {e}"),
+    }
 }
 
 impl Loop {
@@ -69,6 +79,7 @@ impl Loop {
             item("Editar barra", EDIT),
             item("Reiniciar a ilha", ISLAND),
             item("Abrir pasta de logs", LOGS),
+            MenuEntry { checked: system::autostart_enabled(), ..item("Iniciar com o Windows", AUTOSTART) },
             MenuEntry { separator: true, ..Default::default() },
             item("Sair", EXIT),
         ];
@@ -83,6 +94,7 @@ impl Loop {
                 let dir = zefiro_core::observability::log_dir_from(std::env::var_os("LOCALAPPDATA"), std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"));
                 system::open_folder(&dir);
             }
+            Some(AUTOSTART) => toggle_autostart(),
             // SAFETY: encerra o laço de mensagens desta thread pelo caminho normal (tira as AppBars).
             Some(EXIT) => unsafe { PostQuitMessage(0) },
             _ => {}

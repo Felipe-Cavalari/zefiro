@@ -138,6 +138,34 @@ pub fn spawn_detached(exe: &Path, args: &[String]) -> std::io::Result<()> {
     std::process::Command::new(exe).args(args).creation_flags(DETACHED_PROCESS).spawn().map(|_| ())
 }
 
+const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+
+/// O Zefiro inicia com o Windows? (valor "Zefiro" em `HKCU\...\Run`, o mesmo que o instalador grava).
+pub fn autostart_enabled() -> bool {
+    let mut size = 0u32;
+    // SAFETY: só pergunta o tamanho do valor; nenhum buffer é escrito.
+    unsafe { RegGetValueW(HKEY_CURRENT_USER, &HSTRING::from(RUN_KEY), &HSTRING::from("Zefiro"), RRF_RT_REG_SZ, None, None, Some(&mut size)) }.is_ok()
+}
+
+/// Liga (apontando para este `zefiro.exe`) ou desliga o início com o Windows.
+pub fn set_autostart(on: bool) -> windows::core::Result<()> {
+    let (key, name) = (HSTRING::from(RUN_KEY), HSTRING::from("Zefiro"));
+    // SAFETY: chave e nome são HSTRINGs vivos; o dado é a string UTF-16 terminada em zero, com o tamanho em bytes.
+    unsafe {
+        if on {
+            let exe = std::env::current_exe().map_err(|e| windows::core::Error::new(windows::Win32::Foundation::E_FAIL, e.to_string()))?;
+            let data: Vec<u16> = format!("\"{}\"", exe.display()).encode_utf16().chain(std::iter::once(0)).collect();
+            RegSetKeyValueW(HKEY_CURRENT_USER, &key, &name, REG_SZ.0, Some(data.as_ptr().cast()), (data.len() * 2) as u32).ok()
+        } else {
+            match RegDeleteKeyValueW(HKEY_CURRENT_USER, &key, &name) {
+                // Já não existia: desligado do mesmo jeito.
+                e if e == windows::Win32::Foundation::ERROR_FILE_NOT_FOUND => Ok(()),
+                e => e.ok(),
+            }
+        }
+    }
+}
+
 /// Barra de tarefas escura (o padrão do Windows 11)? Define a cor do ícone da bandeja.
 pub fn taskbar_dark() -> bool {
     reg_dword(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "SystemUsesLightTheme").unwrap_or(0) == 0

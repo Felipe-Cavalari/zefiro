@@ -8,7 +8,7 @@ use zefiro_resources::tokens::Tokens;
 use zefiro_ui::paint::{DisplayList, DrawOp};
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum MenuAction { SetHeight(BarHeight), SetFormat(BarFormat), SetTheme(String), ReloadTheme, OpenThemesFolder, RestartIsland, Exit, EditBar }
+pub enum MenuAction { SetHeight(BarHeight), SetFormat(BarFormat), SetTheme(String), ReloadTheme, OpenThemesFolder, RestartIsland, ToggleAutostart, Exit, EditBar }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThemeSwatch { pub id: String, pub name: String, pub background: Rgba, pub text: Rgba, pub border: Option<Rgba> }
@@ -28,17 +28,18 @@ const SWATCH_H: f32 = 56.0;
 const SECTION_GAP: f32 = 8.0;
 const COLS: usize = 4;
 
-fn actions() -> [(&'static str, MenuAction); 5] {
+fn actions() -> [(&'static str, MenuAction); 6] {
     [
         ("Editar barra", MenuAction::EditBar),
         ("Recarregar tema", MenuAction::ReloadTheme),
         ("Abrir pasta de temas", MenuAction::OpenThemesFolder),
         ("Reiniciar a ilha", MenuAction::RestartIsland),
+        ("Iniciar com o Windows", MenuAction::ToggleAutostart),
         ("Sair", MenuAction::Exit),
     ]
 }
 
-pub struct MenuModel { height: BarHeight, format: BarFormat, theme_id: String, themes: Vec<ThemeSwatch>, focus: (usize, usize) }
+pub struct MenuModel { height: BarHeight, format: BarFormat, theme_id: String, themes: Vec<ThemeSwatch>, focus: (usize, usize), autostart: bool }
 
 /// Onde ficam os títulos de seção (topo, em px), para o `paint`.
 struct Titles { altura: f32, formato: f32, tema: f32 }
@@ -46,7 +47,13 @@ struct Titles { altura: f32, formato: f32, tema: f32 }
 impl MenuModel {
     pub fn new(height: BarHeight, format: BarFormat, theme_id: &str, themes: Vec<ThemeSwatch>) -> MenuModel {
         let col = if height == BarHeight::Compacta { 1 } else { 0 };
-        MenuModel { height, format, theme_id: theme_id.to_string(), themes, focus: (0, col) }
+        MenuModel { height, format, theme_id: theme_id.to_string(), themes, focus: (0, col), autostart: false }
+    }
+
+    /// "Iniciar com o Windows" ligado (a chave do item acende).
+    pub fn with_autostart(mut self, on: bool) -> MenuModel {
+        self.autostart = on;
+        self
     }
 
     pub fn focus(&self) -> (usize, usize) {
@@ -196,6 +203,13 @@ impl MenuModel {
                         list.push(DrawOp::RoundRect { rect: b.rect, radius: s(10.0), color: tokens.raised });
                     }
                     list.push(DrawOp::Text { rect: b.rect.inset(s(12.0), 0.0), text: label.into(), style: body, color: tokens.text, align: Align::Leading });
+                    if *action == MenuAction::ToggleAutostart {
+                        // Chave liga/desliga à direita: trilho no destaque quando ligada, botão do lado dela.
+                        let track = Rect::new(b.rect.right() - s(46.0), b.rect.y + (b.rect.h - s(18.0)) / 2.0, s(34.0), s(18.0));
+                        list.push(DrawOp::RoundRect { rect: track, radius: track.h / 2.0, color: if self.autostart { tokens.accent } else { tokens.text_tertiary.with_alpha(0.4) } });
+                        let knob_x = if self.autostart { track.right() - s(9.0) } else { track.x + s(9.0) };
+                        list.push(DrawOp::Circle { center: Point { x: knob_x, y: track.y + track.h / 2.0 }, radius: s(7.0), color: Rgba::WHITE });
+                    }
                 }
             }
         }
@@ -215,6 +229,16 @@ mod tests {
 
     fn model() -> MenuModel {
         MenuModel::new(BarHeight::Completa, BarFormat::Faixa, "t2", swatches(8))
+    }
+
+    #[test]
+    fn autostart_item_shows_a_switch_lit_only_when_on() {
+        let tokens = zefiro_resources::tokens::derive_tokens(&zefiro_resources::theme::parse_theme("obsidian", "o", zefiro_resources::theme::BUILTIN[0].1).unwrap(), Rgba::rgb(0, 120, 215), None);
+        let accent_pills = |m: &MenuModel| m.paint(1.0, &tokens).ops.iter().filter(|o| matches!(o, DrawOp::RoundRect { color, .. } if *color == tokens.accent)).count();
+        let off = model();
+        assert!(off.layout(1.0).iter().any(|b| b.action == MenuAction::ToggleAutostart), "o item existe");
+        assert_eq!(accent_pills(&off), 0, "desligado: a chave fica apagada");
+        assert_eq!(accent_pills(&model().with_autostart(true)), 1, "ligado: a chave acende");
     }
 
     #[test]

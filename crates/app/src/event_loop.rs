@@ -144,7 +144,7 @@ impl Loop {
     fn panel_list(&mut self, kind: PanelKind, scale: f32) -> DisplayList {
         match kind {
             PanelKind::Menu => {
-                let m = self.menu.get_or_insert_with(|| MenuModel::new(self.ctx.config.bar.height, self.ctx.config.bar.format, &self.ctx.config.theme, swatches(&self.ctx)));
+                let m = self.menu.get_or_insert_with(|| MenuModel::new(self.ctx.config.bar.height, self.ctx.config.bar.format, &self.ctx.config.theme, swatches(&self.ctx)).with_autostart(zefiro_platform_windows::system::autostart_enabled()));
                 m.paint(scale, &self.ctx.theme.tokens)
             }
             PanelKind::Calendar => {
@@ -338,6 +338,12 @@ impl Loop {
             MenuAction::RestartIsland => {
                 window::post_user(USER_ISLAND);
                 return Ok(());
+            }
+            MenuAction::ToggleAutostart => {
+                crate::tray_loop::toggle_autostart();
+                // O menu continua aberto, com a chave na posição nova.
+                self.menu = None;
+                return self.redraw_open_panel();
             }
             MenuAction::Exit => {
                 // SAFETY: encerra o laço de mensagens desta thread.

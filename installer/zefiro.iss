@@ -97,3 +97,10 @@ begin
   CloseZefiro;
   Result := True;
 end;
+
+{ "Iniciar com o Windows" também pode ser ligado pelo menu do Zefiro; desinstalar sempre tira. }
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'Zefiro');
+end;
