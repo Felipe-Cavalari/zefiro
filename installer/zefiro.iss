@@ -61,6 +61,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\zefiro.exe"; Description: "Abrir o Zefiro agora"; Flags: nowait postinstall skipifsilent
+; Atualização pelo menu do Z (instalação silenciosa): o Zefiro saiu para o instalador e volta aqui.
+Filename: "{app}\zefiro.exe"; Flags: nowait; Check: WizardSilent
 
 [Code]
 const

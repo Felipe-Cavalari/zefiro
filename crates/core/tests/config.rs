@@ -76,3 +76,10 @@ fn bar_uses_reports_items_in_any_layout() {
     let per_monitor = parse_config("[bar]\nlayout_mode = \"per_monitor\"\n[bar.sections]\nend = [\"clock\"]\n[bar.monitors.abc.sections]\nstart = []\ncenter = []\nend = [\"codex\"]\n").unwrap();
     assert!(per_monitor.bar.uses("codex"));
 }
+
+#[test]
+fn update_check_is_on_by_default_and_can_be_turned_off() {
+    assert!(parse_config(zefiro_core::config::DEFAULT_CONFIG).unwrap().update.check);
+    assert!(parse_config("").unwrap().update.check, "configs antigas, sem a seção");
+    assert!(!parse_config("[update]\ncheck = false\n").unwrap().update.check);
+}

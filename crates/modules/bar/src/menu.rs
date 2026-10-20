@@ -9,7 +9,7 @@ use zefiro_resources::tokens::Tokens;
 use zefiro_ui::paint::{DisplayList, DrawOp};
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum MenuAction { SetHeight(BarHeight), SetFormat(BarFormat), SetTheme(String), OpenThemes, BackToMenu, ReloadTheme, OpenThemesFolder, RestartIsland, ToggleAutostart, ToggleHud, ExportDiagnostics, Exit, EditBar }
+pub enum MenuAction { SetHeight(BarHeight), SetFormat(BarFormat), SetTheme(String), OpenThemes, BackToMenu, ReloadTheme, OpenThemesFolder, RestartIsland, ToggleAutostart, ToggleHud, ExportDiagnostics, InstallUpdate, Exit, EditBar }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThemeSwatch { pub id: String, pub name: String, pub background: Rgba, pub text: Rgba, pub border: Option<Rgba> }
@@ -53,7 +53,7 @@ fn action_label(action: &MenuAction) -> &'static str {
     actions().into_iter().chain(theme_actions()).find(|(_, a)| a == action).map_or("", |(l, _)| l)
 }
 
-pub struct MenuModel { height: BarHeight, format: BarFormat, theme_id: String, themes: Vec<ThemeSwatch>, focus: (usize, usize), autostart: bool, page: MenuPage }
+pub struct MenuModel { height: BarHeight, format: BarFormat, theme_id: String, themes: Vec<ThemeSwatch>, focus: (usize, usize), autostart: bool, page: MenuPage, update: Option<String> }
 
 /// Títulos de seção (texto e topo, em px), para o `paint`.
 type Titles = Vec<(&'static str, f32)>;
@@ -66,7 +66,7 @@ const THEME_ROW: usize = 2;
 impl MenuModel {
     pub fn new(height: BarHeight, format: BarFormat, theme_id: &str, themes: Vec<ThemeSwatch>) -> MenuModel {
         let col = if height == BarHeight::Compacta { 1 } else { 0 };
-        MenuModel { height, format, theme_id: theme_id.to_string(), themes, focus: (0, col), autostart: false, page: MenuPage::Main }
+        MenuModel { height, format, theme_id: theme_id.to_string(), themes, focus: (0, col), autostart: false, page: MenuPage::Main, update: None }
     }
 
     pub fn page(&self) -> MenuPage {
@@ -96,6 +96,11 @@ impl MenuModel {
     /// A lista de temas mudou (recarregar tema, temas do usuário).
     pub fn set_themes(&mut self, themes: Vec<ThemeSwatch>) {
         self.themes = themes;
+    }
+
+    /// Texto da linha de atualização ("Atualizar para a 1.1.0", "Baixando…"); `None` esconde a linha.
+    pub fn set_update(&mut self, label: Option<String>) {
+        self.update = label;
     }
 
     pub fn set_autostart(&mut self, on: bool) {
@@ -141,6 +146,9 @@ impl MenuModel {
                 }
                 line(&mut out, &mut y, &mut row, MenuAction::OpenThemes);
                 y += s(SECTION_GAP);
+                if self.update.is_some() {
+                    line(&mut out, &mut y, &mut row, MenuAction::InstallUpdate);
+                }
                 for (_, action) in actions() {
                     line(&mut out, &mut y, &mut row, action);
                 }
@@ -278,6 +286,13 @@ impl MenuModel {
                         list.push(DrawOp::Circle { center: c, radius: s(6.5), color: t.border.unwrap_or(tokens.hairline) });
                         list.push(DrawOp::Circle { center: c, radius: s(5.5), color: t.background.with_alpha(1.0) });
                     }
+                }
+                MenuAction::InstallUpdate => {
+                    if focused {
+                        list.push(DrawOp::RoundRect { rect: b.rect, radius: s(10.0), color: tokens.raised });
+                    }
+                    let label = self.update.clone().unwrap_or_default();
+                    list.push(DrawOp::Text { rect: b.rect.inset(s(12.0), 0.0), text: label, style: body, color: tokens.accent, align: Align::Leading });
                 }
                 action => {
                     let label = action_label(action);
@@ -433,6 +448,22 @@ mod tests {
         let texts: Vec<String> = m.paint(1.0, &zefiro_resources::tokens::derive_tokens(&zefiro_resources::theme::parse_theme("obsidian", "o", zefiro_resources::theme::BUILTIN[0].1).unwrap(), Rgba::rgb(0, 120, 215), None))
             .ops.into_iter().filter_map(|o| if let DrawOp::Text { text, .. } = o { Some(text) } else { None }).collect();
         assert!(texts.contains(&"HUD de debug".to_string()) && texts.contains(&"Exportar diagnóstico".to_string()), "{texts:?}");
+    }
+
+    #[test]
+    fn update_row_appears_above_the_actions_only_when_there_is_one() {
+        let mut m = model();
+        assert!(m.layout(1.0).iter().all(|b| b.action != MenuAction::InstallUpdate));
+        let short = m.size(1.0).h;
+        m.set_update(Some("Atualizar para a 1.1.0".into()));
+        let actions: Vec<_> = m.layout(1.0).into_iter().filter(|b| matches!(b.action, MenuAction::InstallUpdate | MenuAction::EditBar)).map(|b| b.action).collect();
+        assert_eq!(actions, [MenuAction::InstallUpdate, MenuAction::EditBar], "logo antes de Editar barra");
+        assert_eq!(m.size(1.0).h - short, 32.0);
+        let t = tokens();
+        let row = m.paint(1.0, &t).ops.into_iter().find_map(|o| match o { DrawOp::Text { text, color, .. } if text == "Atualizar para a 1.1.0" => Some(color), _ => None });
+        assert_eq!(row, Some(t.accent), "na cor de destaque");
+        m.set_update(None);
+        assert_eq!(m.size(1.0).h, short);
     }
 
     #[test]

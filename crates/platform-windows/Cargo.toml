@@ -15,6 +15,7 @@ zefiro-ui.workspace = true
 zefiro-island.workspace = true
 zefiro-integration-devices.workspace = true
 zefiro-integration-usage.workspace = true
+zefiro-integration-update.workspace = true
 windows.workspace = true
 windows-core.workspace = true
 windows-numerics.workspace = true

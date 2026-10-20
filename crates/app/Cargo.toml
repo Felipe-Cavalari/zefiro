@@ -23,6 +23,7 @@ zefiro-island-host.workspace = true
 zefiro-island.workspace = true
 zefiro-integration-devices.workspace = true
 zefiro-integration-usage.workspace = true
+zefiro-integration-update.workspace = true
 zefiro-integration-vscode.workspace = true
 zefiro-platform-windows.workspace = true
 windows.workspace = true

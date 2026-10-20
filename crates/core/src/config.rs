@@ -24,6 +24,9 @@ exe     = ""          # vazio = ao lado do zefiro.exe
 [clock]
 format  = ""          # vazio = formato do Windows; ou um padrão de data do Windows, ex.: "ddd d MMM"
 seconds = false
+
+[update]
+check = true          # procura versão nova no GitHub Releases (1 vez por dia); instalar é pelo menu do Z
 "#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -54,7 +57,18 @@ impl BarFormat {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
-pub struct Config { pub theme: String, pub bar: BarConfig, pub island: IslandConfig, pub clock: ClockConfig }
+pub struct Config { pub theme: String, pub bar: BarConfig, pub island: IslandConfig, pub clock: ClockConfig, pub update: UpdateConfig }
+
+/// Atualização pelo GitHub Releases (ADR-0014).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct UpdateConfig { pub check: bool }
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        UpdateConfig { check: true }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
@@ -165,7 +179,7 @@ pub struct ClockConfig { pub format: String, pub seconds: bool }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { theme: "obsidian".into(), bar: BarConfig::default(), island: IslandConfig::default(), clock: ClockConfig::default() }
+        Config { theme: "obsidian".into(), bar: BarConfig::default(), island: IslandConfig::default(), clock: ClockConfig::default(), update: UpdateConfig::default() }
     }
 }
 

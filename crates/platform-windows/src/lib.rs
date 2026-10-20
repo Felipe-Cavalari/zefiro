@@ -31,6 +31,7 @@ pub mod system_events;
 pub mod text;
 pub mod text_input;
 pub mod tray;
+pub mod update;
 pub mod volume;
 pub mod weather;
 pub mod window;

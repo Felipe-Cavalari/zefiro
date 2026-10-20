@@ -60,6 +60,8 @@ pub const USER_CLAUDE: u32 = 20;
 pub const USER_VSCODE: u32 = 21;
 /// Nome e foto da conta (painel Energia) foram lidos.
 pub const USER_POWER: u32 = 22;
+/// O serviço de atualização mudou de estado (versão nova, baixando, pronto, falhou).
+pub const USER_UPDATE: u32 = 23;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
@@ -112,6 +114,7 @@ pub struct Loop {
     pub(crate) shown_month: (i32, u32),
     pub(crate) island: crate::island_loop::IslandRuntime,
     pub(crate) debug: crate::debug_loop::DebugRuntime,
+    pub(crate) update: crate::update_loop::UpdateRuntime,
     pub(crate) devices: crate::devices_loop::DevicesRuntime,
     pub(crate) usage: crate::usage_loop::UsageRuntime,
     pub(crate) vscode: crate::vscode_loop::VsCodeRuntime,
@@ -138,7 +141,7 @@ impl Loop {
             panels.push(PanelView::create(&ctx, b.monitor())?);
         }
         let today = now_local().date;
-        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), debug: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), power: Default::default(), system: Default::default(), cycles: None })
+        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), debug: Default::default(), update: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), power: Default::default(), system: Default::default(), cycles: None })
     }
 
     pub(crate) fn bar_index(&self, hwnd: isize) -> Option<usize> { self.bars.iter().position(|b| b.hwnd().0 as isize == hwnd) }
@@ -148,6 +151,7 @@ impl Loop {
         match kind {
             PanelKind::Menu => {
                 let m = self.menu.get_or_insert_with(|| MenuModel::new(self.ctx.config.bar.height, self.ctx.config.bar.format, &self.ctx.config.theme, swatches(&self.ctx)).with_autostart(zefiro_platform_windows::system::autostart_enabled()));
+                m.set_update(self.update.label.clone());
                 m.paint(scale, &self.ctx.theme.tokens)
             }
             PanelKind::Calendar => {
@@ -358,6 +362,7 @@ impl Loop {
                 return self.redraw_open_panel();
             }
             MenuAction::ToggleHud => return self.toggle_hud(),
+            MenuAction::InstallUpdate => return self.install_update(),
             MenuAction::ExportDiagnostics => {
                 self.close_open_panel()?;
                 return self.export_diagnostics();
@@ -632,6 +637,7 @@ impl Loop {
             }
             WinEvent::Timer { id: TIMER_CYCLE } => self.cycle_tick()?,
             WinEvent::Timer { id: TIMER_HUD } => self.hud_tick()?,
+            WinEvent::User { code: USER_UPDATE } => self.update_changed()?,
             WinEvent::Hotkey { id: zefiro_platform_windows::diagnostics::HOTKEY_HUD } => self.toggle_hud()?,
             WinEvent::Timer { id: TIMER_ISLAND_PEEK } => self.island_peek_timer()?,
             WinEvent::Timer { id: TIMER_ISLAND_TICK } => self.island_tick()?,
