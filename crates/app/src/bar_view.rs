@@ -275,6 +275,8 @@ impl BarView {
         let animate = animate && ctx.theme.animations;
         let spring = ctx.theme.spring(SpringParams::SETTLE);
         let place = |shape: &MorphShape, s: Shape| if animate { shape.animate(&ctx.comp, s, spring) } else { shape.set(s) };
+        // Como `place`, mas a mola parte de `from` (a forma nasce ali).
+        let place_from = |shape: &MorphShape, from: Shape, s: Shape| if animate { shape.animate_from(&ctx.comp, from, s, spring) } else { shape.set(s) };
         let fade = |shape: &MorphShape, v: f32| if animate { shape.animate_opacity(&ctx.comp, v, spring) } else { shape.set_opacity(v) };
         // "Na hora" também é animação (1 ms), senão uma mola de opacidade em andamento grava por cima.
         let at_once = |visual: &ContainerVisual, v: f32| ctx.comp.fade(&visual.cast::<Visual>()?, v, 0.001);
@@ -320,11 +322,12 @@ impl BarView {
                 Some(r) => {
                     let target = layout.group_shape(r, pill_radius(r.h, radius_max, style, self.scale));
                     if was_strip {
-                        g.shape.set(band_rect(r))?;
+                        place_from(&g.shape, band_rect(r), target)?;
                     } else if !before[slot] {
-                        g.shape.set(target)?;
+                        place_from(&g.shape, target, target)?;
+                    } else {
+                        place(&g.shape, target)?;
                     }
-                    place(&g.shape, target)?;
                     if was_strip && layout.islands.is_some() { at_once(g.shape.root(), 1.0)? } else { fade(&g.shape, 1.0)? }
                 }
                 None => fade(&g.shape, 0.0)?,
@@ -351,13 +354,15 @@ impl BarView {
                 Some(r) => {
                     let target = Shape { rect: *r, radius: 0.0 };
                     if was_strip {
-                        rail.set(band_rect(*r))?;
+                        place_from(rail, band_rect(*r), target)?;
                         at_once(rail.root(), 1.0)?;
                     } else if i >= rails_before {
-                        rail.set(target)?;
+                        place_from(rail, target, target)?;
+                        fade(rail, 1.0)?;
+                    } else {
+                        place(rail, target)?;
+                        fade(rail, 1.0)?;
                     }
-                    place(rail, target)?;
-                    fade(rail, 1.0)?;
                 }
                 None => fade(rail, 0.0)?,
             }

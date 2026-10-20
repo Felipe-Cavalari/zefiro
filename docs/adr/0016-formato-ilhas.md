@@ -51,6 +51,10 @@ monitor (o canto externo das ilhas das pontas fica reto, como no YASB).
   encolhe até 4 px e as ilhas arredondam embaixo com a mola. Das pílulas para as ilhas, as pílulas
   sobem e grudam no trilho.
 - Ilha externa (`engine = "externa"`): pílula 36/24 e `merged` (sem contorno), como na faixa.
+- Para nascer num lugar, a forma usa `MorphShape::animate_from` (a mola recebe `InitialValue`). O
+  `set` + `animate` de antes não funcionava: a parada do `set` chega ao compositor depois e a mola sai
+  do valor antigo. Visto na tela: da faixa para as ilhas, o trilho aparecia já fino, sem encolher. As
+  pílulas vindas da faixa usam o mesmo caminho e também passam a nascer do retângulo da faixa.
 
 ## Consequências
 

@@ -9,6 +9,7 @@
 //! como formas vetoriais ligadas às mesmas propriedades. (Um `DropShadow` num `LayerVisual` deixava a
 //! janela inteira preta; ver o ledger da Task 20.)
 
+use windows::Foundation::{IReference, PropertyValue};
 use windows::UI::Composition::*;
 use windows::core::{HSTRING, Interface, Result};
 use windows_numerics::{Vector2, Vector3};
@@ -173,6 +174,18 @@ impl MorphShape {
         Ok(())
     }
 
+    /// Mola que parte de `from`, não do valor atual. `set` seguido de `animate` não serve: a parada do
+    /// `set` chega ao compositor depois, e a mola sai do valor antigo (a faixa não encolhia até o trilho).
+    pub fn animate_from(&self, comp: &Comp, from: Shape, to: Shape, p: SpringParams) -> Result<()> {
+        let values = |s: Shape| [s.rect.x, s.rect.y, s.rect.w, s.rect.h, s.radius];
+        for ((k, v), f) in KEYS.iter().zip(values(to)).zip(values(from)) {
+            let a = comp.scalar_spring(v, p)?;
+            a.SetInitialValue(&PropertyValue::CreateSingle(f)?.cast::<IReference<f32>>()?)?;
+            self.props.StartAnimation(&HSTRING::from(*k), &a)?;
+        }
+        Ok(())
+    }
+
     /// "Cutucada": desloca a forma inteira `from_y` px e volta a 0 com a mola.
     pub fn nudge(&self, comp: &Comp, from_y: f32, p: SpringParams) -> Result<()> {
         self.root.SetOffset(Vector3 { X: 0.0, Y: from_y, Z: 0.0 })?;
@@ -236,6 +249,7 @@ mod tests {
         let m = MorphShape::new(&comp, &parent, &style).unwrap();
         m.set(Shape { rect: Rect::new(10.0, 6.0, 120.0, 32.0), radius: 16.0 }).unwrap();
         m.animate(&comp, Shape { rect: Rect::new(0.0, 50.0, 352.0, 186.0), radius: 24.0 }, SpringParams::GROW).unwrap();
+        m.animate_from(&comp, Shape { rect: Rect::new(0.0, 0.0, 400.0, 36.0), radius: 0.0 }, Shape { rect: Rect::new(0.0, 0.0, 400.0, 4.0), radius: 0.0 }, SpringParams::SETTLE).unwrap();
         let child = comp.compositor.CreateSpriteVisual().unwrap();
         m.clip_child(&comp, &child.cast().unwrap()).unwrap();
         m.bind_alpha(&comp, &child.cast().unwrap(), 186.0).unwrap();
