@@ -62,6 +62,8 @@ pub const USER_VSCODE: u32 = 21;
 pub const USER_POWER: u32 = 22;
 /// O serviço de atualização mudou de estado (versão nova, baixando, pronto, falhou).
 pub const USER_UPDATE: u32 = 23;
+/// A thread do Terminal terminou de ler os perfis.
+pub const USER_TERMINAL: u32 = 24;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
@@ -118,6 +120,7 @@ pub struct Loop {
     pub(crate) devices: crate::devices_loop::DevicesRuntime,
     pub(crate) usage: crate::usage_loop::UsageRuntime,
     pub(crate) vscode: crate::vscode_loop::VsCodeRuntime,
+    pub(crate) terminal: crate::terminal_loop::TerminalRuntime,
     pub(crate) power: crate::power_loop::PowerRuntime,
     pub(crate) system: crate::system_loop::SystemRuntime,
     /// Ciclos de medição: (total, feitos).
@@ -141,7 +144,7 @@ impl Loop {
             panels.push(PanelView::create(&ctx, b.monitor())?);
         }
         let today = now_local().date;
-        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), debug: Default::default(), update: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), power: Default::default(), system: Default::default(), cycles: None })
+        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), debug: Default::default(), update: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), terminal: Default::default(), power: Default::default(), system: Default::default(), cycles: None })
     }
 
     pub(crate) fn bar_index(&self, hwnd: isize) -> Option<usize> { self.bars.iter().position(|b| b.hwnd().0 as isize == hwnd) }
@@ -176,7 +179,7 @@ impl Loop {
             PanelKind::Audio | PanelKind::Mic | PanelKind::Brightness => self.devices_panel_list(kind, scale),
             PanelKind::Claude | PanelKind::Codex => self.usage_panel_list(kind, scale),
             PanelKind::VsCode => self.vscode_panel_list(scale),
-            PanelKind::Terminal => DisplayList::new(Size { w: 1.0, h: 1.0 }),
+            PanelKind::Terminal => self.terminal_panel_list(scale),
             PanelKind::Power => self.power_panel_list(scale),
         }
     }
@@ -210,6 +213,7 @@ impl Loop {
                     self.island_panel_closed();
                     self.devices_panel_closed();
                     self.power_panel_closed();
+                    self.terminal_panel_closed();
                 }
                 PanelEffect::Open(p) => {
                     if p.kind == PanelKind::Overflow {
@@ -221,6 +225,7 @@ impl Loop {
                     self.devices_prepare(p.kind);
                     self.usage_prepare(p.kind);
                     self.vscode_prepare(p.kind);
+                    self.terminal_prepare(p.kind);
                     self.power_prepare(p.kind);
                     if p.kind.tabbed() {
                         self.island_panel_opening();
@@ -471,6 +476,8 @@ impl Loop {
                         self.island_panel_click(Point { x: x - ox, y: y - oy })?;
                     } else if self.power_click(Point { x: x - ox, y: y - oy })? {
                         // Botão de energia (armar, confirmar ou agir).
+                    } else if self.terminal_up(Point { x: x - ox, y: y - oy })? {
+                        // Perfil do Windows Terminal aberto (ou clique fora das linhas).
                     } else if self.vscode_click(Point { x: x - ox, y: y - oy })? {
                         // Projeto do VS Code aberto (ou clique fora das linhas).
                     } else if self.devices_up(Point { x: x - ox, y: y - oy })? {
@@ -560,7 +567,7 @@ impl Loop {
                 if self.panel_index(hwnd).is_none() {
                     return Ok(true);
                 }
-                if self.vscode_key(vk)? {
+                if self.terminal_key(vk)? || self.vscode_key(vk)? {
                     return Ok(true);
                 }
                 // Esc na tela de temas volta ao menu; no menu, fecha.
@@ -616,7 +623,7 @@ impl Loop {
                 if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind.tabbed()) {
                     return self.island_wheel(delta).map(|_| true);
                 }
-                if self.panel_index(hwnd).is_some() && self.vscode_wheel(delta)? {
+                if self.panel_index(hwnd).is_some() && (self.terminal_wheel(delta)? || self.vscode_wheel(delta)?) {
                     return Ok(true);
                 }
                 if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind == PanelKind::Overflow) {
@@ -651,6 +658,7 @@ impl Loop {
             WinEvent::User { code: USER_CODEX } => self.usage_codex_changed()?,
             WinEvent::User { code: USER_CLAUDE } => self.usage_claude_changed()?,
             WinEvent::User { code: USER_VSCODE } => self.vscode_loaded()?,
+            WinEvent::User { code: USER_TERMINAL } => self.terminal_loaded()?,
             WinEvent::Tray { mouse } => self.tray_event(mouse)?,
             WinEvent::Character { code, .. } => self.vscode_char(code)?,
             WinEvent::User { code: USER_POWER } => self.power_user_loaded()?,

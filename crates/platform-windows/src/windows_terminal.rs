@@ -4,7 +4,9 @@
 use std::path::PathBuf;
 use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS};
 use windows::Win32::Storage::Packaging::Appx::{GetPackagePathByFullName, GetPackagesByPackageFamily};
+use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
 use windows::core::{HSTRING, PWSTR};
+use zefiro_platform::image::Image;
 
 const FAMILIES: [&str; 2] = ["Microsoft.WindowsTerminal_8wekyb3d8bbwe", "Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe"];
 
@@ -56,6 +58,19 @@ fn package_path(full_name: &str) -> Option<PathBuf> {
 pub fn wt_exe() -> Option<PathBuf> {
     let path = PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join(r"Microsoft\WindowsApps\wt.exe");
     std::fs::symlink_metadata(&path).is_ok().then_some(path)
+}
+
+/// Para cada perfil, a primeira imagem que abrir entre os seus candidatos, em `side` px. Bloqueante:
+/// chame na thread de leitura, que ganha o WinRT só durante a chamada.
+pub fn load_icons(candidates: &[Vec<PathBuf>], side: u32) -> Vec<Option<Image>> {
+    // SAFETY: WinRT nesta thread, desfeito logo abaixo.
+    let inited = unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.is_ok();
+    let icons = candidates.iter().map(|paths| paths.iter().find_map(|p| crate::imaging::decode_file(p, side))).collect();
+    if inited {
+        // SAFETY: par do RoInitialize.
+        unsafe { RoUninitialize() };
+    }
+    icons
 }
 
 #[cfg(test)]
