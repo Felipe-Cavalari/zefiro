@@ -57,11 +57,11 @@ Valores medidos com **todos os widgets da Fase 1 ligados**, em 2 monitores:
 | Fase | Entrega | Público | Inspiração |
 |---|---|---|---|
 | **0 — Fundação e spikes** | Provas técnicas das partes arriscadas (S1–S6) + esqueleto do repositório | Só eu | — |
-| **1 — Barra (MVP)** | Barra + **ilha de mídia** + painéis + **modo de edição** + **itens declarativos v1** (komorebi fica fora até a 1.0) | Só eu (dogfooding) | YASB, Fancy Toolbar (Seelen), Dynamic Island, Dock do PowerToys |
+| **1 — Barra (MVP)** | Barra + **ilha de mídia** + painéis + **modo de edição** (komorebi fica fora até a 1.0; os itens declarativos foram para a Fase 5) | Só eu (dogfooding) | YASB, Fancy Toolbar (Seelen), Dynamic Island, Dock do PowerToys |
 | **2 — Beta público** | Instalador, documentação, **app de configurações** pesquisável com pré-visualização ao vivo, formato de recursos documentado | Público (beta) | Settings do Seelen |
 | **3 — Launcher** | Busca fuzzy em apps, arquivos, projetos e **ações das integrações** | Público | Raycast, Apps Menu do Seelen |
-| **4 — Dock** | Apps fixados e abertos, ampliação com mola, badges, itens declarativos | Público | Weg do Seelen |
-| **5 — Plugins e catálogo** | Providers externos (fora do processo) + catálogo de recursos da comunidade | Público | Providers e marketplace do Zebar |
+| **4 — Dock** | Apps fixados e abertos, ampliação com mola, badges (itens declarativos na dock só depois da Fase 5) | Público | Weg do Seelen |
+| **5 — Plugins e catálogo** | **Itens declarativos** + linguagem de expressões, providers externos (fora do processo) + catálogo de recursos da comunidade | Público | Providers e marketplace do Zebar |
 | **6 — Gerenciador de janelas** | Tiling próprio e animado (BSP, colunas, monocle…), **só se ainda fizer falta** depois da integração com o komorebi | Público | Window Manager do Seelen |
 | **7 — Linux (opcional)** | Implementação de plataforma para Wayland | Futuro | — |
 
@@ -80,10 +80,10 @@ Valores medidos com **todos os widgets da Fase 1 ligados**, em 2 monitores:
 | **Áudio — alto-falantes** | Volume/mudo, roda do mouse, painel com troca de dispositivo de saída | Core Audio: `IMMDeviceEnumerator`, `IAudioEndpointVolume` (+ callbacks), troca de padrão via `IPolicyConfig` |
 | **Áudio — microfone** | Mudo/volume do microfone, troca de dispositivo de entrada | Core Audio (mesmas APIs, fluxo de captura) |
 | **Modo foco** | Liga/desliga Não Perturbe (perfil "somente prioridade") | Serviço Quiet Hours (COM) + escuta via WNF `WNF_STATE_QUIET_HOURS_CHANGED` |
-| **Modo noturno** | Liga/desliga a luz noturna do Windows | Chave de registro `CloudStore …bluelightreduction…` (não documentada; ver §12) |
+| ~~Modo noturno~~ | **Fora do plano (2026-10-20):** uma rotina do usuário já liga a luz noturna às 18h e desliga às 9h | — |
 | **Notificações (sino)** | Contador; clique abre a central (`Win+N`) | `UserNotificationListener` + escuta via WNF `WNF_SHEL_NOTIFICATIONS` |
 
-**Candidatos a itens declarativos na 1.x** (sem código novo de UI, só providers): CPU/GPU/RAM (antigo sysmon), rede, disco, bateria, clima, menu de energia.
+**Candidatos a itens declarativos (Fase 5)** (sem código novo de UI, só providers): CPU/GPU/RAM (antigo sysmon), rede, disco, bateria, clima, menu de energia.
 
 ---
 
@@ -323,7 +323,7 @@ A comunidade personaliza o Zefiro com **recursos**: arquivos declarativos que s�
 | Tipo | O que é | Fase |
 |---|---|---|
 | **Tema** | Tokens (§4.1) + ajustes por módulo | 1 |
-| **Item** | Elemento de barra (e depois de dock): ícone, texto, cor, painel e ações, ligado a um provider | 1 (v1) |
+| **Item** | Elemento de barra (e depois de dock): ícone, texto, cor, painel e ações, ligado a um provider | 5 |
 | **Pacote de ícones** | Mapeia nomes de ícones para glifos/SVGs | 2 |
 | **Idioma** | Textos da interface | 2 |
 | **Sons** | Sons de eventos (opcional) | Futuro |
@@ -472,7 +472,7 @@ Depois dos spikes: workspace Rust, CI, logs e esqueleto de `core`/`ui`/`platform
 | **1d** | **Áudio e brilho**: chips `audio`, `mic` e `brightness` com %, roda (2 % no volume, 5 % no brilho) e painéis (slider, mudo, troca de saída/entrada; um slider por monitor por DDC/CI, gravado numa thread com escrita agrupada). [ADR-0010](adr/0010-audio-e-brilho-fase-1d.md) |
 | **1e** | **Widgets do YASB que faltam**: chips `claude`, `codex` (uso), `vscode` (projetos recentes), `notifications` (contador, central, limpar), `dnd` (Não perturbe) e `power` (energia com confirmação). O chip de apps fixados/abertos foi feito e removido a pedido do usuário (barra de tarefas do Windows e Raycast cobrem). [Spec](superpowers/specs/2026-10-19-fase-1e-widgets-do-yasb-design.md), [ADR-0011](adr/0011-widgets-do-yasb-fase-1e.md) |
 | **1e+** | **Chips da ilha**: `player` (a pílula de mídia da ilha, idêntica, sem os avisos), `weather` (temperatura e cidade) e `hardware` (CPU, GPU, RAM ao clicar), em qualquer seção de qualquer monitor; a ilha continua fixa no centro do principal. [Spec](superpowers/specs/2026-10-20-chips-da-ilha-design.md), [ADR-0012](adr/0012-chips-da-ilha.md) |
-| **1f** | **Itens declarativos v1** + linguagem de expressões (Claude e Codex podem virar itens sobre os parsers da 1e) e **Modo noturno**. O Pomodoro ficou coberto pelo timer de foco da ilha |
+| ~~1f~~ | **Removida em 2026-10-20.** Os itens declarativos e a linguagem de expressões foram para a Fase 5. O modo noturno saiu do plano: uma rotina do usuário já liga a luz noturna às 18h e desliga às 9h. O Pomodoro ficou coberto pelo timer de foco da ilha |
 | **1g** | Tema `cavalaridev.toml`, HUD de debug, exportar diagnóstico, **2 semanas de uso diário** substituindo o YASB |
 
 **Pronto quando:** todas as metas da §1 forem atingidas e houver 2 semanas sem crash.
@@ -487,11 +487,11 @@ Atalho global, janela acrílica, busca fuzzy em apps, arquivos, projetos e **aç
 
 ### Fase 4 — Dock
 
-Estilo macOS: apps fixados e abertos, indicadores, badges, ampliação com mola, itens declarativos na dock. Spec própria.
+Estilo macOS: apps fixados e abertos, indicadores, badges, ampliação com mola. Itens declarativos na dock só depois da Fase 5. Spec própria.
 
 ### Fase 5 — Plugins e catálogo
 
-Providers externos **fora do processo** (JSON-RPC por named pipe, mesmo modelo Estado + Ações) e catálogo de recursos da comunidade. Spec própria.
+**Itens declarativos** e a linguagem de expressões (§5; vieram da antiga 1f, e Claude e Codex podem virar itens sobre os parsers da 1e), providers externos **fora do processo** (JSON-RPC por named pipe, mesmo modelo Estado + Ações) e catálogo de recursos da comunidade. Spec própria.
 
 ### Fase 6 — Gerenciador de janelas (condicional)
 

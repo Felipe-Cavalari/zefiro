@@ -6,7 +6,7 @@ Leia antes de mudar qualquer coisa:
 
 | Documento | Quando ler |
 | --- | --- |
-| `docs/PLANNING.md` | Sempre. É a visão, o roteiro de fases (1a a 1e feitas: barra, modo de edição, ilha embutida em Rust, áudio e brilho, widgets do YASB; próxima: 1f itens declarativos v1 e modo noturno, depois 1g) e as metas de performance. |
+| `docs/PLANNING.md` | Sempre. É a visão, o roteiro de fases (1a a 1e feitas: barra, modo de edição, ilha embutida em Rust, áudio e brilho, widgets do YASB; próxima: 1g; a 1f foi removida e os itens declarativos foram para a Fase 5) e as metas de performance. |
 | `docs/adr/` | Antes de mexer em desenho, animação, janelas ou na ilha. Registra as decisões tomadas e o motivo. Não desfaça uma decisão de um ADR sem escrever outro ADR que a substitua. |
 | `docs/superpowers/specs/` e `docs/superpowers/plans/` | Antes de começar uma fase. Mostra como as fases 0, 1a e 1b foram especificadas e planejadas; as próximas seguem o mesmo modelo. |
 | `docs/superpowers/handoff/` | Para saber o estado da última passagem e o que ficou pendente. |
