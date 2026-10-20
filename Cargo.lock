@@ -982,6 +982,14 @@ name = "zefiro-integration-devices"
 version = "1.1.0"
 
 [[package]]
+name = "zefiro-integration-terminal"
+version = "1.1.0"
+dependencies = [
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "zefiro-integration-update"
 version = "1.1.0"
 dependencies = [

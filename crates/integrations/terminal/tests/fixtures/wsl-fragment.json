@@ -1,0 +1,50 @@
+{
+  "profiles": [
+    {
+      "hidden": true,
+      "updates": "{963ff2f7-6aed-5ce3-9d91-90d99571f53a}"
+    },
+    {
+      "colorScheme": "Ubuntu",
+      "commandline": "C:\\WINDOWS\\system32\\wsl.exe --distribution-id {54e7dab8-3953-4a07-9e15-9c58dc528819}",
+      "cursorShape": "filledBox",
+      "font": {
+        "face": "Ubuntu Mono",
+        "size": 13
+      },
+      "guid": "{05554e26-1c8e-5d55-9236-24a445d70daa}",
+      "icon": "C:\\Users\\teste\\AppData\\Local\\wsl\\{54e7dab8-3953-4a07-9e15-9c58dc528819}\\shortcut.ico",
+      "name": "Ubuntu-24.04",
+      "pathTranslationStyle": "wsl",
+      "startingDirectory": "~",
+      "suppressApplicationTitle": true,
+      "wsl.distribution-type": "ubuntu",
+      "wsl.distribution-version": "24.04"
+    }
+  ],
+  "schemes": [
+    {
+      "background": "#300A24",
+      "black": "#171421",
+      "blue": "#0037DA",
+      "brightBlack": "#767676",
+      "brightBlue": "#08458F",
+      "brightCyan": "#2C9FB3",
+      "brightGreen": "#26A269",
+      "brightPurple": "#A347BA",
+      "brightRed": "#C01C28",
+      "brightWhite": "#F2F2F2",
+      "brightYellow": "#A2734C",
+      "cursorColor": "#FFFFFF",
+      "cyan": "#3A96DD",
+      "foreground": "#FFFFFF",
+      "green": "#26A269",
+      "name": "Ubuntu",
+      "purple": "#881798",
+      "red": "#C21A23",
+      "selectionBackground": "#FFFFFF",
+      "white": "#CCCCCC",
+      "yellow": "#A2734C"
+    }
+  ]
+}
