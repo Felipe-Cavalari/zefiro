@@ -1,7 +1,14 @@
 //! Quem abre e quem fecha: um painel por vez.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PanelKind { Menu, Calendar, Overflow, Island, Audio, Mic, Brightness, Claude, Codex, VsCode, Power }
+pub enum PanelKind { Menu, Calendar, Overflow, Island, Audio, Mic, Brightness, Claude, Codex, VsCode, Power, Player, Weather, Hardware }
+
+impl PanelKind {
+    /// Painel com abas da ilha: a própria ilha ou um dos chips que levam uma aba dela.
+    pub fn tabbed(self) -> bool {
+        matches!(self, PanelKind::Island | PanelKind::Player | PanelKind::Weather | PanelKind::Hardware)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenPanel { pub monitor: usize, pub chip: String, pub kind: PanelKind }
@@ -25,6 +32,9 @@ pub fn panel_kind_for(chip: &str) -> Option<PanelKind> {
         "codex" => Some(PanelKind::Codex),
         "vscode" => Some(PanelKind::VsCode),
         "power" => Some(PanelKind::Power),
+        "player" => Some(PanelKind::Player),
+        "weather" => Some(PanelKind::Weather),
+        "hardware" => Some(PanelKind::Hardware),
         _ => None,
     }
 }
@@ -91,6 +101,17 @@ mod tests {
         }
         assert_eq!(panel_kind_for("clock"), Some(PanelKind::Calendar));
         assert!(!action_chip("clock"));
+    }
+
+    #[test]
+    fn island_chips_open_tabbed_panels() {
+        assert_eq!(panel_kind_for("player"), Some(PanelKind::Player));
+        assert_eq!(panel_kind_for("weather"), Some(PanelKind::Weather));
+        assert_eq!(panel_kind_for("hardware"), Some(PanelKind::Hardware));
+        for kind in [PanelKind::Island, PanelKind::Player, PanelKind::Weather, PanelKind::Hardware] {
+            assert!(kind.tabbed(), "{kind:?}");
+        }
+        assert!(!PanelKind::Calendar.tabbed());
     }
 
     #[test]

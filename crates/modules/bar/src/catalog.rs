@@ -1,4 +1,5 @@
-//! Catálogo local de itens implementados; a ilha fica no centro do monitor principal.
+//! Catálogo local de itens implementados; a ilha fica no centro do monitor principal, e o player,
+//! o clima e o monitor do PC levam partes dela para qualquer seção.
 
 pub struct ItemDescriptor { pub id: &'static str, pub name: &'static str, pub description: &'static str }
 
@@ -13,6 +14,9 @@ pub const ITEMS: &[ItemDescriptor] = &[
     ItemDescriptor { id: "vscode", name: "VS Code", description: "Projetos recentes do VS Code" },
     ItemDescriptor { id: "notifications", name: "Notificações", description: "Contador; clique abre a central" },
     ItemDescriptor { id: "dnd", name: "Não perturbe", description: "Liga e desliga o Não perturbe; o botão do meio abre as configurações" },
+    ItemDescriptor { id: "player", name: "Player", description: "A mídia tocando, como na ilha; clique abre os controles" },
+    ItemDescriptor { id: "weather", name: "Clima", description: "Temperatura e cidade; clique abre a previsão" },
+    ItemDescriptor { id: "hardware", name: "Monitor do PC", description: "CPU, GPU, RAM, disco e rede ao clicar" },
     ItemDescriptor { id: "power", name: "Energia", description: "Bloquear, suspender, sair, reiniciar e desligar" },
 ];
 
@@ -26,7 +30,7 @@ mod tests {
 
     #[test]
     fn new_items_are_in_the_catalog() {
-        for id in ["claude", "codex", "vscode", "notifications", "dnd", "power"] {
+        for id in ["claude", "codex", "vscode", "notifications", "dnd", "power", "player", "weather", "hardware"] {
             assert!(descriptor(id).is_some(), "{id} fora do catálogo");
         }
         let names: std::collections::HashSet<_> = ITEMS.iter().map(|i| i.name).collect();

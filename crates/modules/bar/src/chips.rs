@@ -62,6 +62,43 @@ pub fn bell_chip(count: usize, chip_h: f32, font_px: f32, scale: f32, tokens: &T
     ChipContent { content_w: w, list: DisplayList { size: Size { w, h: chip_h }, ops } }
 }
 
+/// Clima: emoji da condição, temperatura (largura de "-00°" reservada, para o painel não andar
+/// quando ela muda) e a cidade apagada, cortada com "…" para o chip caber em 160 DIP. Sem leitura,
+/// só "--°".
+pub fn weather_chip(reading: Option<(&str, i32, &str)>, chip_h: f32, font_px: f32, scale: f32, tokens: &Tokens, m: &dyn TextMeasurer) -> ChipContent {
+    let strong = TextStyle { size: font_px, weight: FontWeight::SemiBold, family: Family::Text };
+    let soft = TextStyle { size: font_px, weight: FontWeight::Regular, family: Family::Text };
+    let reserved = m.measure("-00°", &strong).w.ceil();
+    let Some((icon, temp, city)) = reading else {
+        let ops = vec![DrawOp::Text { rect: Rect::new(0.0, 0.0, reserved, chip_h), text: "--°".into(), style: strong, color: tokens.text_secondary, align: Align::Leading }];
+        return ChipContent { content_w: reserved, list: DisplayList { size: Size { w: reserved, h: chip_h }, ops } };
+    };
+    let gap = (5.0 * scale).round();
+    let icon_w = m.measure(icon, &strong).w.ceil();
+    let temp = format!("{temp}°");
+    let slot = reserved.max(m.measure(&temp, &strong).w.ceil());
+    let mut ops = vec![
+        DrawOp::Text { rect: Rect::new(0.0, 0.0, icon_w, chip_h), text: icon.into(), style: strong, color: tokens.text, align: Align::Leading },
+        DrawOp::Text { rect: Rect::new(icon_w + gap, 0.0, slot, chip_h), text: temp, style: strong, color: tokens.text, align: Align::Leading },
+    ];
+    let x = icon_w + gap + slot + gap;
+    let max = 160.0 * scale;
+    let mut name = city.trim().to_string();
+    while !name.is_empty() && x + m.measure(&name, &soft).w.ceil() > max {
+        if name.ends_with('…') { name.pop(); }
+        name.pop();
+        name = name.trim_end().to_string();
+        if !name.is_empty() { name.push('…'); }
+    }
+    let mut w = x - gap;
+    if !name.is_empty() {
+        let name_w = m.measure(&name, &soft).w.ceil();
+        ops.push(DrawOp::Text { rect: Rect::new(x, 0.0, name_w, chip_h), text: name, style: soft, color: tokens.text_secondary, align: Align::Leading });
+        w = x + name_w;
+    }
+    ChipContent { content_w: w, list: DisplayList { size: Size { w, h: chip_h }, ops } }
+}
+
 pub const MOON: &str = "\u{E708}";
 
 /// Não perturbe: lua na cor de destaque quando ativo, apagada quando não.
@@ -137,6 +174,34 @@ mod tests {
         let t = tokens();
         let w = |n| bell_chip(n, 28.0, 12.0, 1.0, &t, &FixedWidthMeasurer).content_w;
         assert_eq!(w(1), w(250));
+    }
+
+    #[test]
+    fn weather_chip_shows_icon_temperature_and_city() {
+        let t = tokens();
+        let c = weather_chip(Some(("☁️", 17, "Guarulhos")), 28.0, 12.0, 1.0, &t, &FixedWidthMeasurer);
+        assert_eq!(texts(&c), vec!["☁️".to_string(), "17°".into(), "Guarulhos".into()]);
+        assert!(matches!(&c.list.ops[2], DrawOp::Text { color, .. } if color == &t.text_secondary), "cidade apagada");
+        assert!(matches!(&c.list.ops[1], DrawOp::Text { color, .. } if color == &t.text), "temperatura em destaque");
+    }
+
+    #[test]
+    fn weather_chip_width_does_not_follow_the_temperature() {
+        let t = tokens();
+        let w = |temp| weather_chip(Some(("☀️", temp, "Itu")), 28.0, 12.0, 1.0, &t, &FixedWidthMeasurer).content_w;
+        assert_eq!(w(7), w(-12));
+        assert_eq!(w(7), w(35));
+    }
+
+    #[test]
+    fn weather_chip_cuts_long_city_names_and_shows_dashes_without_reading() {
+        let t = tokens();
+        let long = weather_chip(Some(("☀️", 20, "Cidade muito comprida ".repeat(4).as_str())), 28.0, 12.0, 1.0, &t, &FixedWidthMeasurer);
+        assert!(long.content_w <= 160.0, "{}", long.content_w);
+        assert!(texts(&long)[2].ends_with('…'));
+        let none = weather_chip(None, 28.0, 12.0, 1.0, &t, &FixedWidthMeasurer);
+        assert_eq!(texts(&none), vec!["--°".to_string()]);
+        assert!(matches!(&none.list.ops[0], DrawOp::Text { color, .. } if color == &t.text_secondary));
     }
 
     #[test]
