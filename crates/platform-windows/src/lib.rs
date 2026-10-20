@@ -10,6 +10,7 @@ pub mod claude;
 pub mod audio_capture;
 pub mod bar_context;
 pub mod compositor;
+pub mod diagnostics;
 pub mod dnd;
 pub mod gfx;
 pub mod hardware;

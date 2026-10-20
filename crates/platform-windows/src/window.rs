@@ -46,6 +46,8 @@ pub enum WinEvent {
     Key { hwnd: isize, vk: u32 },
     FocusLost { hwnd: isize },
     Timer { id: usize },
+    /// Atalho global registrado com `RegisterHotKey` (o `id` dele).
+    Hotkey { id: i32 },
     DpiChanged { hwnd: isize },
     DisplayChanged,
     /// Notificação da AppBar (`ABN_*`) com o seu parâmetro (ex.: ABN_FULLSCREENAPP: 1 abriu, 0 fechou).
@@ -194,6 +196,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         WM_KILLFOCUS => push(WinEvent::FocusLost { hwnd: h }),
         WM_ACTIVATE if (wp.0 & 0xFFFF) as u32 == WA_INACTIVE => push(WinEvent::FocusLost { hwnd: h }),
         WM_TIMER => push(WinEvent::Timer { id: wp.0 }),
+        WM_HOTKEY => push(WinEvent::Hotkey { id: wp.0 as i32 }),
         WM_DPICHANGED => push(WinEvent::DpiChanged { hwnd: h }),
         WM_DISPLAYCHANGE => push(WinEvent::DisplayChanged),
         WM_SETTINGCHANGE => push(WinEvent::SettingChanged),
