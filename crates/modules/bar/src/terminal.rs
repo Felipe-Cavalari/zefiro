@@ -221,6 +221,47 @@ pub fn terminal_panel(view: &PanelView, scale: f32, tokens: &Tokens) -> PanelLay
     PanelLayout { list: DisplayList { size, ops }, pencil, rows, eyes, visible_zone, hidden_zone }
 }
 
+/// O que um botão solto no painel faz.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum UpAction { Nothing, Launch(usize), StartEdit, FinishEdit, Drop(usize, Slot), Toggle(usize) }
+
+/// Estado do mouse no painel quando o botão é solto.
+pub struct UpInput<'a> {
+    pub editing: bool,
+    /// Perfis lidos e `wt.exe` achado (o lápis só vale assim).
+    pub ready: bool,
+    /// Perfil em que o botão desceu na edição.
+    pub press: Option<usize>,
+    pub drag: Option<&'a DragView>,
+    /// O gesto foi cancelado pelo teclado com o botão ainda apertado: este soltar não faz nada.
+    pub swallow: bool,
+}
+
+pub fn up_action(layout: &PanelLayout, input: &UpInput, p: Point) -> UpAction {
+    if input.swallow {
+        return UpAction::Nothing;
+    }
+    if let Some(d) = input.drag {
+        return UpAction::Drop(d.profile, d.slot);
+    }
+    if input.ready && layout.pencil.contains(p) {
+        return if input.editing { UpAction::FinishEdit } else { UpAction::StartEdit };
+    }
+    if input.editing {
+        let on_own_eye = |profile: usize| layout.eyes.iter().any(|(r, i)| *i == profile && r.contains(p));
+        return match input.press {
+            Some(profile) if on_own_eye(profile) => UpAction::Toggle(profile),
+            _ => UpAction::Nothing,
+        };
+    }
+    layout.rows.iter().find(|(r, _)| r.contains(p)).map_or(UpAction::Nothing, |(_, i)| UpAction::Launch(*i))
+}
+
+/// Perfil que o Enter abre no modo normal: só o escolhido que está visível.
+pub fn launch_target(selected: Option<usize>, arrangement: &Arrangement) -> Option<usize> {
+    selected.filter(|p| arrangement.visible.contains(p))
+}
+
 /// Onde o perfil arrastado cairia com o mouse em `p`: abaixo do meio do vão entre as zonas é
 /// "Ocultos"; acima, a posição entre os outros visíveis pelo meio de cada linha.
 pub fn drop_slot(layout: &PanelLayout, arrangement: &Arrangement, dragged: usize, p: Point) -> Slot {
@@ -327,6 +368,53 @@ mod tests {
         let below = Point { x: 50.0, y: row(2).bottom() - 2.0 };
         assert_eq!(drop_slot(&l, &arr, 0, below), Slot::Visible(2));
         assert_eq!(drop_slot(&l, &arr, 0, center(l.hidden_zone)), Slot::Hidden);
+    }
+
+    fn up(editing: bool, press: Option<usize>, drag: Option<&DragView>, swallow: bool) -> UpInput<'_> {
+        UpInput { editing, ready: true, press, drag, swallow }
+    }
+
+    #[test]
+    fn release_after_a_keyboard_cancel_opens_nothing() {
+        let rows = profile_rows(2);
+        let arr = Arrangement { visible: vec![0, 1], hidden: vec![] };
+        let l = terminal_panel(&view(&rows, &arr, false), 1.0, &tokens());
+        let on_row = center(l.rows[1].0);
+        assert_eq!(up_action(&l, &up(false, None, None, true), on_row), UpAction::Nothing, "Esc ou Enter no meio do arraste não abre perfil ao soltar");
+        assert_eq!(up_action(&l, &up(false, None, None, false), on_row), UpAction::Launch(1));
+    }
+
+    #[test]
+    fn release_in_normal_mode_pencil_needs_a_loaded_list() {
+        let rows = profile_rows(2);
+        let arr = Arrangement { visible: vec![0, 1], hidden: vec![] };
+        let l = terminal_panel(&view(&rows, &arr, false), 1.0, &tokens());
+        assert_eq!(up_action(&l, &up(false, None, None, false), center(l.pencil)), UpAction::StartEdit);
+        let not_ready = UpInput { ready: false, ..up(false, None, None, false) };
+        assert_eq!(up_action(&l, &not_ready, center(l.pencil)), UpAction::Nothing);
+    }
+
+    #[test]
+    fn release_in_edit_mode_never_launches() {
+        let rows = profile_rows(3);
+        let arr = Arrangement { visible: vec![0, 1], hidden: vec![2] };
+        let l = terminal_panel(&view(&rows, &arr, true), 1.0, &tokens());
+        let row = |p: usize| l.rows.iter().find(|(_, i)| *i == p).unwrap().0;
+        let eye = |p: usize| l.eyes.iter().find(|(_, i)| *i == p).unwrap().0;
+        assert_eq!(up_action(&l, &up(true, Some(1), None, false), center(row(1))), UpAction::Nothing, "clique na linha não abre na edição");
+        assert_eq!(up_action(&l, &up(true, Some(2), None, false), center(eye(2))), UpAction::Toggle(2));
+        assert_eq!(up_action(&l, &up(true, Some(1), None, false), center(eye(0))), UpAction::Nothing, "o olho é do perfil em que o botão desceu");
+        let drag = DragView { profile: 0, point: center(l.hidden_zone), slot: Slot::Hidden };
+        assert_eq!(up_action(&l, &up(true, Some(0), Some(&drag), false), center(l.hidden_zone)), UpAction::Drop(0, Slot::Hidden));
+        assert_eq!(up_action(&l, &up(true, None, None, false), center(l.pencil)), UpAction::FinishEdit);
+    }
+
+    #[test]
+    fn enter_opens_only_a_visible_choice() {
+        let arr = Arrangement { visible: vec![0, 1], hidden: vec![2] };
+        assert_eq!(launch_target(Some(1), &arr), Some(1));
+        assert_eq!(launch_target(Some(2), &arr), None, "escondido pelo teclado na edição");
+        assert_eq!(launch_target(None, &arr), None);
     }
 
     #[test]

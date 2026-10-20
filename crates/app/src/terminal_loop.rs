@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use windows::core::Result;
 use zefiro_bar::controller::PanelKind;
-use zefiro_bar::terminal::{Arrangement, DragView, PanelLayout, PanelView, ProfileRow, VISIBLE, drop_slot, max_scroll, terminal_panel};
+use zefiro_bar::terminal::{Arrangement, DragView, PanelLayout, PanelView, ProfileRow, UpAction, UpInput, VISIBLE, drop_slot, launch_target, max_scroll, terminal_panel, up_action};
 use zefiro_core::config::{TerminalConfig, set_terminal};
 use zefiro_integration_terminal::{LoadError, Profile, arrange, icon_candidates, open_args, read_profiles, saved_lists};
 use zefiro_platform::geometry::Point;
@@ -47,6 +47,8 @@ pub struct TerminalRuntime {
     /// Botão apertado numa linha da edição: o perfil e onde.
     press: Option<(usize, Point)>,
     drag: Option<DragView>,
+    /// Um gesto foi cancelado pelo teclado com o botão ainda apertado: o próximo soltar não faz nada.
+    swallow_up: bool,
 }
 
 fn env_dir(name: &str) -> PathBuf {
@@ -176,7 +178,7 @@ impl Loop {
                 Ok(true)
             }
             0x0D => {
-                if let Some(p) = t.selected {
+                if let Some(p) = launch_target(t.selected, &t.arrangement) {
                     self.terminal_launch(p)?;
                 }
                 Ok(true)
@@ -208,11 +210,10 @@ impl Loop {
                     t.arrangement.toggle(p);
                 }
             }
-            0x0D => self.terminal_finish_edit(),
+            0x0D => self.terminal_leave_edit(true),
             0x1B => {
                 t.arrangement = std::mem::take(&mut t.before_edit);
-                t.editing = false;
-                self.terminal_drop_gesture();
+                self.terminal_leave_edit(false);
             }
             _ => return Ok(true),
         }
@@ -220,11 +221,21 @@ impl Loop {
         Ok(true)
     }
 
-    /// Sai da edição gravando.
-    fn terminal_finish_edit(&mut self) {
-        self.terminal_save();
-        self.terminal.editing = false;
-        self.terminal_drop_gesture();
+    /// Sai da edição, gravando ou não. A escolha do teclado some (podia ser um perfil agora
+    /// oculto). Com o botão ainda apertado (tecla no meio do arraste), o próximo soltar é engolido,
+    /// senão ele abriria o perfil sob o mouse no modo normal.
+    fn terminal_leave_edit(&mut self, save: bool) {
+        if save {
+            self.terminal_save();
+        }
+        let t = &mut self.terminal;
+        t.editing = false;
+        t.selected = None;
+        t.drag = None;
+        if t.press.take().is_some() {
+            // A captura continua até o botão subir, para o soltar chegar aqui e ser engolido.
+            t.swallow_up = true;
+        }
     }
 
     /// Grava ordem e ocultos em `[terminal]` se mudaram.
@@ -247,12 +258,13 @@ impl Loop {
         }
     }
 
-    /// Esquece o botão apertado e o arraste.
+    /// Esquece o botão apertado, o arraste e o soltar a engolir, e devolve a captura.
     fn terminal_drop_gesture(&mut self) {
         let t = &mut self.terminal;
         let pressed = t.press.take().is_some();
         let dragging = t.drag.take().is_some();
-        if pressed || dragging {
+        let swallowing = std::mem::take(&mut t.swallow_up);
+        if pressed || dragging || swallowing {
             window::release_capture();
         }
     }
@@ -275,7 +287,12 @@ impl Loop {
 
     /// Botão apertado: na edição, uma linha pode virar arraste. `true` se tratou.
     pub fn terminal_down(&mut self, panel: usize, p: Point) -> Result<bool> {
-        if !self.terminal_open() || !self.terminal.editing {
+        if !self.terminal_open() {
+            return Ok(false);
+        }
+        // Um botão novo desceu: o soltar engolido (se ficou para trás) já passou.
+        self.terminal.swallow_up = false;
+        if !self.terminal.editing {
             return Ok(false);
         }
         let Some(profile) = self.terminal_row_at(p) else { return Ok(false) };
@@ -325,31 +342,30 @@ impl Loop {
         if !self.terminal_open() {
             return Ok(false);
         }
+        let t = &self.terminal;
+        let input = UpInput {
+            editing: t.editing,
+            ready: t.profiles.as_ref().is_some_and(|r| r.is_ok()) && t.wt.is_some(),
+            press: t.press.map(|(profile, _)| profile),
+            drag: t.drag.as_ref(),
+            swallow: t.swallow_up,
+        };
+        let action = t.layout.as_ref().map_or(UpAction::Nothing, |l| up_action(l, &input, p));
+        self.terminal_drop_gesture();
         let t = &mut self.terminal;
-        let loaded = t.profiles.as_ref().is_some_and(|r| r.is_ok()) && t.wt.is_some();
-        let on_pencil = loaded && t.drag.is_none() && t.layout.as_ref().is_some_and(|l| l.pencil.contains(p));
-        if t.editing {
-            if let Some(d) = t.drag.take() {
-                t.arrangement.move_to(d.profile, d.slot);
-            } else if let Some((profile, _)) = t.press
-                && t.layout.as_ref().is_some_and(|l| l.eyes.iter().any(|(r, i)| *i == profile && r.contains(p)))
-            {
-                t.arrangement.toggle(profile);
-            } else if on_pencil {
-                self.terminal_finish_edit();
+        match action {
+            UpAction::Launch(profile) => return self.terminal_launch(profile).map(|_| true),
+            UpAction::StartEdit => {
+                t.before_edit = t.arrangement.clone();
+                t.editing = true;
+                t.selected = None;
             }
-            self.terminal_drop_gesture();
-            self.redraw_open_panel()?;
-            return Ok(true);
+            UpAction::FinishEdit => self.terminal_leave_edit(true),
+            UpAction::Drop(profile, slot) => t.arrangement.move_to(profile, slot),
+            UpAction::Toggle(profile) => t.arrangement.toggle(profile),
+            UpAction::Nothing => {}
         }
-        if on_pencil {
-            t.before_edit = t.arrangement.clone();
-            t.editing = true;
-            t.selected = None;
-            self.redraw_open_panel()?;
-        } else if let Some(profile) = self.terminal_row_at(p) {
-            self.terminal_launch(profile)?;
-        }
+        self.redraw_open_panel()?;
         Ok(true)
     }
 
@@ -365,7 +381,7 @@ impl Loop {
     /// Painel fechando: no meio da edição, grava (fechar não perde nada).
     pub fn terminal_panel_closed(&mut self) {
         if self.terminal.editing {
-            self.terminal_finish_edit();
+            self.terminal_leave_edit(true);
         }
         self.terminal_drop_gesture();
         self.terminal.layout = None;
