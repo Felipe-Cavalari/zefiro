@@ -96,6 +96,28 @@ impl ZipWriter {
     }
 }
 
+/// O `.zip` do exportar diagnóstico: os logs (`zefiro*.log`) e relatórios de crash (`crash-*.txt`)
+/// da pasta de logs, o `config.toml` e o `info.txt`, todos limpos por `sanitize`.
+pub fn diagnostic_zip(log_dir: &std::path::Path, config: Option<&str>, info: &str, home: &str, user: &str, when: (u16, u16)) -> Vec<u8> {
+    let name_of = |p: &std::path::Path| p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let mut logs: Vec<std::path::PathBuf> = std::fs::read_dir(log_dir).map(|d| d.flatten().map(|e| e.path()).collect()).unwrap_or_default();
+    logs.retain(|p| {
+        let name = name_of(p);
+        (name.starts_with("zefiro") && name.ends_with(".log")) || (name.starts_with("crash-") && name.ends_with(".txt"))
+    });
+    logs.sort();
+    let mut zip = ZipWriter::new(when);
+    for path in logs {
+        let Ok(bytes) = std::fs::read(&path) else { continue };
+        zip.add(&format!("logs/{}", name_of(&path)), sanitize(&String::from_utf8_lossy(&bytes), home, user).as_bytes());
+    }
+    if let Some(config) = config {
+        zip.add("config.toml", sanitize(config, home, user).as_bytes());
+    }
+    zip.add("info.txt", sanitize(info, home, user).as_bytes());
+    zip.finish()
+}
+
 /// Tira do texto o que identifica o usuário: a pasta dele (vira `%USERPROFILE%`), e-mails, o que tem
 /// cara de token e o nome de usuário (como palavra inteira, a partir de 3 letras).
 pub fn sanitize(text: &str, home: &str, user: &str) -> String {
@@ -290,6 +312,22 @@ mod tests {
     fn sanitize_keeps_ordinary_log_lines() {
         let line = "2026-10-20T14:03:01Z  INFO zefiro: primeiro quadro da barra ms=38 monitors=2 SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify";
         assert_eq!(sanitize(line, r"C:\Users\felip", "felip"), line);
+    }
+
+    #[test]
+    fn diagnostic_zip_takes_logs_crashes_config_and_info_scrubbed() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("zefiro.2026-10-20.log"), r"lendo C:\Users\felip\.claude").unwrap();
+        std::fs::write(dir.path().join("crash-1-2-3.txt"), "panic em felip").unwrap();
+        std::fs::write(dir.path().join("outro.bin"), "fora").unwrap();
+        let zip = diagnostic_zip(dir.path(), Some("theme = \"cobalto\""), "zefiro 1.0.1", r"C:\Users\felip", "felip", (0, 0x21));
+        let text = String::from_utf8_lossy(&zip);
+        for name in ["logs/zefiro.2026-10-20.log", "logs/crash-1-2-3.txt", "config.toml", "info.txt"] {
+            assert!(text.contains(name), "{name}");
+        }
+        assert!(!text.contains("outro.bin") && !text.contains("fora"));
+        assert!(!text.contains("felip"), "{text}");
+        assert!(text.contains("%USERPROFILE%") && text.contains("<usuario>"));
     }
 
     #[test]

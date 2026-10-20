@@ -3,6 +3,7 @@
 mod app;
 mod bar_view;
 mod config_worker;
+mod debug_loop;
 mod editor_view;
 mod event_loop;
 mod devices_loop;
@@ -34,6 +35,9 @@ fn main() {
     let log_dir = default_log_dir();
     install_panic_hook(log_dir.clone(), VERSION);
     let _guard = init_logging(&log_dir, "info").ok();
+    if let Some(guard) = &_guard {
+        debug_loop::set_recent(guard.recent.clone());
+    }
     if !dpi_aware {
         tracing::warn!("não consegui ligar DPI por monitor; a barra pode ficar borrada fora de 100%");
     }

@@ -81,6 +81,8 @@ pub const TIMER_POWER: usize = 11;
 /// Barra escondida por tela cheia: confere a cada 1 s se o app saiu (o aviso do Windows pode chegar
 /// antes de a janela encolher, ou não chegar).
 pub const TIMER_FULLSCREEN: usize = 12;
+/// HUD de debug: uma atualização por segundo, só com ele aberto.
+pub const TIMER_HUD: usize = 13;
 const CYCLE_HALF_MS: u32 = 450;
 
 const VK_ESCAPE: u32 = 0x1B;
@@ -109,6 +111,7 @@ pub struct Loop {
     menu: Option<MenuModel>,
     pub(crate) shown_month: (i32, u32),
     pub(crate) island: crate::island_loop::IslandRuntime,
+    pub(crate) debug: crate::debug_loop::DebugRuntime,
     pub(crate) devices: crate::devices_loop::DevicesRuntime,
     pub(crate) usage: crate::usage_loop::UsageRuntime,
     pub(crate) vscode: crate::vscode_loop::VsCodeRuntime,
@@ -135,7 +138,7 @@ impl Loop {
             panels.push(PanelView::create(&ctx, b.monitor())?);
         }
         let today = now_local().date;
-        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), power: Default::default(), system: Default::default(), cycles: None })
+        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), debug: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), power: Default::default(), system: Default::default(), cycles: None })
     }
 
     pub(crate) fn bar_index(&self, hwnd: isize) -> Option<usize> { self.bars.iter().position(|b| b.hwnd().0 as isize == hwnd) }
@@ -347,6 +350,11 @@ impl Loop {
                 system::open_folder(&dir);
                 return Ok(());
             }
+            MenuAction::ToggleHud => return self.toggle_hud(),
+            MenuAction::ExportDiagnostics => {
+                self.close_open_panel()?;
+                return self.export_diagnostics();
+            }
             MenuAction::RestartIsland => {
                 window::post_user(USER_ISLAND);
                 return Ok(());
@@ -406,6 +414,9 @@ impl Loop {
     }
 
     pub fn handle(&mut self, e: WinEvent) -> Result<bool> {
+        if let WinEvent::User { code } = e {
+            self.debug_stamp(code);
+        }
         if self.editor_event(e)? { return Ok(true); }
         match e {
             WinEvent::Quit => return Ok(false),
@@ -603,6 +614,8 @@ impl Loop {
                 self.schedule_clock();
             }
             WinEvent::Timer { id: TIMER_CYCLE } => self.cycle_tick()?,
+            WinEvent::Timer { id: TIMER_HUD } => self.hud_tick()?,
+            WinEvent::Hotkey { id: zefiro_platform_windows::diagnostics::HOTKEY_HUD } => self.toggle_hud()?,
             WinEvent::Timer { id: TIMER_ISLAND_PEEK } => self.island_peek_timer()?,
             WinEvent::Timer { id: TIMER_ISLAND_TICK } => self.island_tick()?,
             WinEvent::Timer { id: TIMER_FOCUS } => self.island_focus_tick()?,
@@ -712,6 +725,9 @@ pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
     }
     crate::island::start(&l.ctx);
     crate::tray_loop::show_icon();
+    if !zefiro_platform_windows::diagnostics::register_hud_hotkey() {
+        tracing::warn!("Ctrl+Alt+Shift+D já é usado por outro app; o HUD fica só no menu do Z");
+    }
     l.refresh_services();
     l.devices_start();
     'pump: while window::pump() {
@@ -731,6 +747,7 @@ pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
 /// Saída por qualquer caminho: primeiro as AppBars saem da tela (a área reservada volta na hora),
 /// depois a ilha, que pode levar até 3 s para fechar.
 fn shutdown(l: &mut Loop) {
+    l.debug_shutdown();
     for b in l.bars.drain(..) {
         b.destroy();
     }
