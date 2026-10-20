@@ -922,7 +922,7 @@ dependencies = [
 
 [[package]]
 name = "zefiro-app"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "tempfile",
  "tracing",
@@ -946,7 +946,7 @@ dependencies = [
 
 [[package]]
 name = "zefiro-bar"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "zefiro-core",
  "zefiro-integration-clock",
@@ -958,7 +958,7 @@ dependencies = [
 
 [[package]]
 name = "zefiro-core"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "notify",
  "serde",
@@ -972,18 +972,18 @@ dependencies = [
 
 [[package]]
 name = "zefiro-integration-clock"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "windows",
 ]
 
 [[package]]
 name = "zefiro-integration-devices"
-version = "1.0.1"
+version = "1.1.0"
 
 [[package]]
 name = "zefiro-integration-update"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -991,21 +991,21 @@ dependencies = [
 
 [[package]]
 name = "zefiro-integration-usage"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "zefiro-integration-vscode"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "zefiro-island"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1016,7 +1016,7 @@ dependencies = [
 
 [[package]]
 name = "zefiro-island-host"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "tempfile",
  "tracing",
@@ -1027,11 +1027,11 @@ dependencies = [
 
 [[package]]
 name = "zefiro-platform"
-version = "1.0.1"
+version = "1.1.0"
 
 [[package]]
 name = "zefiro-platform-windows"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "serde_json",
  "tracing",
@@ -1050,7 +1050,7 @@ dependencies = [
 
 [[package]]
 name = "zefiro-resources"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "serde",
  "tempfile",
@@ -1060,7 +1060,7 @@ dependencies = [
 
 [[package]]
 name = "zefiro-ui"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "zefiro-core",
  "zefiro-platform",
