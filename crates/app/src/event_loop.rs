@@ -176,6 +176,7 @@ impl Loop {
             PanelKind::Audio | PanelKind::Mic | PanelKind::Brightness => self.devices_panel_list(kind, scale),
             PanelKind::Claude | PanelKind::Codex => self.usage_panel_list(kind, scale),
             PanelKind::VsCode => self.vscode_panel_list(scale),
+            PanelKind::Terminal => DisplayList::new(Size { w: 1.0, h: 1.0 }),
             PanelKind::Power => self.power_panel_list(scale),
         }
     }

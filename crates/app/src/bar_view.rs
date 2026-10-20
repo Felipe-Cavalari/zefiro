@@ -99,11 +99,12 @@ fn player_chip(pill: &PillContent, pad: f32, chip_h: f32, font_px: f32, tokens: 
     ChipContent { content_w: w, list: DisplayList { size: Size { w, h: chip_h }, ops } }
 }
 
-/// Ícone dos chips de VS Code, Monitor do PC e Energia (só ícone).
+/// Ícone dos chips de VS Code, Monitor do PC, Terminal e Energia (só ícone).
 fn icon_glyph(id: &str) -> &'static str {
     match id {
         "vscode" => "\u{E8B7}",
         "hardware" => "\u{E950}",
+        "terminal" => "\u{E756}",
         _ => "\u{E7E8}",
     }
 }
@@ -140,7 +141,7 @@ fn chip_content(ctx: &AppCtx, id: &str, device: &str, height: BarHeight, chip_h:
         "notifications" => zefiro_bar::chips::bell_chip(ctx.system.notifications, chip_h, font_px, scale, t, &ctx.text),
         "dnd" => zefiro_bar::chips::dnd_chip(ctx.system.dnd, chip_h, font_px, t),
         "weather" => weather_chip(ctx.island.weather.as_ref().map(|w| (zefiro_island::weather::icon(w.code), w.temp_c, w.city.as_str())), chip_h, font_px, scale, t, &ctx.text),
-        "hardware" | "power" => level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text),
+        "hardware" | "power" | "terminal" => level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text),
         _ => clock_chip("⋯", chip_h, font_px, t, &ctx.text),
     }
 }
