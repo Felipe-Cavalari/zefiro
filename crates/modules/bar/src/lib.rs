@@ -10,5 +10,6 @@ pub mod editor_panel;
 pub mod hud;
 pub mod menu;
 pub mod power;
+pub mod terminal;
 pub mod usage;
 pub mod vscode;
