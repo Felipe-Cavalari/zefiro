@@ -43,6 +43,7 @@ Leia antes de mudar qualquer coisa:
 | `crates/integrations/devices` | Brilho e níveis, portável: escrita agrupada do DDC/CI (`Coalescer`), passo da roda e posição no slider (ADR-0010) |
 | `crates/integrations/usage` | Uso do Claude (resposta do endpoint, token) e do Codex (fim dos `.jsonl`, thread `CodexService`) e datas em pt-BR, portável (ADR-0011) |
 | `crates/integrations/vscode` | Projetos recentes do VS Code pelo `workspaceStorage`, portável (ADR-0011) |
+| `crates/integrations/update` | Atualização pelo GitHub Releases, portável: versão, última release, URL confiável e SHA-256 (ADR-0014) |
 | `crates/modules/bar` | Chips, menu do Zefiro, calendário, chips e painéis de som, microfone e brilho (`devices.rs`), uso (`usage.rs`), VS Code (`vscode.rs`), energia (`power.rs`), sino e lua (`chips.rs`) e o controlador de painéis |
 | `crates/modules/island` (`zefiro-island`) | Ilha embutida, portável: mídia e escolha da fonte, estados, avisos, visões em `DisplayList`, abas (clima, hardware, letras), menu, visualizador e cor da capa (ADR-0009) |
 | `crates/modules/island-host` | Ilha externa (`engine = "externa"`): gravação do `island.ini`/`island-state.ini`, política de reinício e o processo |
@@ -66,6 +67,8 @@ Copy-Item island/build/zefiro-island.exe target/release/
 # Instalador (Inno Setup 6: winget install JRSoftware.InnoSetup) → dist\Zefiro-<versão>-setup.exe
 pwsh -NoProfile -File scripts/package.ps1      # -BuildIsland recompila a ilha C++ antes
 ```
+
+**Releases e atualização (ADR-0014):** o Zefiro instalado consulta o GitHub Releases a cada 24 h e oferece "Atualizar para a x.y.z" no menu do Z. Para publicar: subir a versão no `Cargo.toml`, commit e `git tag vX.Y.Z` + push (só quando o usuário pedir); o `.github/workflows/release.yml` gera e anexa o instalador. Guia: `docs/RELEASES.md`. O build de `targetelease` só checa com `ZEFIRO_UPDATE_CHECK=1`.
 
 **Instalador:** `installer/zefiro.iss`, por usuário e sem admin, em `%LOCALAPPDATA%\Programs\Zefiro`. A versão vem do `[workspace.package]` do `Cargo.toml`. Ele fecha o Zefiro com `WM_CLOSE` antes de instalar ou desinstalar e nunca apaga `%APPDATA%\zefiro`. O ícone e a versão do exe vêm do `crates/app/build.rs`.
 

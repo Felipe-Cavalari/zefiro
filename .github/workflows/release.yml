@@ -1,0 +1,51 @@
+# Release: um push de tag `vX.Y.Z` (ou uma release criada no site com uma tag nova) testa, gera o
+# instalador e anexa o Zefiro-X.Y.Z-setup.exe à release. O Zefiro instalado acha a versão nova pela
+# API do GitHub (ADR-0014). Guia: docs/RELEASES.md.
+name: release
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Conferir a versão
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            throw "A tag ${{ github.ref_name }} não bate com a versão $version do Cargo.toml. Suba a versão, faça o commit e crie a tag de novo."
+          }
+
+      - name: Testes
+        run: |
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+
+      - name: Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Instalador
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/package.ps1
+
+      - name: Publicar na release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $setup = (Get-ChildItem dist -Filter "Zefiro-*-setup.exe" | Select-Object -First 1).FullName
+          # Release criada no site: só anexa. Tag enviada pelo git: cria a release com notas automáticas.
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $setup --clobber
+          } else {
+            gh release create $tag $setup --title "Zefiro $($tag.TrimStart('v'))" --generate-notes
+          }
