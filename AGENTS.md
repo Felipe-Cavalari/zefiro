@@ -43,6 +43,7 @@ Leia antes de mudar qualquer coisa:
 | `crates/integrations/devices` | Brilho e níveis, portável: escrita agrupada do DDC/CI (`Coalescer`), passo da roda e posição no slider (ADR-0010) |
 | `crates/integrations/usage` | Uso do Claude (resposta do endpoint, token) e do Codex (fim dos `.jsonl`, thread `CodexService`) e datas em pt-BR, portável (ADR-0011) |
 | `crates/integrations/vscode` | Projetos recentes do VS Code pelo `workspaceStorage`, portável (ADR-0011) |
+| `crates/integrations/terminal` | Perfis do Windows Terminal pelo `settings.json` e fragmentos (JSONC, ocultos, fontes desativadas), ordem e ocultos do `[terminal]` e os argumentos do `wt.exe`, portável (ADR-0015) |
 | `crates/integrations/update` | Atualização pelo GitHub Releases, portável: versão, última release, URL confiável e SHA-256 (ADR-0014) |
 | `crates/modules/bar` | Chips, menu do Zefiro, calendário, chips e painéis de som, microfone e brilho (`devices.rs`), uso (`usage.rs`), VS Code (`vscode.rs`), energia (`power.rs`), sino e lua (`chips.rs`) e o controlador de painéis |
 | `crates/modules/island` (`zefiro-island`) | Ilha embutida, portável: mídia e escolha da fonte, estados, avisos, visões em `DisplayList`, abas (clima, hardware, letras), menu, visualizador e cor da capa (ADR-0009) |
@@ -77,7 +78,8 @@ pwsh -NoProfile -File scripts/package.ps1      # -BuildIsland recompila a ilha C
 - A configuração fica em `%APPDATA%\zefiro\config.toml` e é recarregada ao salvar.
   - `[bar] height = completa | compacta`
   - `[bar] format = faixa | pilulas`
-  - `[bar.sections] start/center/end`: ids do catálogo (`zefiro`, `clock`, `audio`, `mic`, `brightness`, `claude`, `codex`, `vscode`, `notifications`, `dnd`, `player`, `weather`, `hardware`, `power`)
+  - `[bar.sections] start/center/end`: ids do catálogo (`zefiro`, `clock`, `audio`, `mic`, `brightness`, `claude`, `codex`, `vscode`, `terminal`, `notifications`, `dnd`, `player`, `weather`, `hardware`, `power`)
+  - `[terminal] order/hidden`: `guid`s dos perfis do Windows Terminal, gravados pelo painel do chip (lápis → Concluir)
 - `ZEFIRO_CONFIG_DIR=<pasta>` troca a pasta da configuração: use um perfil isolado para testes, sem mexer no do usuário.
 - Os temas do usuário ficam em `%APPDATA%\zefiro\themes\`.
 - Os logs ficam em `%LOCALAPPDATA%\zefiro\logs`.
@@ -98,6 +100,7 @@ pwsh -NoProfile -File scripts/package.ps1      # -BuildIsland recompila a ilha C
 - **Mover "na hora" no compositor é animação:** `StopAnimation` + `InsertScalar` logo depois de uma mola perde para a parada, que grava o valor do meio do caminho por cima. `Comp::move_offset` usa um quadro-chave de 1 ms (ADR-0010).
 - **Chips de nível com largura fixa:** o painel aberto nasce do chip; se o chip mudar de largura com o nível, o painel anda sob o cursor. Os chips de som, microfone e brilho mostram só o ícone (a % fica no painel); qualquer chip de nível com texto precisa reservar "100%" (ADR-0010).
 - **Brilho por DDC/CI:** ~60 ms por chamada. Tudo na thread `zefiro-brightness`; a interface é otimista e só o último valor de cada monitor é gravado.
+- **Chip Terminal (ADR-0015):** lê os perfis do Terminal ao abrir o painel e nunca grava nos arquivos dele. A edição (arrastar, olho) é no próprio painel e grava só `[terminal]`; mudança só nessa seção não fecha o painel (`Config::same_except_terminal`). O `wt.exe` é um alias de execução: `Path::exists` dá `false`, use `symlink_metadata`.
 - **Serviços seguem a barra:** Claude, Codex e notificações só rodam com o chip em algum layout (`BarConfig::uses`); `refresh_services()` roda ao salvar o config e ao concluir o modo de edição.
 - **Claude:** o Zefiro só lê `~/.claude/.credentials.json` (a cada consulta) e nunca renova nem grava o token, porque isso derrubaria o login do Claude Code. O token nunca vai para log, teste ou sonda (ADR-0011).
 - **Notificações:** sem identidade de pacote o `ClearNotifications` falha (0x80070490); limpar remove uma a uma. A central abre com Win+N por `SendInput`.
