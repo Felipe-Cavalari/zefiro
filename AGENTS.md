@@ -6,7 +6,7 @@ Leia antes de mudar qualquer coisa:
 
 | Documento | Quando ler |
 | --- | --- |
-| `docs/PLANNING.md` | Sempre. É a visão, o roteiro de fases (1a a 1e feitas: barra, modo de edição, ilha embutida em Rust, áudio e brilho, widgets do YASB; próxima: 1g; a 1f foi removida e os itens declarativos foram para a Fase 5) e as metas de performance. |
+| `docs/PLANNING.md` | Sempre. É a visão, o roteiro de fases (1a a 1e feitas: barra, modo de edição, ilha embutida em Rust, áudio e brilho, widgets do YASB; 1g feita no código: Cobalto, HUD e diagnóstico; falta o uso diário de 2 semanas; a 1f foi removida e os itens declarativos foram para a Fase 5) e as metas de performance. |
 | `docs/adr/` | Antes de mexer em desenho, animação, janelas ou na ilha. Registra as decisões tomadas e o motivo. Não desfaça uma decisão de um ADR sem escrever outro ADR que a substitua. |
 | `docs/superpowers/specs/` e `docs/superpowers/plans/` | Antes de começar uma fase. Mostra como as fases 0, 1a e 1b foram especificadas e planejadas; as próximas seguem o mesmo modelo. |
 | `docs/superpowers/handoff/` | Para saber o estado da última passagem e o que ficou pendente. |
@@ -37,7 +37,7 @@ Leia antes de mudar qualquer coisa:
 | --- | --- |
 | `crates/core` (`zefiro-core`) | Config (`config.toml`, gravação com `toml_edit` que preserva comentários), observador de arquivos, logs e panic hook |
 | `crates/platform` | Tipos portáveis: `Rgba`, `Rect`, `TextStyle` e medição de texto |
-| `crates/resources` | Os 8 temas embutidos (`themes/*.toml`, padrão Obsidian), o parser de tema com erros por linha, os tokens e o registro de temas com os do usuário |
+| `crates/resources` | Os 9 temas embutidos (`themes/*.toml`, padrão Obsidian; o Cobalto usa acrílico), o parser de tema com erros por linha, os tokens e o registro de temas com os do usuário |
 | `crates/ui` | Molas (constantes da ilha), `DisplayList`, layout da barra e regras do painel (pílula → painel) |
 | `crates/integrations/clock` | Grade do mês e formatação de data (pt-BR e Windows) |
 | `crates/integrations/devices` | Brilho e níveis, portável: escrita agrupada do DDC/CI (`Coalescer`), passo da roda e posição no slider (ADR-0010) |
@@ -105,6 +105,8 @@ pwsh -NoProfile -File scripts/package.ps1      # -BuildIsland recompila a ilha C
 - **Fork da ilha:** toda mudança no `dynamic-island-for-windows.wh.cpp` vai dentro de `#ifdef ZEFIRO_ISLAND` e é marcada com `// ZEFIRO:`, para acompanhar o upstream com diffs mínimos. A camada `wh_shim.*` substitui a API do Windhawk.
 - **Ilha embutida (padrão, ADR-0009):** a barra do primário desenha a ilha no próprio compositor; o "chip" `island` abre o painel com abas. Cada fonte de dados (SMTC, volume, privacidade, notificações, Bluetooth, clima, letras, hardware) é um serviço em `platform-windows` com thread própria que avisa a UI por `post_user`; nada consulta por quadro. O hardware só amostra com a aba aberta, e a captura de áudio só roda com mídia tocando e a barra visível.
 - **Chips da ilha (ADR-0012):** `player`, `weather` e `hardware` levam partes da ilha para qualquer seção e monitor. O player é uma `IslandView` própria no retângulo do chip, sem os avisos; a largura dele segue a pílula e refaz o layout. Os painéis reaproveitam o painel com abas da ilha (`PanelKind::tabbed`, `tabs::for_set`). Mídia e clima rodam com a ilha embutida ou com o chip na barra.
+- **HUD e diagnóstico (ADR-0013):** `Ctrl+Alt+Shift+D` abre o HUD (quadros do DWM, memória, último dado de cada integração e os últimos avisos do log, pela `RecentLayer`); ele só atualiza aberto. "Exportar diagnóstico" no menu do Z grava um zip limpo (`zefiro_core::diagnostics::sanitize`) em Downloads.
+- **Ilha externa e temas novos:** a ilha C++ tem só 8 paletas; temas embutidos depois delas vão como personalizados (`ISLAND_PRESETS`).
 - **Barra ↔ ilha externa (`engine = "externa"`):**
   - A barra grava `island.ini` (seção `[Zefiro]`, cores do tema, e no formato faixa sem contorno, sem sombra e sem o tom da capa) e o `ColorThemeV2` no `island-state.ini`.
   - A ilha publica `ZefiroAccent` no `island-state.ini`. A barra usa esse valor quando o tema tem `accent = "auto"`.
