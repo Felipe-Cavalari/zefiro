@@ -119,6 +119,18 @@ impl IslandState {
         }
         if self.hovering || self.peek_until.is_some_and(|t| now < t) { Collapsed::Peek } else { Collapsed::Media }
     }
+
+    /// Pílula do chip do player: só mídia (sem avisos, timer nem o hover da ilha). `hover` é o mouse
+    /// em cima daquele chip; a espiada da troca de faixa vale para todos.
+    pub fn player(&self, has_media: bool, hover: bool, now: f64) -> Collapsed {
+        if !has_media {
+            Collapsed::Idle
+        } else if hover || self.peek_until.is_some_and(|t| now < t) {
+            Collapsed::Peek
+        } else {
+            Collapsed::Media
+        }
+    }
 }
 
 #[cfg(test)]
@@ -177,6 +189,25 @@ mod tests {
         assert_eq!(s.collapsed(false, 1.0), Collapsed::Activity(v.clone()));
         assert_eq!(s.collapsed(false, 2.0), Collapsed::Activity(v), "volume ainda vale até 2,3 s");
         assert_eq!(s.collapsed(false, 2.4), Collapsed::Idle, "o brilho acabou em 1,8 s");
+    }
+
+    #[test]
+    fn player_chip_shows_only_media_and_peeks_by_its_own_hover() {
+        let mut s = IslandState::default();
+        assert_eq!(s.player(false, false, 0.0), Collapsed::Idle);
+        s.track(key("a"), 0.0);
+        assert_eq!(s.player(true, false, 1.0), Collapsed::Media);
+        // Avisos, timer e o hover da ilha ficam só na ilha.
+        s.activity(Activity::Volume { level: 0.5, muted: false }, 1.0);
+        s.timer = Some(crate::timer::FocusTimer::start(crate::timer::TimerKind::Focus, 25, 1.0));
+        s.hover(true);
+        assert_eq!(s.player(true, false, 1.5), Collapsed::Media);
+        assert_eq!(s.player(false, false, 1.5), Collapsed::Idle);
+        assert_eq!(s.player(true, true, 1.5), Collapsed::Peek, "o mouse em cima do chip espia");
+        // A troca de faixa espia em todos os players.
+        s.track(key("b"), 10.0);
+        assert_eq!(s.player(true, false, 12.0), Collapsed::Peek);
+        assert_eq!(s.player(true, false, 13.0), Collapsed::Media);
     }
 
     #[test]

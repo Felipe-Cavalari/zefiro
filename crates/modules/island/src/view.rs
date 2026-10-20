@@ -248,6 +248,18 @@ pub fn idle_pill(clock: &str, weather: Option<(&str, i32)>, pill_h: f32, font_sc
     PillContent { size: Size { w, h: pill_h }, list, visualizer: None, dots: Vec::new() }
 }
 
+/// Largura de projeto do player parado (chip `player` sem mídia).
+const PLAYER_IDLE_DESIGN_W: f32 = 64.0;
+
+/// Chip do player sem mídia: pílula pequena com a nota apagada (a ilha mostraria o relógio).
+pub fn player_idle_pill(pill_h: f32, tokens: &Tokens) -> PillContent {
+    let k = pill_h / MEDIA_DESIGN.h;
+    let w = round2(PLAYER_IDLE_DESIGN_W * k);
+    let mut list = DisplayList::new(Size { w, h: pill_h });
+    list.push(DrawOp::Text { rect: Rect::new(0.0, 0.0, w, pill_h), text: "\u{E8D6}".into(), style: icon(18.0 * k), color: tokens.text_tertiary, align: Align::Center });
+    PillContent { size: Size { w, h: pill_h }, list, visualizer: None, dots: Vec::new() }
+}
+
 /// Mídia recolhida: capa redonda à esquerda e visualizador à direita. Espiando: capa, "título —
 /// artista" e o visualizador, numa pílula mais larga.
 pub fn media_pill(s: &MediaSession, peek: bool, pill_h: f32, font_scale: f32, tokens: &Tokens) -> PillContent {
@@ -531,6 +543,18 @@ mod tests {
         assert!(with_weather.size.w > short.size.w);
         let texts: Vec<_> = with_weather.list.ops.iter().filter_map(|o| if let DrawOp::Text { text, .. } = o { Some(text.as_str()) } else { None }).collect();
         assert_eq!(texts, ["12:00", "☀️ 21°"]);
+    }
+
+    #[test]
+    fn player_idle_is_a_small_dim_note_narrower_than_media() {
+        let t = tokens();
+        let idle = player_idle_pill(28.0, &t);
+        assert_eq!(idle.size.h, 28.0);
+        assert_eq!(idle.size.w % 2.0, 0.0);
+        let media = media_pill(&session("a", Playback::Playing), false, 28.0, 1.0, &t);
+        assert!(idle.size.w < media.size.w, "{} < {}", idle.size.w, media.size.w);
+        assert!(idle.visualizer.is_none() && idle.dots.is_empty());
+        assert!(matches!(&idle.list.ops[..], [DrawOp::Text { text, color, .. }] if text == "\u{E8D6}" && *color == t.text_tertiary));
     }
 
     #[test]

@@ -30,6 +30,21 @@ pub fn available(has_media: bool, has_weather: bool, has_lyrics: bool) -> Vec<Ta
     tabs
 }
 
+/// Quem abriu o painel com abas: a ilha (carrossel inteiro) ou um dos chips (uma aba só).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabSet { Island, Media, Weather, Hardware }
+
+/// Abas do painel aberto por `set`. Vazio = não há o que mostrar (o painel não abre, ou fecha).
+pub fn for_set(set: TabSet, has_media: bool, has_weather: bool, has_lyrics: bool) -> Vec<Tab> {
+    match set {
+        TabSet::Island => available(has_media, has_weather, has_lyrics),
+        TabSet::Media if has_media => vec![Tab::Media],
+        TabSet::Weather if has_weather => vec![Tab::Weather],
+        TabSet::Hardware => vec![Tab::Hardware],
+        TabSet::Media | TabSet::Weather => Vec::new(),
+    }
+}
+
 /// Próxima aba pela roda (`delta` > 0 = para cima = anterior), sem dar a volta.
 pub fn step(tabs: &[Tab], current: Tab, delta: i32) -> Tab {
     let i = tabs.iter().position(|t| *t == current).unwrap_or(0) as i32;
@@ -212,6 +227,16 @@ mod tests {
 
     fn texts(l: &DisplayList) -> Vec<String> {
         l.ops.iter().filter_map(|o| if let DrawOp::Text { text, .. } = o { Some(text.clone()) } else { None }).collect()
+    }
+
+    #[test]
+    fn tab_sets_of_the_chips() {
+        assert_eq!(for_set(TabSet::Island, true, true, true), available(true, true, true));
+        assert_eq!(for_set(TabSet::Media, true, true, true), vec![Tab::Media]);
+        assert!(for_set(TabSet::Media, false, true, false).is_empty(), "sem mídia, o player não tem painel");
+        assert_eq!(for_set(TabSet::Weather, false, true, false), vec![Tab::Weather]);
+        assert!(for_set(TabSet::Weather, true, false, true).is_empty());
+        assert_eq!(for_set(TabSet::Hardware, false, false, false), vec![Tab::Hardware]);
     }
 
     #[test]

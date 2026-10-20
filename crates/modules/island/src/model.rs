@@ -104,6 +104,11 @@ impl IslandModel {
     pub fn collapsed(&self, now: f64) -> Collapsed {
         self.state.collapsed(self.media().is_some(), now)
     }
+
+    /// Pílula do chip do player (`hover` = o mouse em cima daquele chip).
+    pub fn player(&self, hover: bool, now: f64) -> Collapsed {
+        self.state.player(self.media().is_some(), hover, now)
+    }
 }
 
 #[cfg(test)]
