@@ -5,7 +5,7 @@ use windows::UI::Composition::{CompositionDrawingSurface, ContainerVisual, Sprit
 use windows::Win32::Foundation::HWND;
 use windows::core::{Interface, Result};
 use windows_numerics::{Vector2, Vector3};
-use zefiro_bar::chips::{ChipContent, clock_chip, zefiro_chip};
+use zefiro_bar::chips::{ChipContent, clock_chip, weather_chip, zefiro_chip};
 use zefiro_bar::devices::{ICON_BRIGHTNESS, Level, level_chip, volume_level};
 use zefiro_core::config::BarHeight;
 use zefiro_integration_clock::format::ClockText;
@@ -25,10 +25,12 @@ use zefiro_platform::text::{Align, Family, FontWeight, TextStyle};
 use crate::app::AppCtx;
 use crate::island_view::IslandView;
 use crate::theme_state::SurfaceKind;
-use zefiro_island::view::{Collapsed, PillContent, RESERVE_DESIGN_W, activity_pill, idle_pill, media_pill, timer_pill, with_privacy};
+use zefiro_island::view::{Collapsed, PillContent, RESERVE_DESIGN_W, activity_pill, idle_pill, media_pill, player_idle_pill, timer_pill, with_privacy};
 
 /// Id do "chip" da ilha embutida (clique, painel e foco usam o mesmo caminho dos chips).
 pub const ISLAND_CHIP: &str = "island";
+/// Chip do player: a pílula de mídia da ilha num chip comum, em qualquer seção e monitor.
+pub const PLAYER_CHIP: &str = "player";
 
 struct ChipView { id: String, hover: MorphShape, content: SpriteVisual, surface: CompositionDrawingSurface, rect: Rect, pos: windows::UI::Composition::CompositionPropertySet }
 
@@ -50,6 +52,10 @@ pub struct BarView {
     drag_ghost: Option<SpriteVisual>,
     drag_marker: Option<SpriteVisual>,
     island: Option<IslandView>,
+    /// Pílula do chip do player, quando ele está nesta barra.
+    player: Option<IslandView>,
+    /// Mouse em cima do player desta barra (espia só ele).
+    player_hover: bool,
     hidden: bool,
     /// Áreas clicáveis sem a ilha (a ilha muda de tamanho sem refazer o layout inteiro).
     interactive_base: Vec<Rect>,
@@ -72,9 +78,33 @@ fn island_content(ctx: &AppCtx, pill_h: f32) -> PillContent {
     }
 }
 
-/// Ícone dos chips de VS Code e Energia (só ícone).
+/// Pílula do player agora: só mídia, sem avisos (`hover` = o mouse em cima deste chip).
+fn player_content(ctx: &AppCtx, pill_h: f32, hover: bool) -> PillContent {
+    let font_scale = ctx.theme.theme.font.scale;
+    let tokens = &ctx.theme.tokens;
+    match (ctx.island.player(hover, ctx.now()), ctx.island.media()) {
+        (Collapsed::Peek, Some(s)) => media_pill(s, true, pill_h, font_scale, tokens),
+        (Collapsed::Media, Some(s)) => media_pill(s, false, pill_h, font_scale, tokens),
+        _ => player_idle_pill(pill_h, tokens),
+    }
+}
+
+/// Conteúdo do chip do player: a pílula fica numa `IslandView` própria; a superfície do chip só
+/// guarda a nota, que aparece no fantasma do arraste do modo de edição.
+fn player_chip(pill: &PillContent, pad: f32, chip_h: f32, font_px: f32, tokens: &zefiro_resources::tokens::Tokens) -> ChipContent {
+    let w = (pill.size.w - 2.0 * pad).max(1.0);
+    let style = TextStyle { size: font_px * 1.05, weight: FontWeight::Regular, family: Family::Icons };
+    let ops = vec![DrawOp::Text { rect: Rect::new(0.0, 0.0, w, chip_h), text: "\u{E8D6}".into(), style, color: tokens.text_secondary, align: Align::Center }];
+    ChipContent { content_w: w, list: DisplayList { size: Size { w, h: chip_h }, ops } }
+}
+
+/// Ícone dos chips de VS Code, Monitor do PC e Energia (só ícone).
 fn icon_glyph(id: &str) -> &'static str {
-    if id == "vscode" { "\u{E8B7}" } else { "\u{E7E8}" }
+    match id {
+        "vscode" => "\u{E8B7}",
+        "hardware" => "\u{E950}",
+        _ => "\u{E7E8}",
+    }
 }
 
 /// `device`: monitor desta barra (o chip de brilho mostra o brilho dele).
@@ -106,7 +136,8 @@ fn chip_content(ctx: &AppCtx, id: &str, device: &str, height: BarHeight, chip_h:
         "claude" => zefiro_bar::usage::usage_chip(crate::usage_loop::CLAUDE_GLYPH, ctx.usage.claude_chip(), chip_h, font_px, scale, t, &ctx.text),
         "notifications" => zefiro_bar::chips::bell_chip(ctx.system.notifications, chip_h, font_px, scale, t, &ctx.text),
         "dnd" => zefiro_bar::chips::dnd_chip(ctx.system.dnd, chip_h, font_px, t),
-        "vscode" | "power" => level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text),
+        "weather" => weather_chip(ctx.island.weather.as_ref().map(|w| (zefiro_island::weather::icon(w.code), w.temp_c, w.city.as_str())), chip_h, font_px, scale, t, &ctx.text),
+        "vscode" | "hardware" | "power" => level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text),
         _ => clock_chip("⋯", chip_h, font_px, t, &ctx.text),
     }
 }
@@ -123,7 +154,7 @@ impl BarView {
         let divider = ctx.comp.compositor.CreateSpriteVisual()?;
         root.Children()?.InsertAtTop(&divider)?;
         let groups = Vec::new();
-        let mut view = BarView { hwnd, monitor: monitor.clone(), scale, _target: target, root, strip, divider, groups, chips: Vec::new(), layout: None, appbar: false, hover: None, active: None, guides: None, drag_ghost: None, drag_marker: None, island: None, hidden: false, interactive_base: Vec::new() };
+        let mut view = BarView { hwnd, monitor: monitor.clone(), scale, _target: target, root, strip, divider, groups, chips: Vec::new(), layout: None, appbar: false, hover: None, active: None, guides: None, drag_ghost: None, drag_marker: None, island: None, player: None, player_hover: false, hidden: false, interactive_base: Vec::new() };
         view.apply(ctx, false)?;
         window::set_bounds(hwnd, bounds, true);
         Ok(view)
@@ -153,14 +184,22 @@ impl BarView {
         let m = metrics(cfg.height, cfg.format);
         let chip_h = (m.chip_h * self.scale).round();
         let font_px = m.font * self.scale * ctx.theme.theme.font.scale;
+        let pad = (m.chip_pad_x * self.scale).round();
         let mut contents: Vec<(String, ChipContent)> = sections
             .ids()
             .filter(|id| zefiro_bar::catalog::descriptor(id).is_some())
-            .map(|id| (id.to_string(), chip_content(ctx, id, &self.monitor.device, cfg.height, chip_h, font_px, self.scale)))
+            .map(|id| {
+                let content = if id == PLAYER_CHIP {
+                    player_chip(&player_content(ctx, chip_h, self.player_hover), pad, chip_h, font_px, &ctx.theme.tokens)
+                } else {
+                    chip_content(ctx, id, &self.monitor.device, cfg.height, chip_h, font_px, self.scale)
+                };
+                (id.to_string(), content)
+            })
             .collect();
         let spec = |ids: &[String]| {
             ids.iter().filter(|id| zefiro_bar::catalog::descriptor(id).is_some())
-                .map(|id| ChipSpec { id: id.clone(), content_w: contents.iter().find(|(c, _)| c == id).map_or(0.0, |(_, c)| c.content_w) })
+                .map(|id| ChipSpec { id: id.clone(), content_w: contents.iter().find(|(c, _)| c == id).map_or(0.0, |(_, c)| c.content_w), wide: id == PLAYER_CHIP })
                 .collect::<Vec<_>>()
         };
         let specs = [spec(&sections.start), spec(&sections.center), spec(&sections.end)];
@@ -238,7 +277,6 @@ impl BarView {
         }
 
         // Chips: cria os que faltam, redesenha o conteúdo e move.
-        let pad = (10.0 * self.scale).round();
         for (id, content) in &contents {
             let Some(b) = layout.chips.iter().find(|c| &c.id == id) else { continue };
             let is_new = !self.chips.iter().any(|c| &c.id == id);
@@ -247,6 +285,10 @@ impl BarView {
                 hover.set_opacity(0.0)?;
                 let surface = ctx.comp.surface(content.list.size.w, content.list.size.h)?;
                 let sprite = ctx.comp.sprite_for(&surface, content.list.size.w, content.list.size.h)?;
+                if id == PLAYER_CHIP {
+                    // Quem aparece é a pílula; a nota da superfície é só para o arraste.
+                    sprite.SetOpacity(0.0)?;
+                }
                 self.root.Children()?.InsertAtTop(&sprite)?;
                 let pos = ctx.comp.spring_offset(&sprite.cast::<Visual>()?, b.rect.x + pad, b.rect.y)?;
                 self.chips.push(ChipView { id: id.clone(), hover, content: sprite, surface, rect: b.rect, pos });
@@ -286,7 +328,18 @@ impl BarView {
             }
             _ => {}
         }
+        let has_player = self.layout.as_ref().is_some_and(|l| l.chips.iter().any(|c| c.id == PLAYER_CHIP));
+        match (has_player, self.player.is_some()) {
+            (true, false) => self.player = Some(IslandView::new(ctx, &self.root, &ctx.theme.morph_style(self.scale, SurfaceKind::Strip))?),
+            (false, true) => {
+                if let Some(view) = self.player.take() {
+                    self.root.Children()?.Remove(view.root())?;
+                }
+            }
+            _ => {}
+        }
         self.refresh_island(ctx, animate)?;
+        self.refresh_player(ctx, animate)?;
         self.refresh_chip_fills(ctx)?;
         if reserve {
             if animate {
@@ -344,16 +397,56 @@ impl BarView {
         Ok(())
     }
 
-    /// Barras do visualizador (`None` = paradas).
-    pub fn set_visualizer(&self, wave: Option<&zefiro_island::waveform::Waveform>) -> Result<()> {
-        match &self.island {
-            Some(view) => view.set_levels(&wave.map(|w| w.bars(view.bar_count())).unwrap_or_default()),
-            None => Ok(()),
+    /// Redesenha a pílula do player no retângulo do chip. Na faixa ou nas pílulas, ela se funde à
+    /// barra, como a ilha na faixa.
+    pub fn refresh_player(&mut self, ctx: &AppCtx, animate: bool) -> Result<()> {
+        let (Some(layout), Some(view)) = (&self.layout, &mut self.player) else { return Ok(()) };
+        let Some(chip) = layout.chips.iter().find(|c| c.id == PLAYER_CHIP) else { return Ok(()) };
+        let content = player_content(ctx, chip.rect.h, self.player_hover);
+        let rect = Rect::new(chip.rect.x, chip.rect.y, content.size.w, chip.rect.h);
+        let style = ctx.theme.morph_style(self.scale, SurfaceKind::Strip);
+        let radius = pill_radius(rect.h, ctx.theme.theme.shape.radius_max * self.scale, ctx.theme.theme.shape.style, self.scale);
+        view.update(ctx, content, rect, radius, &style, animate && ctx.theme.animations)
+    }
+
+    /// A pílula do player mudou de largura (parado, mídia, espiando): o chip precisa de outro layout.
+    fn player_resized(&self, ctx: &AppCtx) -> bool {
+        let Some(chip) = self.layout.as_ref().and_then(|l| l.chips.iter().find(|c| c.id == PLAYER_CHIP)) else { return false };
+        player_content(ctx, chip.rect.h, self.player_hover).size.w != chip.rect.w
+    }
+
+    /// Mídia, espiada ou aviso mudaram: redesenha a ilha e o player. Se o player mudou de largura,
+    /// refaz o layout (os vizinhos deslizam com a mola).
+    pub fn refresh_media(&mut self, ctx: &AppCtx, animate: bool) -> Result<()> {
+        if self.player_resized(ctx) {
+            return self.apply(ctx, animate);
         }
+        self.refresh_island(ctx, animate)?;
+        self.refresh_player(ctx, animate)
+    }
+
+    /// Mouse entrou ou saiu do player desta barra. `true` se mudou.
+    pub fn set_player_hover(&mut self, on: bool) -> bool {
+        let changed = self.player_hover != on;
+        self.player_hover = on;
+        changed
+    }
+
+    /// Barras do visualizador (`None` = paradas), na ilha e no player.
+    pub fn set_visualizer(&self, wave: Option<&zefiro_island::waveform::Waveform>) -> Result<()> {
+        for view in [&self.island, &self.player].into_iter().flatten() {
+            view.set_levels(&wave.map(|w| w.bars(view.bar_count())).unwrap_or_default())?;
+        }
+        Ok(())
     }
 
     pub fn has_island(&self) -> bool {
         self.island.is_some()
+    }
+
+    /// Esta barra mostra a mídia (ilha ou player): a captura do som serve a ela.
+    pub fn shows_media(&self) -> bool {
+        self.island.is_some() || self.player.is_some()
     }
 
     pub fn is_hidden(&self) -> bool {
@@ -465,8 +558,10 @@ impl BarView {
     fn refresh_chip_fills(&self, ctx: &AppCtx) -> Result<()> {
         let spring = ctx.theme.spring(SpringParams::SETTLE);
         for c in &self.chips {
-            let active = self.active.as_deref() == Some(&c.id);
-            let hovered = self.hover.as_deref() == Some(&c.id);
+            // O player é uma pílula, como a ilha: sem fundo de hover nem de ativo.
+            let player = c.id == PLAYER_CHIP;
+            let active = !player && self.active.as_deref() == Some(&c.id);
+            let hovered = !player && self.hover.as_deref() == Some(&c.id);
             let mut style = ctx.theme.morph_style(self.scale, SurfaceKind::Hover);
             if active {
                 style.fill = ctx.theme.active_fill();
@@ -481,6 +576,12 @@ impl BarView {
     pub fn fade_chip(&self, ctx: &AppCtx, chip: &str, visible: bool) -> Result<()> {
         if chip == ISLAND_CHIP {
             if let Some(view) = &self.island {
+                view.fade_content(ctx, visible)?;
+            }
+            return Ok(());
+        }
+        if chip == PLAYER_CHIP {
+            if let Some(view) = &self.player {
                 view.fade_content(ctx, visible)?;
             }
             return Ok(());

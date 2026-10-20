@@ -165,7 +165,7 @@ impl Loop {
                 }
                 list
             }
-            PanelKind::Island => self.island_panel_list(scale),
+            PanelKind::Island | PanelKind::Player | PanelKind::Weather | PanelKind::Hardware => self.island_panel_list(scale),
             PanelKind::Audio | PanelKind::Mic | PanelKind::Brightness => self.devices_panel_list(kind, scale),
             PanelKind::Claude | PanelKind::Codex => self.usage_panel_list(kind, scale),
             PanelKind::VsCode => self.vscode_panel_list(scale),
@@ -192,6 +192,12 @@ impl Loop {
                             b.fade_chip(&self.ctx, id, true)?;
                         }
                     }
+                    // O mouse saiu do player para o painel sem a barra saber: ele para de espiar.
+                    for b in &mut self.bars {
+                        if b.set_player_hover(false) {
+                            b.refresh_media(&self.ctx, true)?;
+                        }
+                    }
                     self.menu = None;
                     self.island_panel_closed();
                     self.devices_panel_closed();
@@ -208,7 +214,7 @@ impl Loop {
                     self.usage_prepare(p.kind);
                     self.vscode_prepare(p.kind);
                     self.power_prepare(p.kind);
-                    if p.kind == PanelKind::Island {
+                    if p.kind.tabbed() {
                         self.island_panel_opening();
                     }
                     if p.kind == PanelKind::Calendar {
@@ -220,7 +226,7 @@ impl Loop {
                     let chip = self.panel_anchor(p.monitor, &p.chip);
                     let band_bottom = self.bars[p.monitor].band_bottom();
                     self.panels[p.monitor].open(&self.ctx, chip, band_bottom, &list)?;
-                    if p.kind == PanelKind::Island {
+                    if p.kind.tabbed() {
                         self.island_sync_tabs(p.monitor, false)?;
                     } else {
                         self.panels[p.monitor].clear_tabs()?;
@@ -270,13 +276,19 @@ impl Loop {
         let chip = self.panel_anchor(open.monitor, &open.chip);
         let band_bottom = self.bars[open.monitor].band_bottom();
         self.panels[open.monitor].resize(&self.ctx, chip, band_bottom, &list)?;
-        if open.kind == PanelKind::Island {
+        if open.kind.tabbed() {
             self.island_sync_tabs(open.monitor, false)?;
         }
         Ok(())
     }
 
-    fn panel_anchor(&self, monitor: usize, id: &str) -> Rect {
+    /// Clique num chip: abre (ou fecha) o painel dele. Um chip sem o que mostrar (player parado,
+    /// clima sem leitura) conta como clique fora.
+    fn chip_click(&self, monitor: usize, chip: String) -> PanelInput {
+        if self.chip_has_panel(&chip) { PanelInput::ChipClick { monitor, chip } } else { PanelInput::ClickOutside }
+    }
+
+    pub(crate) fn panel_anchor(&self, monitor: usize, id: &str) -> Rect {
         self.bars[monitor].chip_rect(id).unwrap_or_else(|| {
             let bar = &self.bars[monitor];
             let rect = bar.monitor().rect;
@@ -414,7 +426,7 @@ impl Loop {
                         return self.chip_action(i, &chip, MouseButton::Left).map(|_| true);
                     }
                     let input = match self.bars[i].chip_at(x, y) {
-                        Some(chip) => PanelInput::ChipClick { monitor: i, chip },
+                        Some(chip) => self.chip_click(i, chip),
                         // Faixa vazia: é "clicar fora" do painel aberto (a barra não rouba o foco,
                         // então nenhum FocusLost chegaria).
                         None => PanelInput::ClickOutside,
@@ -425,7 +437,7 @@ impl Loop {
                     let (ox, oy) = self.panels[i].content_origin();
                     let scale = self.bars[i].scale();
                     let hit = self.menu.as_ref().and_then(|m| m.hit(Point { x: x - ox, y: y - oy }, scale));
-                    if self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) {
+                    if self.controller.open().is_some_and(|o| o.kind.tabbed()) {
                         self.island_panel_click(Point { x: x - ox, y: y - oy })?;
                     } else if self.power_click(Point { x: x - ox, y: y - oy })? {
                         // Botão de energia (armar, confirmar ou agir).
@@ -438,7 +450,8 @@ impl Loop {
                     } else if self.controller.open().is_some_and(|o| o.kind == PanelKind::Overflow) {
                         let row = ((y - oy) / scale - 32.0) / 32.0;
                         if row >= 0.0 && let Some(id) = self.overflow_ids.get(self.overflow_scroll + row as usize).cloned() {
-                            let fx = self.controller.handle(PanelInput::ChipClick { monitor: i, chip: id });
+                            let input = self.chip_click(i, id);
+                            let fx = self.controller.handle(input);
                             self.run_effects(fx)?;
                         }
                     }
@@ -486,10 +499,13 @@ impl Loop {
                 if let Some(i) = self.bar_index(hwnd) {
                     let chip = self.bars[i].chip_at(x, y);
                     let on_island = chip.as_deref() == Some(crate::bar_view::ISLAND_CHIP);
-                    self.bars[i].set_hover(&self.ctx, chip.as_deref().filter(|_| !on_island))?;
+                    let on_player = chip.as_deref() == Some(crate::bar_view::PLAYER_CHIP);
+                    // Ilha e player espiam em vez de ganhar o fundo de hover.
+                    self.bars[i].set_hover(&self.ctx, chip.as_deref().filter(|_| !on_island && !on_player))?;
                     if self.bars[i].has_island() {
                         self.island_hover(on_island)?;
                     }
+                    self.player_hover(i, on_player)?;
                 }
             }
             WinEvent::MouseLeave { hwnd } => {
@@ -498,6 +514,7 @@ impl Loop {
                     if self.bars[i].has_island() {
                         self.island_hover(false)?;
                     }
+                    self.player_hover(i, false)?;
                 }
             }
             WinEvent::FocusLost { hwnd } => {
@@ -522,7 +539,7 @@ impl Loop {
                 }
                 // Ilha: as abas ficam lado a lado (os pontos no rodapé), então ← / → trocam de aba.
                 // ↑ / ↓ fazem o mesmo, como na ilha C++, onde as telas eram empilhadas.
-                if self.effective_open_kind() == Some(PanelKind::Island) && matches!(vk, VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN) {
+                if self.effective_open_kind().is_some_and(PanelKind::tabbed) && matches!(vk, VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN) {
                     let delta = if vk == VK_LEFT || vk == VK_UP { 120 } else { -120 };
                     return self.island_wheel(delta).map(|_| true);
                 }
@@ -544,7 +561,8 @@ impl Loop {
                     Some(PanelKind::Overflow) => {
                         let monitor = self.controller.open().map_or(0, |p| p.monitor);
                         if vk == VK_RETURN && let Some(id) = self.overflow_ids.get(self.overflow_focus).cloned() {
-                            let fx = self.controller.handle(PanelInput::ChipClick { monitor, chip: id });
+                            let input = self.chip_click(monitor, id);
+                            let fx = self.controller.handle(input);
                             self.run_effects(fx)?;
                         } else if vk == VK_UP || vk == VK_DOWN {
                             self.overflow_focus = if vk == VK_UP { self.overflow_focus.saturating_sub(1) } else { (self.overflow_focus + 1).min(self.overflow_ids.len().saturating_sub(1)) };
@@ -561,7 +579,7 @@ impl Loop {
                 {
                     return Ok(true);
                 }
-                if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) {
+                if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind.tabbed()) {
                     return self.island_wheel(delta).map(|_| true);
                 }
                 if self.panel_index(hwnd).is_some() && self.vscode_wheel(delta)? {
@@ -655,7 +673,6 @@ impl Loop {
                         self.apply_bars(true)?;
                         crate::island::sync(&self.ctx);
                         self.refresh_services();
-                        self.island_services()?;
                         self.schedule_clock();
                     }
                     Ok(_) => {}
@@ -696,7 +713,6 @@ pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
     crate::island::start(&l.ctx);
     crate::tray_loop::show_icon();
     l.refresh_services();
-    l.island_services()?;
     l.devices_start();
     'pump: while window::pump() {
         for e in window::take_events() {

@@ -47,6 +47,9 @@ pub fn for_set(set: TabSet, has_media: bool, has_weather: bool, has_lyrics: bool
 
 /// Próxima aba pela roda (`delta` > 0 = para cima = anterior), sem dar a volta.
 pub fn step(tabs: &[Tab], current: Tab, delta: i32) -> Tab {
+    if tabs.is_empty() {
+        return current;
+    }
     let i = tabs.iter().position(|t| *t == current).unwrap_or(0) as i32;
     let next = (i + if delta > 0 { -1 } else { 1 }).clamp(0, tabs.len() as i32 - 1);
     tabs[next as usize]
@@ -227,6 +230,11 @@ mod tests {
 
     fn texts(l: &DisplayList) -> Vec<String> {
         l.ops.iter().filter_map(|o| if let DrawOp::Text { text, .. } = o { Some(text.clone()) } else { None }).collect()
+    }
+
+    #[test]
+    fn step_without_tabs_keeps_the_current_one() {
+        assert_eq!(step(&[], Tab::Media, -120), Tab::Media);
     }
 
     #[test]

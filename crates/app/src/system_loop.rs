@@ -64,6 +64,10 @@ impl Loop {
     pub fn refresh_services(&mut self) {
         self.system_services();
         self.usage_services();
+        // Mídia e clima seguem a ilha embutida e os chips do player e do clima.
+        if let Err(e) = self.island_services() {
+            tracing::warn!("não consegui atualizar os serviços da ilha: {e}");
+        }
     }
 
     pub fn notification_count(&self) -> usize {

@@ -24,7 +24,7 @@ use zefiro_platform_windows::bluetooth::BluetoothWatcher;
 use zefiro_platform_windows::weather::WeatherService;
 use zefiro_platform_windows::hardware::HardwareMonitor;
 use zefiro_platform_windows::lyrics::{LyricsRequest, LyricsService};
-use zefiro_island::tabs::{self, Tab};
+use zefiro_island::tabs::{self, Tab, TabSet};
 use zefiro_island::view::Privacy;
 use zefiro_island::menu::{self, AppOutput, MenuCommand, MenuInput};
 use zefiro_island::state::{Activity, Notice};
@@ -32,7 +32,7 @@ use zefiro_island::timer::{FocusTimer, TimerKind};
 use zefiro_platform_windows::window;
 use zefiro_ui::paint::DisplayList;
 
-use crate::bar_view::ISLAND_CHIP;
+use crate::bar_view::PLAYER_CHIP;
 use crate::event_loop::{Loop, TIMER_FOCUS, TIMER_ISLAND_ANIM, TIMER_LYRICS, TIMER_ISLAND_PEEK, TIMER_ISLAND_TICK, USER_BLUETOOTH, USER_DND, USER_HARDWARE, USER_LYRICS, USER_MEDIA, USER_PRIVACY, USER_VISUALIZER, USER_WEATHER};
 
 /// O visualizador atualiza no máximo a 60 Hz.
@@ -62,19 +62,23 @@ pub struct IslandRuntime {
 }
 
 impl Loop {
-    fn island_bar(&self) -> Option<usize> {
-        self.bars.iter().position(|b| b.has_island())
+    /// A mídia serve à ilha embutida ou a algum chip do player.
+    fn media_wanted(&self) -> bool {
+        self.ctx.config.island.embedded() || self.ctx.config.bar.uses(PLAYER_CHIP)
     }
 
-    /// Liga ou desliga os serviços conforme `[island] engine` (no início e quando a configuração muda).
+    /// Liga ou desliga os serviços conforme `[island] engine` e os chips da barra (no início e
+    /// quando a configuração muda). Mídia e clima também servem aos chips do player e do clima.
     pub fn island_services(&mut self) -> Result<()> {
         let embedded = self.ctx.config.island.embedded();
-        if embedded && self.island.media.is_none() {
+        let media = self.media_wanted();
+        let weather = embedded || self.ctx.config.bar.uses("weather");
+        if media && self.island.media.is_none() {
             match MediaService::start(Arc::new(|| window::post_user(USER_MEDIA))) {
                 Ok(service) => self.island.media = Some(service),
                 Err(e) => tracing::error!("não consegui iniciar a thread de mídia: {e}"),
             }
-        } else if !embedded && self.island.media.is_some() {
+        } else if !media && self.island.media.is_some() {
             self.island.media = None;
             self.island.capture = None;
             self.ctx.island.update(Vec::new(), self.ctx.now());
@@ -88,12 +92,12 @@ impl Loop {
         } else if !embedded {
             self.island.privacy = None;
         }
-        if embedded && self.island.weather.is_none() {
+        if weather && self.island.weather.is_none() {
             match WeatherService::start(String::new(), Arc::new(|| window::post_user(USER_WEATHER))) {
                 Ok(w) => self.island.weather = Some(w),
                 Err(e) => tracing::warn!("clima indisponível: {e}"),
             }
-        } else if !embedded {
+        } else if !weather {
             self.island.weather = None;
             self.ctx.island.weather = None;
         }
@@ -261,8 +265,13 @@ impl Loop {
         }
         self.island_request_lyrics();
         self.island_refresh()?;
-        if self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) {
-            self.redraw_island_panel()?;
+        if self.controller.open().is_some_and(|o| o.kind.tabbed()) {
+            if self.island_tabs().is_empty() {
+                // A mídia sumiu com o painel do player aberto: não há o que mostrar.
+                self.close_open_panel()?;
+            } else {
+                self.redraw_island_panel()?;
+            }
         }
         self.island_capture();
         Ok(())
@@ -304,10 +313,10 @@ impl Loop {
         }
     }
 
-    /// Redesenha a pílula e agenda o fim da espiada.
+    /// Redesenha a pílula da ilha e as dos players e agenda o fim da espiada.
     pub fn island_refresh(&mut self) -> Result<()> {
-        if let Some(i) = self.island_bar() {
-            self.bars[i].refresh_island(&self.ctx, true)?;
+        for b in &mut self.bars {
+            b.refresh_media(&self.ctx, true)?;
         }
         match self.ctx.island.state.next_change(self.ctx.now()) {
             Some(secs) => window::set_timer(TIMER_ISLAND_PEEK, (secs * 1000.0).ceil() as u32 + 20),
@@ -328,10 +337,22 @@ impl Loop {
         Ok(())
     }
 
-    /// Captura do som só com mídia tocando e a ilha visível.
+    /// Mouse em cima do player da barra `bar`: espia só ele. Com o painel dele aberto, não espia
+    /// (o painel nasce do chip e não pode andar sob o cursor).
+    pub fn player_hover(&mut self, bar: usize, on: bool) -> Result<()> {
+        if self.controller.open().is_some_and(|o| o.monitor == bar && o.chip == PLAYER_CHIP) {
+            return Ok(());
+        }
+        if self.bars[bar].set_player_hover(on) {
+            self.bars[bar].refresh_media(&self.ctx, true)?;
+        }
+        Ok(())
+    }
+
+    /// Captura do som só com mídia tocando e a ilha ou um player visível.
     fn island_capture(&mut self) {
-        let visible = self.island_bar().is_some_and(|i| !self.bars[i].is_hidden());
-        let needed = self.ctx.config.island.embedded() && self.ctx.island.playing() && visible;
+        let visible = self.bars.iter().any(|b| b.shows_media() && !b.is_hidden());
+        let needed = self.media_wanted() && self.ctx.island.playing() && visible;
         if needed && self.island.capture.is_none() {
             let waveform = self.island.waveform.clone();
             let mut last = Instant::now();
@@ -353,13 +374,13 @@ impl Loop {
             if let Ok(mut w) = self.island.waveform.lock() {
                 *w = Waveform::new();
             }
-            if let Some(i) = self.island_bar() {
-                let _ = self.bars[i].set_visualizer(None);
+            for b in &self.bars {
+                let _ = b.set_visualizer(None);
             }
         }
     }
 
-    /// A barra que hospeda a ilha apareceu ou sumiu (tela cheia).
+    /// Uma barra com a ilha ou um player apareceu ou sumiu (tela cheia).
     pub fn island_visibility_changed(&mut self) {
         self.island_capture();
     }
@@ -368,21 +389,31 @@ impl Loop {
         if self.island.capture.is_none() {
             return Ok(());
         }
-        let Some(i) = self.island_bar() else { return Ok(()) };
         let wave = self.island.waveform.lock().map(|w| w.clone()).ok();
-        self.bars[i].set_visualizer(wave.as_ref())
+        for b in self.bars.iter().filter(|b| b.shows_media() && !b.is_hidden()) {
+            b.set_visualizer(wave.as_ref())?;
+        }
+        Ok(())
     }
 
+    /// Abas do painel aberto: o carrossel da ilha, ou a aba única de um chip.
     fn island_tabs(&self) -> Vec<Tab> {
-        tabs::available(self.ctx.island.media().is_some(), self.ctx.island.weather.is_some(), self.ctx.island.lyrics.is_some())
+        let kind = self.controller.open().map(|o| o.kind);
+        tabs::for_set(tab_set(kind), self.ctx.island.media().is_some(), self.ctx.island.weather.is_some(), self.ctx.island.lyrics.is_some())
+    }
+
+    /// O chip tem o que mostrar no painel? (O player sem mídia e o clima sem leitura não abrem nada.)
+    pub fn chip_has_panel(&self, chip: &str) -> bool {
+        let set = tab_set(zefiro_bar::controller::panel_kind_for(chip));
+        set == TabSet::Island || !tabs::for_set(set, self.ctx.island.media().is_some(), self.ctx.island.weather.is_some(), self.ctx.island.lyrics.is_some()).is_empty()
     }
 
     /// Conteúdo normal do painel da ilha: só os pontos das abas. As abas em si ficam no compositor
     /// (`island_sync_tabs`), para a troca entre elas rodar na taxa do monitor.
     pub fn island_panel_list(&mut self, scale: f32) -> DisplayList {
         let available = self.island_tabs();
-        if !available.contains(&self.island.tab) {
-            self.island.tab = available[0];
+        if let Some(first) = available.first().filter(|_| !available.contains(&self.island.tab)) {
+            self.island.tab = *first;
         }
         let index = available.iter().position(|t| *t == self.island.tab).unwrap_or(0);
         let mut list = DisplayList::new(zefiro_platform::geometry::Size { w: zefiro_island::view::EXPANDED_DESIGN.w * scale, h: zefiro_island::view::EXPANDED_DESIGN.h * scale });
@@ -394,8 +425,9 @@ impl Loop {
     /// anda com a mola 250/31; senão, pula para a aba atual.
     pub fn island_sync_tabs(&mut self, monitor: usize, animate: bool) -> Result<()> {
         let available = self.island_tabs();
+        let Some(first) = available.first().copied() else { return Ok(()) };
         if !available.contains(&self.island.tab) {
-            self.island.tab = available[0];
+            self.island.tab = first;
         }
         let tab = self.island.tab;
         let index = available.iter().position(|t| *t == tab).unwrap_or(0);
@@ -464,8 +496,11 @@ impl Loop {
         let w = self.island.weather.as_ref().and_then(WeatherService::weather);
         if w != self.ctx.island.weather {
             self.ctx.island.weather = w;
+            if self.ctx.config.bar.uses("weather") {
+                self.apply_bars(true)?;
+            }
             self.island_refresh()?;
-            if self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) && self.island.tab == Tab::Weather {
+            if self.controller.open().is_some_and(|o| o.kind.tabbed()) && self.island.tab == Tab::Weather {
                 self.redraw_island_panel()?;
             }
         }
@@ -474,7 +509,7 @@ impl Loop {
 
     /// Nova amostra do hardware, com a aba aberta.
     pub fn island_hardware(&mut self) -> Result<()> {
-        if self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) && self.island.tab == Tab::Hardware {
+        if self.controller.open().is_some_and(|o| o.kind.tabbed()) && self.island.tab == Tab::Hardware {
             self.redraw_island_panel()?;
         } else {
             self.island.hardware = None;
@@ -490,7 +525,7 @@ impl Loop {
         let Some(open) = self.controller.open().cloned() else { return Ok(()) };
         let scale = self.bars[open.monitor].scale();
         let list = self.island_panel_list(scale);
-        let Some(chip) = self.bars[open.monitor].chip_rect(ISLAND_CHIP) else { return Ok(()) };
+        let chip = self.panel_anchor(open.monitor, &open.chip);
         let band_bottom = self.bars[open.monitor].band_bottom();
         self.panels[open.monitor].resize(&self.ctx, chip, band_bottom, &list)?;
         self.island_sync_tabs(open.monitor, true)
@@ -498,7 +533,7 @@ impl Loop {
 
     /// A linha do tempo anda uma vez por segundo enquanto o painel da ilha está aberto.
     pub fn island_tick(&mut self) -> Result<()> {
-        if !self.controller.open().is_some_and(|o| o.kind == PanelKind::Island) || self.ctx.island.media().is_none() || self.island.tab != Tab::Media {
+        if !self.controller.open().is_some_and(|o| o.kind.tabbed()) || self.ctx.island.media().is_none() || self.island.tab != Tab::Media {
             window::kill_timer(TIMER_ISLAND_TICK);
             self.island.expanded = None;
             return Ok(());
@@ -667,8 +702,7 @@ impl Loop {
     }
 
     pub fn island_panel_opening(&mut self) {
-        let available = self.island_tabs();
-        self.island.tab = available[0];
+        self.island.tab = self.island_tabs().first().copied().unwrap_or_default();
     }
 
     /// Ao fechar: o painel da ilha não guarda áreas de clique de um desenho antigo.
@@ -676,6 +710,16 @@ impl Loop {
         self.island.expanded = None;
         self.island.hardware = None;
         window::kill_timer(TIMER_ISLAND_TICK);
+    }
+}
+
+/// Conjunto de abas de cada painel com abas (qualquer outro é a ilha).
+fn tab_set(kind: Option<PanelKind>) -> TabSet {
+    match kind {
+        Some(PanelKind::Player) => TabSet::Media,
+        Some(PanelKind::Weather) => TabSet::Weather,
+        Some(PanelKind::Hardware) => TabSet::Hardware,
+        _ => TabSet::Island,
     }
 }
 
