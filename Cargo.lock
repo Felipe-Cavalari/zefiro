@@ -933,6 +933,7 @@ dependencies = [
  "zefiro-core",
  "zefiro-integration-clock",
  "zefiro-integration-devices",
+ "zefiro-integration-terminal",
  "zefiro-integration-update",
  "zefiro-integration-usage",
  "zefiro-integration-vscode",
