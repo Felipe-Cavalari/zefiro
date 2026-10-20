@@ -62,7 +62,12 @@ cargo build --release -p zefiro-app
 ./island/build.ps1                     # MSVC; feche o zefiro-island.exe antes, senão o link falha
 Copy-Item island/build/zefiro-island.exe target/release/
 ./target/release/zefiro.exe
+
+# Instalador (Inno Setup 6: winget install JRSoftware.InnoSetup) → dist\Zefiro-<versão>-setup.exe
+pwsh -NoProfile -File scripts/package.ps1      # -BuildIsland recompila a ilha C++ antes
 ```
+
+**Instalador:** `installer/zefiro.iss`, por usuário e sem admin, em `%LOCALAPPDATA%\Programs\Zefiro`. A versão vem do `[workspace.package]` do `Cargo.toml`. Ele fecha o Zefiro com `WM_CLOSE` antes de instalar ou desinstalar e nunca apaga `%APPDATA%\zefiro`. O ícone e a versão do exe vêm do `crates/app/build.rs`.
 
 **Arquivos da barra em uso:**
 

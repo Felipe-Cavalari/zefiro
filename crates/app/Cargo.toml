@@ -29,5 +29,8 @@ windows.workspace = true
 windows-numerics.workspace = true
 tracing.workspace = true
 
+[build-dependencies]
+winresource = "0.1"
+
 [dev-dependencies]
 tempfile.workspace = true
