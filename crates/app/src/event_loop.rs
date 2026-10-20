@@ -350,6 +350,13 @@ impl Loop {
                 system::open_folder(&dir);
                 return Ok(());
             }
+            MenuAction::OpenThemes | MenuAction::BackToMenu => {
+                // A mesma janela troca de conteúdo; o painel acompanha o tamanho novo com a mola.
+                if let Some(m) = &mut self.menu {
+                    if a == MenuAction::OpenThemes { m.open_themes() } else { m.back() }
+                }
+                return self.redraw_open_panel();
+            }
             MenuAction::ToggleHud => return self.toggle_hud(),
             MenuAction::ExportDiagnostics => {
                 self.close_open_panel()?;
@@ -362,7 +369,9 @@ impl Loop {
             MenuAction::ToggleAutostart => {
                 crate::tray_loop::toggle_autostart();
                 // O menu continua aberto, com a chave na posição nova.
-                self.menu = None;
+                if let Some(m) = &mut self.menu {
+                    m.set_autostart(zefiro_platform_windows::system::autostart_enabled());
+                }
                 return self.redraw_open_panel();
             }
             MenuAction::Exit => {
@@ -375,8 +384,12 @@ impl Loop {
                 return self.start_editor(monitor);
             }
         }
-        // Altura/formato/tema: barras animam e o menu continua aberto, redesenhado com a nova escolha.
-        self.menu = None;
+        // Altura/formato/tema: barras animam e o menu continua aberto, na mesma tela, com a nova escolha.
+        let themes = swatches(&self.ctx);
+        if let Some(m) = &mut self.menu {
+            m.set_choices(self.ctx.config.bar.height, self.ctx.config.bar.format, &self.ctx.config.theme);
+            m.set_themes(themes);
+        }
         self.apply_bars(true)?;
         crate::island::sync(&self.ctx);
         self.redraw_open_panel()
@@ -543,6 +556,10 @@ impl Loop {
                 }
                 if self.vscode_key(vk)? {
                     return Ok(true);
+                }
+                // Esc na tela de temas volta ao menu; no menu, fecha.
+                if vk == VK_ESCAPE && self.effective_open_kind() == Some(PanelKind::Menu) && self.menu.as_ref().is_some_and(|m| m.page() == zefiro_bar::menu::MenuPage::Themes) {
+                    return self.menu_action(MenuAction::BackToMenu).map(|_| true);
                 }
                 if vk == VK_ESCAPE {
                     let fx = self.controller.handle(PanelInput::Escape);

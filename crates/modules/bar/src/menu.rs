@@ -1,4 +1,5 @@
-//! Painel do Zefiro: altura, formato, tema e ações, com navegação por teclado.
+//! Painel do Zefiro: altura, formato, a linha do tema e ações, com navegação por teclado. A linha do
+//! tema troca o conteúdo do painel pela grade de temas ("‹ Tema" volta).
 
 use zefiro_core::config::{BarFormat, BarHeight};
 use zefiro_platform::color::Rgba;
@@ -8,10 +9,14 @@ use zefiro_resources::tokens::Tokens;
 use zefiro_ui::paint::{DisplayList, DrawOp};
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum MenuAction { SetHeight(BarHeight), SetFormat(BarFormat), SetTheme(String), ReloadTheme, OpenThemesFolder, RestartIsland, ToggleAutostart, ToggleHud, ExportDiagnostics, Exit, EditBar }
+pub enum MenuAction { SetHeight(BarHeight), SetFormat(BarFormat), SetTheme(String), OpenThemes, BackToMenu, ReloadTheme, OpenThemesFolder, RestartIsland, ToggleAutostart, ToggleHud, ExportDiagnostics, Exit, EditBar }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThemeSwatch { pub id: String, pub name: String, pub background: Rgba, pub text: Rgba, pub border: Option<Rgba> }
+
+/// O que o painel mostra: o menu ou a grade de temas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuPage { Main, Themes }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavKey { Up, Down, Left, Right, Enter }
@@ -28,11 +33,9 @@ const SWATCH_H: f32 = 56.0;
 const SECTION_GAP: f32 = 8.0;
 const COLS: usize = 4;
 
-fn actions() -> [(&'static str, MenuAction); 8] {
+fn actions() -> [(&'static str, MenuAction); 6] {
     [
         ("Editar barra", MenuAction::EditBar),
-        ("Recarregar tema", MenuAction::ReloadTheme),
-        ("Abrir pasta de temas", MenuAction::OpenThemesFolder),
         ("Reiniciar a ilha", MenuAction::RestartIsland),
         ("Iniciar com o Windows", MenuAction::ToggleAutostart),
         ("HUD de debug", MenuAction::ToggleHud),
@@ -41,15 +44,62 @@ fn actions() -> [(&'static str, MenuAction); 8] {
     ]
 }
 
-pub struct MenuModel { height: BarHeight, format: BarFormat, theme_id: String, themes: Vec<ThemeSwatch>, focus: (usize, usize), autostart: bool }
+/// Ações do fim da tela de temas.
+fn theme_actions() -> [(&'static str, MenuAction); 2] {
+    [("Recarregar tema", MenuAction::ReloadTheme), ("Abrir pasta de temas", MenuAction::OpenThemesFolder)]
+}
 
-/// Onde ficam os títulos de seção (topo, em px), para o `paint`.
-struct Titles { altura: f32, formato: f32, tema: f32 }
+fn action_label(action: &MenuAction) -> &'static str {
+    actions().into_iter().chain(theme_actions()).find(|(_, a)| a == action).map_or("", |(l, _)| l)
+}
+
+pub struct MenuModel { height: BarHeight, format: BarFormat, theme_id: String, themes: Vec<ThemeSwatch>, focus: (usize, usize), autostart: bool, page: MenuPage }
+
+/// Títulos de seção (texto e topo, em px), para o `paint`.
+type Titles = Vec<(&'static str, f32)>;
+
+/// Linha da tela de temas: o "‹ Tema" é a linha 0, a grade começa na 1.
+const GRID_ROW: usize = 1;
+/// Linha "Tema" no menu (depois de altura e formato).
+const THEME_ROW: usize = 2;
 
 impl MenuModel {
     pub fn new(height: BarHeight, format: BarFormat, theme_id: &str, themes: Vec<ThemeSwatch>) -> MenuModel {
         let col = if height == BarHeight::Compacta { 1 } else { 0 };
-        MenuModel { height, format, theme_id: theme_id.to_string(), themes, focus: (0, col), autostart: false }
+        MenuModel { height, format, theme_id: theme_id.to_string(), themes, focus: (0, col), autostart: false, page: MenuPage::Main }
+    }
+
+    pub fn page(&self) -> MenuPage {
+        self.page
+    }
+
+    /// A linha "Tema": o painel passa a mostrar a grade, com o foco no tema atual.
+    pub fn open_themes(&mut self) {
+        self.page = MenuPage::Themes;
+        let i = self.themes.iter().position(|t| t.id == self.theme_id).unwrap_or(0);
+        self.focus = (GRID_ROW + i / COLS, i % COLS);
+    }
+
+    /// "‹ Tema" ou Esc: volta ao menu, com o foco na linha "Tema".
+    pub fn back(&mut self) {
+        self.page = MenuPage::Main;
+        self.focus = (THEME_ROW, 0);
+    }
+
+    /// Altura, formato ou tema mudaram: o painel continua na mesma tela.
+    pub fn set_choices(&mut self, height: BarHeight, format: BarFormat, theme_id: &str) {
+        self.height = height;
+        self.format = format;
+        self.theme_id = theme_id.to_string();
+    }
+
+    /// A lista de temas mudou (recarregar tema, temas do usuário).
+    pub fn set_themes(&mut self, themes: Vec<ThemeSwatch>) {
+        self.themes = themes;
+    }
+
+    pub fn set_autostart(&mut self, on: bool) {
+        self.autostart = on;
     }
 
     /// "Iniciar com o Windows" ligado (a chave do item acende).
@@ -66,43 +116,52 @@ impl MenuModel {
         let s = |v: f32| v * scale;
         let inner = s(W - 2.0 * PAD);
         let mut out = Vec::new();
+        let mut titles = Vec::new();
         let mut y = s(PAD);
         let mut row = 0;
-
-        let mut segment = |y: &mut f32, row: &mut usize, opts: [MenuAction; 2]| {
-            let w = inner / 2.0;
-            for (col, action) in opts.into_iter().enumerate() {
-                out.push(MenuItemBox { rect: Rect::new(s(PAD) + w * col as f32, *y, w, s(ROW_H)), row: *row, col, action });
-            }
+        let line = |out: &mut Vec<MenuItemBox>, y: &mut f32, row: &mut usize, action: MenuAction| {
+            out.push(MenuItemBox { rect: Rect::new(s(PAD), *y, inner, s(ROW_H)), row: *row, col: 0, action });
             *y += s(ROW_H);
             *row += 1;
         };
-
-        let altura = y;
-        y += s(TITLE_H);
-        segment(&mut y, &mut row, [MenuAction::SetHeight(BarHeight::Completa), MenuAction::SetHeight(BarHeight::Compacta)]);
-        y += s(SECTION_GAP);
-        let formato = y;
-        y += s(TITLE_H);
-        segment(&mut y, &mut row, [MenuAction::SetFormat(BarFormat::Faixa), MenuAction::SetFormat(BarFormat::Pilulas)]);
-        y += s(SECTION_GAP);
-        let tema = y;
-        y += s(TITLE_H);
-        for (i, t) in self.themes.iter().enumerate() {
-            let (r, c) = (i / COLS, i % COLS);
-            let rect = Rect::new(s(PAD) + s(SWATCH_W) * c as f32, y + s(SWATCH_H) * r as f32, s(SWATCH_W), s(SWATCH_H));
-            out.push(MenuItemBox { rect, row: row + r, col: c, action: MenuAction::SetTheme(t.id.clone()) });
+        match self.page {
+            MenuPage::Main => {
+                for (title, opts) in [
+                    ("Altura", [MenuAction::SetHeight(BarHeight::Completa), MenuAction::SetHeight(BarHeight::Compacta)]),
+                    ("Formato", [MenuAction::SetFormat(BarFormat::Faixa), MenuAction::SetFormat(BarFormat::Pilulas)]),
+                ] {
+                    titles.push((title, y));
+                    y += s(TITLE_H);
+                    let w = inner / 2.0;
+                    for (col, action) in opts.into_iter().enumerate() {
+                        out.push(MenuItemBox { rect: Rect::new(s(PAD) + w * col as f32, y, w, s(ROW_H)), row, col, action });
+                    }
+                    y += s(ROW_H) + s(SECTION_GAP);
+                    row += 1;
+                }
+                line(&mut out, &mut y, &mut row, MenuAction::OpenThemes);
+                y += s(SECTION_GAP);
+                for (_, action) in actions() {
+                    line(&mut out, &mut y, &mut row, action);
+                }
+            }
+            MenuPage::Themes => {
+                line(&mut out, &mut y, &mut row, MenuAction::BackToMenu);
+                y += s(SECTION_GAP) / 2.0;
+                for (i, t) in self.themes.iter().enumerate() {
+                    let (r, c) = (i / COLS, i % COLS);
+                    let rect = Rect::new(s(PAD) + s(SWATCH_W) * c as f32, y + s(SWATCH_H) * r as f32, s(SWATCH_W), s(SWATCH_H));
+                    out.push(MenuItemBox { rect, row: row + r, col: c, action: MenuAction::SetTheme(t.id.clone()) });
+                }
+                let theme_rows = self.themes.len().div_ceil(COLS);
+                y += s(SWATCH_H) * theme_rows as f32 + s(SECTION_GAP);
+                row += theme_rows;
+                for (_, action) in theme_actions() {
+                    line(&mut out, &mut y, &mut row, action);
+                }
+            }
         }
-        let theme_rows = self.themes.len().div_ceil(COLS);
-        y += s(SWATCH_H) * theme_rows as f32;
-        row += theme_rows;
-        y += s(SECTION_GAP);
-        for (_, action) in actions() {
-            out.push(MenuItemBox { rect: Rect::new(s(PAD), y, inner, s(ROW_H)), row, col: 0, action });
-            y += s(ROW_H);
-            row += 1;
-        }
-        (out, Titles { altura, formato, tema }, y + s(PAD))
+        (out, titles, y + s(PAD))
     }
 
     pub fn layout(&self, scale: f32) -> Vec<MenuItemBox> {
@@ -158,10 +217,11 @@ impl MenuModel {
         let body = TextStyle { size: s(13.0), weight: FontWeight::Regular, family: Family::Text };
         let small = TextStyle { size: s(11.0), weight: FontWeight::Regular, family: Family::Text };
 
-        for (text, y) in [("Altura", titles.altura), ("Formato", titles.formato), ("Tema", titles.tema)] {
+        for (text, y) in titles {
             list.push(DrawOp::Text { rect: Rect::new(s(PAD), y, s(W - 2.0 * PAD), s(TITLE_H)), text: text.into(), style: title, color: tokens.text_tertiary, align: Align::Leading });
         }
-        for row in [0usize, 1] {
+        let segments: &[usize] = if self.page == MenuPage::Main { &[0, 1] } else { &[] };
+        for &row in segments {
             let cells: Vec<&MenuItemBox> = boxes.iter().filter(|b| b.row == row).collect();
             let r = cells[0].rect.union(cells[cells.len() - 1].rect);
             list.push(DrawOp::RoundRect { rect: r, radius: r.h / 2.0, color: tokens.raised });
@@ -199,8 +259,28 @@ impl MenuModel {
                     list.push(DrawOp::Circle { center: c, radius: s(4.0), color: t.text });
                     list.push(DrawOp::Text { rect: Rect::new(b.rect.x, b.rect.y + s(36.0), b.rect.w, s(16.0)), text: t.name.clone(), style: small, color: if focused { tokens.text } else { tokens.text_secondary }, align: Align::Center });
                 }
+                MenuAction::OpenThemes | MenuAction::BackToMenu => {
+                    if focused {
+                        list.push(DrawOp::RoundRect { rect: b.rect, radius: s(10.0), color: tokens.raised });
+                    }
+                    if b.action == MenuAction::BackToMenu {
+                        list.push(DrawOp::Text { rect: b.rect.inset(s(12.0), 0.0), text: "‹ Tema".into(), style: body, color: tokens.text_secondary, align: Align::Leading });
+                        continue;
+                    }
+                    list.push(DrawOp::Text { rect: b.rect.inset(s(12.0), 0.0), text: "Tema".into(), style: body, color: tokens.text, align: Align::Leading });
+                    // À direita: a bolinha do tema atual e o nome dele.
+                    let current = self.themes.iter().find(|t| t.id == self.theme_id);
+                    let name = format!("{} ›", current.map_or(self.theme_id.as_str(), |t| t.name.as_str()));
+                    let value = Rect::new(b.rect.x, b.rect.y, b.rect.w - s(12.0), b.rect.h);
+                    list.push(DrawOp::Text { rect: value, text: name, style: small, color: tokens.text_secondary, align: Align::Trailing });
+                    if let Some(t) = current {
+                        let c = Point { x: b.rect.right() - s(12.0) - s(78.0), y: b.rect.y + b.rect.h / 2.0 };
+                        list.push(DrawOp::Circle { center: c, radius: s(6.5), color: t.border.unwrap_or(tokens.hairline) });
+                        list.push(DrawOp::Circle { center: c, radius: s(5.5), color: t.background.with_alpha(1.0) });
+                    }
+                }
                 action => {
-                    let label = actions().into_iter().find(|(_, a)| a == action).map_or("", |(l, _)| l);
+                    let label = action_label(action);
                     if focused {
                         list.push(DrawOp::RoundRect { rect: b.rect, radius: s(10.0), color: tokens.raised });
                     }
@@ -272,14 +352,9 @@ mod tests {
         let mut m = model();
         m.key(NavKey::Down); // formato
         assert_eq!(m.key(NavKey::Enter), Some(MenuAction::SetFormat(BarFormat::Faixa)));
-        m.key(NavKey::Down); // primeira linha de temas
-        for _ in 0..4 {
-            m.key(NavKey::Right); // a quarta passa do fim e fica na coluna 3
-        }
-        assert_eq!(m.key(NavKey::Enter), Some(MenuAction::SetTheme("t3".into())));
-        m.key(NavKey::Down); // segunda linha de temas, coluna 3
-        assert_eq!(m.key(NavKey::Enter), Some(MenuAction::SetTheme("t7".into())));
-        m.key(NavKey::Down); // primeira ação, coluna volta a 0
+        m.key(NavKey::Down); // a linha "Tema", coluna volta a 0
+        assert_eq!(m.key(NavKey::Enter), Some(MenuAction::OpenThemes));
+        m.key(NavKey::Down); // primeira ação
         assert_eq!(m.key(NavKey::Enter), Some(MenuAction::EditBar));
         for _ in 0..10 {
             m.key(NavKey::Down);
@@ -292,16 +367,57 @@ mod tests {
     }
 
     #[test]
-    fn partial_last_theme_row_clamps_column() {
-        let mut m = MenuModel::new(BarHeight::Completa, BarFormat::Faixa, "t0", swatches(9));
+    fn main_menu_has_one_theme_row_and_no_grid() {
+        let m = MenuModel::new(BarHeight::Completa, BarFormat::Faixa, "t2", swatches(9));
+        let boxes = m.layout(1.0);
+        assert!(boxes.iter().all(|b| !matches!(b.action, MenuAction::SetTheme(_) | MenuAction::ReloadTheme | MenuAction::OpenThemesFolder)));
+        assert_eq!(boxes.iter().filter(|b| b.action == MenuAction::OpenThemes).count(), 1);
+        assert_eq!(m.size(1.0), model().size(1.0), "o menu não cresce com o número de temas");
+        let texts = texts(&m.paint(1.0, &tokens()));
+        assert!(texts.contains(&"Tema".to_string()) && texts.contains(&"T2 ›".to_string()), "{texts:?}");
+    }
+
+    #[test]
+    fn themes_page_opens_on_the_current_theme_and_goes_back() {
+        let mut m = model();
+        m.open_themes();
+        assert_eq!(m.page(), MenuPage::Themes);
+        assert_eq!(m.key(NavKey::Enter), Some(MenuAction::SetTheme("t2".into())), "começa no tema atual");
+        m.key(NavKey::Down); // segunda linha de temas, mesma coluna
+        assert_eq!(m.key(NavKey::Enter), Some(MenuAction::SetTheme("t6".into())));
+        m.key(NavKey::Down); // Recarregar tema
+        assert_eq!(m.key(NavKey::Enter), Some(MenuAction::ReloadTheme));
         m.key(NavKey::Down);
-        m.key(NavKey::Down);
-        for _ in 0..3 {
-            m.key(NavKey::Right);
+        assert_eq!(m.key(NavKey::Enter), Some(MenuAction::OpenThemesFolder));
+        for _ in 0..10 {
+            m.key(NavKey::Up);
         }
+        assert_eq!(m.key(NavKey::Enter), Some(MenuAction::BackToMenu));
+        m.back();
+        assert_eq!(m.page(), MenuPage::Main);
+        assert_eq!(m.key(NavKey::Enter), Some(MenuAction::OpenThemes), "volta com o foco na linha Tema");
+        let themes = { let mut t = model(); t.open_themes(); t };
+        assert!(texts(&themes.paint(1.0, &tokens())).contains(&"‹ Tema".to_string()));
+    }
+
+    #[test]
+    fn partial_last_theme_row_clamps_column() {
+        let mut m = MenuModel::new(BarHeight::Completa, BarFormat::Faixa, "t3", swatches(9));
+        m.open_themes(); // foco em t3, coluna 3
         m.key(NavKey::Down);
         m.key(NavKey::Down); // terceira linha de temas só tem t8
         assert_eq!(m.key(NavKey::Enter), Some(MenuAction::SetTheme("t8".into())));
+    }
+
+    #[test]
+    fn choices_update_in_place_and_keep_the_page() {
+        let mut m = model();
+        m.open_themes();
+        m.set_choices(BarHeight::Compacta, BarFormat::Pilulas, "t5");
+        assert_eq!(m.page(), MenuPage::Themes, "trocar o tema não volta ao menu");
+        assert!(m.layout(1.0).iter().any(|b| b.action == MenuAction::SetTheme("t5".into())));
+        m.back();
+        assert!(texts(&m.paint(1.0, &tokens())).contains(&"T5 ›".to_string()));
     }
 
     #[test]
@@ -321,21 +437,31 @@ mod tests {
 
     #[test]
     fn hit_test_matches_layout() {
-        let m = model();
-        for b in m.layout(1.0) {
-            let center = Point { x: b.rect.x + b.rect.w / 2.0, y: b.rect.y + b.rect.h / 2.0 };
-            assert_eq!(m.hit(center, 1.0), Some(b.action.clone()), "{b:?}");
+        let mut m = model();
+        for _ in 0..2 {
+            for b in m.layout(1.0) {
+                let center = Point { x: b.rect.x + b.rect.w / 2.0, y: b.rect.y + b.rect.h / 2.0 };
+                assert_eq!(m.hit(center, 1.0), Some(b.action.clone()), "{b:?}");
+            }
+            assert_eq!(m.hit(Point { x: 1.0, y: 1.0 }, 1.0), None);
+            m.open_themes();
         }
-        assert_eq!(m.hit(Point { x: 1.0, y: 1.0 }, 1.0), None);
     }
 
     #[test]
-    fn size_grows_with_themes_and_scale() {
-        let a = MenuModel::new(BarHeight::Completa, BarFormat::Faixa, "t0", swatches(8)).size(1.0);
-        let b = MenuModel::new(BarHeight::Completa, BarFormat::Faixa, "t0", swatches(9)).size(1.0);
-        assert_eq!(a.w, 300.0);
-        assert_eq!(b.h - a.h, 56.0);
+    fn themes_page_grows_with_themes_and_scale() {
+        let page = |n| { let mut m = MenuModel::new(BarHeight::Completa, BarFormat::Faixa, "t0", swatches(n)); m.open_themes(); m.size(1.0) };
+        assert_eq!(page(8).w, 300.0);
+        assert_eq!(page(9).h - page(8).h, 56.0);
         assert_eq!(MenuModel::new(BarHeight::Completa, BarFormat::Faixa, "t0", swatches(8)).size(1.5).w, 450.0);
+    }
+
+    fn tokens() -> zefiro_resources::tokens::Tokens {
+        zefiro_resources::tokens::derive_tokens(&zefiro_resources::theme::parse_theme("obsidian", "o", zefiro_resources::theme::BUILTIN[0].1).unwrap(), Rgba::rgb(0, 120, 215), None)
+    }
+
+    fn texts(l: &DisplayList) -> Vec<String> {
+        l.ops.iter().filter_map(|o| if let DrawOp::Text { text, .. } = o { Some(text.clone()) } else { None }).collect()
     }
 
     #[test]
