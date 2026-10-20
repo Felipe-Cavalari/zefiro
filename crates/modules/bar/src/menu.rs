@@ -8,7 +8,7 @@ use zefiro_resources::tokens::Tokens;
 use zefiro_ui::paint::{DisplayList, DrawOp};
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum MenuAction { SetHeight(BarHeight), SetFormat(BarFormat), SetTheme(String), ReloadTheme, OpenThemesFolder, RestartIsland, ToggleAutostart, Exit, EditBar }
+pub enum MenuAction { SetHeight(BarHeight), SetFormat(BarFormat), SetTheme(String), ReloadTheme, OpenThemesFolder, RestartIsland, ToggleAutostart, ToggleHud, ExportDiagnostics, Exit, EditBar }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThemeSwatch { pub id: String, pub name: String, pub background: Rgba, pub text: Rgba, pub border: Option<Rgba> }
@@ -28,13 +28,15 @@ const SWATCH_H: f32 = 56.0;
 const SECTION_GAP: f32 = 8.0;
 const COLS: usize = 4;
 
-fn actions() -> [(&'static str, MenuAction); 6] {
+fn actions() -> [(&'static str, MenuAction); 8] {
     [
         ("Editar barra", MenuAction::EditBar),
         ("Recarregar tema", MenuAction::ReloadTheme),
         ("Abrir pasta de temas", MenuAction::OpenThemesFolder),
         ("Reiniciar a ilha", MenuAction::RestartIsland),
         ("Iniciar com o Windows", MenuAction::ToggleAutostart),
+        ("HUD de debug", MenuAction::ToggleHud),
+        ("Exportar diagnóstico", MenuAction::ExportDiagnostics),
         ("Sair", MenuAction::Exit),
     ]
 }
@@ -300,6 +302,21 @@ mod tests {
         m.key(NavKey::Down);
         m.key(NavKey::Down); // terceira linha de temas só tem t8
         assert_eq!(m.key(NavKey::Enter), Some(MenuAction::SetTheme("t8".into())));
+    }
+
+    #[test]
+    fn debug_items_sit_before_exit() {
+        let m = model();
+        let labels: Vec<_> = m.layout(1.0).into_iter().filter_map(|b| match b.action {
+            MenuAction::ToggleHud => Some("hud"),
+            MenuAction::ExportDiagnostics => Some("diag"),
+            MenuAction::Exit => Some("sair"),
+            _ => None,
+        }).collect();
+        assert_eq!(labels, ["hud", "diag", "sair"]);
+        let texts: Vec<String> = m.paint(1.0, &zefiro_resources::tokens::derive_tokens(&zefiro_resources::theme::parse_theme("obsidian", "o", zefiro_resources::theme::BUILTIN[0].1).unwrap(), Rgba::rgb(0, 120, 215), None))
+            .ops.into_iter().filter_map(|o| if let DrawOp::Text { text, .. } = o { Some(text) } else { None }).collect();
+        assert!(texts.contains(&"HUD de debug".to_string()) && texts.contains(&"Exportar diagnóstico".to_string()), "{texts:?}");
     }
 
     #[test]

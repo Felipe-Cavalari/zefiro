@@ -7,6 +7,7 @@ pub mod devices;
 pub mod catalog;
 pub mod editor;
 pub mod editor_panel;
+pub mod hud;
 pub mod menu;
 pub mod power;
 pub mod usage;
