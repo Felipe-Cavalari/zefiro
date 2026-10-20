@@ -74,7 +74,7 @@ pwsh -NoProfile -File scripts/package.ps1      # -BuildIsland recompila a ilha C
 - A configuração fica em `%APPDATA%\zefiro\config.toml` e é recarregada ao salvar.
   - `[bar] height = completa | compacta`
   - `[bar] format = faixa | pilulas`
-  - `[bar.sections] start/center/end`: ids do catálogo (`zefiro`, `clock`, `audio`, `mic`, `brightness`, `claude`, `codex`, `vscode`, `notifications`, `dnd`, `power`)
+  - `[bar.sections] start/center/end`: ids do catálogo (`zefiro`, `clock`, `audio`, `mic`, `brightness`, `claude`, `codex`, `vscode`, `notifications`, `dnd`, `player`, `weather`, `hardware`, `power`)
 - `ZEFIRO_CONFIG_DIR=<pasta>` troca a pasta da configuração: use um perfil isolado para testes, sem mexer no do usuário.
 - Os temas do usuário ficam em `%APPDATA%\zefiro\themes\`.
 - Os logs ficam em `%LOCALAPPDATA%\zefiro\logs`.
@@ -104,6 +104,7 @@ pwsh -NoProfile -File scripts/package.ps1      # -BuildIsland recompila a ilha C
 - **Nenhuma janela do Zefiro do tamanho exato do monitor:** em primeiro plano, o Windows a trata como app em tela cheia e liga o Não perturbe sozinho. A janela do painel tem uma linha a menos (`panel_window`, ADR-0007).
 - **Fork da ilha:** toda mudança no `dynamic-island-for-windows.wh.cpp` vai dentro de `#ifdef ZEFIRO_ISLAND` e é marcada com `// ZEFIRO:`, para acompanhar o upstream com diffs mínimos. A camada `wh_shim.*` substitui a API do Windhawk.
 - **Ilha embutida (padrão, ADR-0009):** a barra do primário desenha a ilha no próprio compositor; o "chip" `island` abre o painel com abas. Cada fonte de dados (SMTC, volume, privacidade, notificações, Bluetooth, clima, letras, hardware) é um serviço em `platform-windows` com thread própria que avisa a UI por `post_user`; nada consulta por quadro. O hardware só amostra com a aba aberta, e a captura de áudio só roda com mídia tocando e a barra visível.
+- **Chips da ilha (ADR-0012):** `player`, `weather` e `hardware` levam partes da ilha para qualquer seção e monitor. O player é uma `IslandView` própria no retângulo do chip, sem os avisos; a largura dele segue a pílula e refaz o layout. Os painéis reaproveitam o painel com abas da ilha (`PanelKind::tabbed`, `tabs::for_set`). Mídia e clima rodam com a ilha embutida ou com o chip na barra.
 - **Barra ↔ ilha externa (`engine = "externa"`):**
   - A barra grava `island.ini` (seção `[Zefiro]`, cores do tema, e no formato faixa sem contorno, sem sombra e sem o tom da capa) e o `ColorThemeV2` no `island-state.ini`.
   - A ilha publica `ZefiroAccent` no `island-state.ini`. A barra usa esse valor quando o tema tem `accent = "auto"`.
