@@ -981,6 +981,14 @@ name = "zefiro-integration-devices"
 version = "1.0.1"
 
 [[package]]
+name = "zefiro-integration-update"
+version = "1.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "zefiro-integration-usage"
 version = "1.0.1"
 dependencies = [
