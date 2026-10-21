@@ -37,6 +37,15 @@ const ROW_H: f32 = 58.0;
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageBlock { pub title: String, pub subtitle: String, pub rows: Vec<UsageRow>, pub message: Option<String> }
 
+/// "Atualizar" do Segoe Fluent Icons.
+pub const GLYPH_REFRESH: &str = "\u{E72C}";
+
+/// Botão de atualizar, no canto do título do primeiro bloco.
+pub fn refresh_button_rect(scale: f32) -> Rect {
+    let px = |v: f32| (v * scale).round();
+    Rect::new(px(WIDTH - 20.0 - 28.0), px(12.0), px(28.0), px(28.0))
+}
+
 /// Espaço entre dois blocos; a linha divisória fica no meio dele.
 const BLOCK_GAP: f32 = 12.0;
 
@@ -53,8 +62,9 @@ fn fit(text: &str, style: &TextStyle, max_w: f32, m: &dyn TextMeasurer) -> Strin
 }
 
 /// Painel com um bloco por conta (título, subtítulo, uma linha por janela com rótulo, %, barra e
-/// detalhe) e o rodapé. Com um bloco sem subtítulo, é o painel de uma conta só de antes.
-pub fn usage_panel(blocks: &[UsageBlock], footer: &str, scale: f32, tokens: &Tokens, m: &dyn TextMeasurer) -> DisplayList {
+/// detalhe) e o rodapé. Com um bloco sem subtítulo, é o painel de uma conta só de antes. `refresh`:
+/// botão de atualizar no título (`Some(false)` apagado); `None`, sem botão.
+pub fn usage_panel(blocks: &[UsageBlock], footer: &str, refresh: Option<bool>, scale: f32, tokens: &Tokens, m: &dyn TextMeasurer) -> DisplayList {
     let px = |v: f32| (v * scale).round();
     let text = |size: f32, weight: FontWeight| TextStyle { size: size * scale, weight, family: Family::Text };
     let lines = |b: &UsageBlock| -> Vec<String> { b.message.as_deref().map(|msg| msg.lines().map(String::from).collect()).unwrap_or_default() };
@@ -70,7 +80,8 @@ pub fn usage_panel(blocks: &[UsageBlock], footer: &str, scale: f32, tokens: &Tok
             list.push(DrawOp::RoundRect { rect: Rect::new(px(20.0), px(y + BLOCK_GAP / 2.0), size.w - px(40.0), px(1.0)), radius: 0.0, color: tokens.hairline });
             y += BLOCK_GAP;
         }
-        list.push(DrawOp::Text { rect: Rect::new(px(20.0), px(y + 14.0), size.w - px(40.0), px(22.0)), text: b.title.clone(), style: text(13.0, FontWeight::SemiBold), color: tokens.text_secondary, align: Align::Leading });
+        let beside_button = if index == 0 && refresh.is_some() { px(36.0) } else { 0.0 };
+        list.push(DrawOp::Text { rect: Rect::new(px(20.0), px(y + 14.0), size.w - px(40.0) - beside_button, px(22.0)), text: b.title.clone(), style: text(13.0, FontWeight::SemiBold), color: tokens.text_secondary, align: Align::Leading });
         if !b.subtitle.is_empty() {
             let style = text(11.0, FontWeight::Regular);
             let shown = fit(&b.subtitle, &style, size.w - px(40.0), m);
@@ -101,6 +112,13 @@ pub fn usage_panel(blocks: &[UsageBlock], footer: &str, scale: f32, tokens: &Tok
             }
         }
         y = top + body_h(b);
+    }
+    if let Some(enabled) = refresh {
+        let r = refresh_button_rect(scale);
+        let icons = TextStyle { size: 12.0 * scale, weight: FontWeight::Regular, family: Family::Icons };
+        list.push(DrawOp::RoundRect { rect: r, radius: r.h / 2.0, color: tokens.raised });
+        let color = if enabled { tokens.text_secondary } else { tokens.text_tertiary };
+        list.push(DrawOp::Text { rect: r, text: GLYPH_REFRESH.into(), style: icons, color, align: Align::Center });
     }
     if !footer.is_empty() {
         let top = px(y);
@@ -167,7 +185,27 @@ mod tests {
     }
 
     fn panel(blocks: &[UsageBlock], footer: &str) -> DisplayList {
-        usage_panel(blocks, footer, 1.0, &tokens(), &FixedWidthMeasurer)
+        usage_panel(blocks, footer, None, 1.0, &tokens(), &FixedWidthMeasurer)
+    }
+
+    fn glyph(l: &DisplayList) -> Option<(Rect, Rgba)> {
+        l.ops.iter().find_map(|o| if let DrawOp::Text { text, rect, color, .. } = o { (text == GLYPH_REFRESH).then_some((*rect, *color)) } else { None })
+    }
+
+    #[test]
+    fn refresh_button_in_the_header() {
+        let blocks = [block("Claude · Pro", "a@b.c · Windows", rows(), None)];
+        let t = tokens();
+        let on = usage_panel(&blocks, "", Some(true), 1.0, &t, &FixedWidthMeasurer);
+        assert_eq!(glyph(&on), Some((refresh_button_rect(1.0), t.text_secondary)));
+        // Apagado enquanto atualiza, logo depois de consultar ou com tudo em pausa.
+        let off = usage_panel(&blocks, "", Some(false), 1.0, &t, &FixedWidthMeasurer);
+        assert_eq!(glyph(&off).map(|g| g.1), Some(t.text_tertiary));
+        assert_eq!(glyph(&panel(&blocks, "")), None);
+        // O título não passa por baixo do botão.
+        let title = text_rect(&on, "Claude · Pro");
+        assert!(title.x + title.w <= refresh_button_rect(1.0).x);
+        assert_eq!(refresh_button_rect(2.0), Rect::new(584.0, 24.0, 56.0, 56.0));
     }
 
     fn text_rect(l: &DisplayList, wanted: &str) -> Rect {

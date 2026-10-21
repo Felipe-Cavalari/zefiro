@@ -489,6 +489,8 @@ impl Loop {
                         // Botão de energia (armar, confirmar ou agir).
                     } else if self.terminal_up(Point { x: x - ox, y: y - oy })? {
                         // Perfil do Windows Terminal aberto (ou clique fora das linhas).
+                    } else if self.usage_click(Point { x: x - ox, y: y - oy }, scale)? {
+                        // Botão de atualizar do painel do Claude.
                     } else if self.vscode_click(Point { x: x - ox, y: y - oy })? {
                         // Projeto do VS Code aberto (ou clique fora das linhas).
                     } else if self.devices_up(Point { x: x - ox, y: y - oy })? {
