@@ -1,13 +1,14 @@
-//! Uso do Claude pelo endpoint OAuth do Claude Code, numa thread própria. O arquivo de credenciais é
-//! relido a cada consulta (o Claude Code renova o token sozinho); o Zefiro nunca renova nem grava o
-//! token, e ele nunca vai para o log.
+//! Uso do Claude pelo endpoint OAuth do Claude Code, numa thread própria, para cada conta achada no
+//! Windows e nas distros do WSL rodando. O arquivo de credenciais é relido a cada consulta (o Claude
+//! Code renova o token sozinho); o Zefiro nunca renova nem grava o token, e ele nunca vai para o log.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
-use zefiro_integration_usage::claude::{ClaudeUsage, TokenState, UsageError, parse_claude, token_state};
+use zefiro_integration_usage::claude::{ClaudeEntry, ClaudeFound, ClaudeSnapshot, ClaudeUsage, TokenState, UsageError, first_valid_token, group_claude, inherit_claude, parse_claude, parse_identity, plan_name};
+use zefiro_integration_usage::origins::{Account, Discover, Origin, accounts_summary, carry_stopped, many_distros, origins_label};
 
 const URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const BETA: &str = "oauth-2025-04-20";
@@ -18,7 +19,7 @@ const TIMEOUT: Duration = Duration::from_secs(15);
 
 enum Wake { Refresh, Stop }
 
-type Shared = Arc<Mutex<Option<(Instant, Result<ClaudeUsage, UsageError>)>>>;
+type Shared = Arc<Mutex<Option<ClaudeSnapshot>>>;
 
 pub struct ClaudeService {
     tx: Sender<Wake>,
@@ -30,9 +31,10 @@ fn now_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
 
-fn query(credentials: &PathBuf) -> Result<ClaudeUsage, UsageError> {
-    let text = std::fs::read_to_string(credentials).unwrap_or_default();
-    let token = match token_state(&text, now_ms()) {
+/// Uso de uma conta, com o primeiro token válido entre as credenciais dela.
+fn query(credentials: &[PathBuf]) -> Result<ClaudeUsage, UsageError> {
+    let texts: Vec<String> = credentials.iter().map(|p| std::fs::read_to_string(p).unwrap_or_default()).collect();
+    let token = match first_valid_token(&texts, now_ms()) {
         TokenState::Valid(token) => token,
         TokenState::Expired => return Err(UsageError::Expired),
         TokenState::Missing => return Err(UsageError::Missing),
@@ -49,10 +51,42 @@ fn query(credentials: &PathBuf) -> Result<ClaudeUsage, UsageError> {
     }
 }
 
+/// Uma origem com credenciais do Claude Code: quem é (`.claude.json`) e o plano.
+fn found(origin: &Origin) -> Option<ClaudeFound> {
+    let credentials = std::fs::read_to_string(origin.home.join(".claude").join(".credentials.json")).ok()?;
+    let identity = parse_identity(&std::fs::read_to_string(origin.home.join(".claude.json")).unwrap_or_default());
+    Some(ClaudeFound { origin: origin.clone(), identity, plan: plan_name(&credentials) })
+}
+
+/// Um ciclo: descobre as contas, consulta cada uma e lembra as de distros que pararam.
+fn cycle(discover: &Discover, previous: &[Account<ClaudeEntry>]) -> ClaudeSnapshot {
+    let discovery = discover();
+    let mut accounts = group_claude(discovery.origins.iter().filter_map(found).collect());
+    inherit_claude(previous, &mut accounts);
+    let many = many_distros(&accounts);
+    for account in &mut accounts {
+        let result = query(&account.data.credentials);
+        let old = previous.iter().find(|p| p.key == account.key).and_then(|p| p.data.result.as_ref());
+        // Só registra quando o erro muda (sem login, seriam 720 linhas por dia).
+        if let Err(e) = &result
+            && old != Some(&result)
+        {
+            tracing::info!(origem = %origins_label(&account.origins, many), ?e, "uso do Claude indisponível");
+        }
+        if let Ok(u) = &result {
+            account.data.last_ok = Some(u.clone());
+        }
+        account.data.result = Some(result);
+    }
+    carry_stopped(previous, &mut accounts, &discovery.running);
+    ClaudeSnapshot { accounts, wsl_stopped: discovery.wsl_stopped, at: Some(Instant::now()) }
+}
+
 impl ClaudeService {
-    /// Consulta ao iniciar, a cada 120 s e no `refresh` (se o dado tiver mais de 60 s). `notify` é
-    /// chamado (em outra thread) depois de cada consulta.
-    pub fn start(credentials: PathBuf, notify: Arc<dyn Fn() + Send + Sync>) -> std::io::Result<ClaudeService> {
+    /// Consulta ao iniciar, a cada 120 s e no `refresh` (se o dado tiver mais de 60 s). `discover`
+    /// acha as origens (Windows e WSL rodando) a cada consulta; `notify` é chamado (em outra thread)
+    /// depois de cada consulta.
+    pub fn start(discover: Discover, notify: Arc<dyn Fn() + Send + Sync>) -> std::io::Result<ClaudeService> {
         let (tx, rx) = mpsc::channel();
         let state: Shared = Default::default();
         let shared = state.clone();
@@ -60,22 +94,20 @@ impl ClaudeService {
             // SAFETY: WinRT nesta thread, desfeito no fim dela.
             let inited = unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.is_ok();
             let mut last: Option<Instant> = None;
+            let mut summary = String::new();
             let mut wake = Wake::Refresh;
             while let Wake::Refresh = wake {
                 if last.is_none_or(|t| t.elapsed() >= FRESH) {
-                    let result = query(&credentials);
+                    let previous = shared.lock().ok().and_then(|s| s.as_ref().map(|s| s.accounts.clone())).unwrap_or_default();
+                    let snapshot = cycle(&discover, &previous);
                     last = Some(Instant::now());
-                    let changed = shared
-                        .lock()
-                        .map(|mut s| {
-                            let changed = s.as_ref().is_none_or(|(_, old)| *old != result);
-                            *s = Some((Instant::now(), result.clone()));
-                            changed
-                        })
-                        .unwrap_or(false);
-                    // Só registra quando o erro muda (sem login, seriam 720 linhas por dia).
-                    if changed && let Err(e) = &result {
-                        tracing::info!(?e, "uso do Claude indisponível");
+                    let text = accounts_summary("Claude", &snapshot.accounts);
+                    if text != summary {
+                        tracing::info!("{text}");
+                        summary = text;
+                    }
+                    if let Ok(mut s) = shared.lock() {
+                        *s = Some(snapshot);
                     }
                     // Avisa sempre: mesmo sem mudança, o "Atualizado há" do painel muda.
                     notify();
@@ -98,8 +130,8 @@ impl ClaudeService {
         Ok(ClaudeService { tx, state, thread: Some(thread) })
     }
 
-    /// Último resultado e quando chegou.
-    pub fn latest(&self) -> Option<(Instant, Result<ClaudeUsage, UsageError>)> {
+    /// As contas, se há WSL parado e quando terminou a última consulta.
+    pub fn latest(&self) -> Option<ClaudeSnapshot> {
         self.state.lock().ok().and_then(|s| s.clone())
     }
 

@@ -86,7 +86,9 @@ impl Loop {
         match (claude, self.usage.claude.is_some()) {
             (true, false) => {
                 tracing::info!("uso do Claude: serviço ligado");
-                self.usage.claude = ClaudeService::start(home().join(".claude").join(".credentials.json"), Arc::new(|| window::post_user(USER_CLAUDE)))
+                let windows = Origin { kind: OriginKind::Windows, home: home() };
+                let discover = Arc::new(move || Discovery { origins: vec![windows.clone()], ..Default::default() });
+                self.usage.claude = ClaudeService::start(discover, Arc::new(|| window::post_user(USER_CLAUDE)))
                     .map_err(|e| tracing::warn!("uso do Claude indisponível: {e}"))
                     .ok();
             }
@@ -133,9 +135,6 @@ impl Loop {
     pub fn usage_claude_changed(&mut self) -> Result<()> {
         let before = self.ctx.usage.claude_chip();
         self.ctx.usage.claude = self.usage.claude.as_ref().and_then(ClaudeService::latest);
-        if let Some((_, Ok(u))) = &self.ctx.usage.claude {
-            self.ctx.usage.claude_last_ok = Some(u.clone());
-        }
         if self.ctx.usage.claude_chip() != before {
             self.apply_bars(true)?;
         }
@@ -163,9 +162,10 @@ impl Loop {
         let tokens = &self.ctx.theme.tokens;
         let (now, offset) = (now_unix(), utc_offset_seconds());
         if kind == PanelKind::Claude {
-            return match &self.ctx.usage.claude {
+            let first = self.ctx.usage.claude.as_ref().and_then(|s| Some((s.at?, s.accounts.first()?.data.result.as_ref()?)));
+            return match first {
                 None => usage_panel("Claude", &[], Some("Carregando…"), "", scale, tokens),
-                Some((at, Err(e))) => usage_panel("Claude", &[], Some(&claude_message(*e)), &updated_ago(*at), scale, tokens),
+                Some((at, Err(e))) => usage_panel("Claude", &[], Some(&claude_message(*e)), &updated_ago(at), scale, tokens),
                 Some((at, Ok(u))) => {
                     let mut rows = Vec::new();
                     if let Some(l) = &u.five_hour {
@@ -177,7 +177,7 @@ impl Loop {
                     for (name, l) in &u.extra {
                         rows.push(claude_row(format!("{name} (7 dias)"), l, 10080, now, offset));
                     }
-                    usage_panel("Claude", &rows, None, &updated_ago(*at), scale, tokens)
+                    usage_panel("Claude", &rows, None, &updated_ago(at), scale, tokens)
                 }
             };
         }

@@ -47,20 +47,19 @@ pub struct SystemState {
     pub dnd: bool,
 }
 
-/// O que os chips de uso mostram: o último uso do Codex lido e quando o arquivo mudou.
+/// O que os chips de uso mostram: as contas do Claude e do Codex no Windows e no WSL.
 #[derive(Debug, Clone, Default)]
 pub struct UsageState {
-    /// Último resultado do Claude e quando chegou.
-    pub claude: Option<(std::time::Instant, Result<zefiro_integration_usage::claude::ClaudeUsage, zefiro_integration_usage::claude::UsageError>)>,
-    /// Último uso do Claude lido com sucesso: o chip continua com ele numa falha de rede.
-    pub claude_last_ok: Option<zefiro_integration_usage::claude::ClaudeUsage>,
+    /// As contas do Claude e quando terminou a última consulta.
+    pub claude: Option<zefiro_integration_usage::claude::ClaudeSnapshot>,
     pub codex: Option<zefiro_integration_usage::codex::CodexSnapshot>,
 }
 
 impl UsageState {
-    /// % do chip do Claude (o último valor bom numa falha passageira).
+    /// % do chip do Claude: a maior janela de 5 h entre as contas (o último valor bom numa falha
+    /// passageira).
     pub fn claude_chip(&self) -> Option<f32> {
-        self.claude.as_ref().and_then(|(_, r)| zefiro_integration_usage::claude::chip_percent(r, self.claude_last_ok.as_ref()))
+        self.claude.as_ref().and_then(|s| zefiro_integration_usage::claude::chip_percent_accounts(&s.accounts, crate::usage_loop::now_unix()))
     }
 
     /// % do chip do Codex: a maior janela primária entre as contas.
