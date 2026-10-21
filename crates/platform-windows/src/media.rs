@@ -5,7 +5,7 @@
 //! chamada assíncrona do WinRT espera na thread de UI.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use windows::Foundation::TypedEventHandler;
@@ -13,9 +13,10 @@ use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession as Session, GlobalSystemMediaTransportControlsSessionManager as Manager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status,
 };
+use windows::Storage::Streams::{Buffer, DataReader, IRandomAccessStream, InputStreamOptions};
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
-use windows::core::Result;
-use zefiro_island::media::{MediaSession, Playback, app_name_from_aumid};
+use windows::core::{Interface, Result};
+use zefiro_island::media::{COVER_SETTLE_MS, CoverCache, MediaSession, Playback, VanishHold, app_name_from_aumid, fingerprint, new_tracks};
 use zefiro_platform::image::Image;
 
 /// Lado da capa decodificada (a maior exibição é 64 DIP; 128 cobre 200 % de escala).
@@ -94,10 +95,13 @@ fn run(rx: &Receiver<Job>, tx: &Sender<Job>, shared: &Mutex<Vec<MediaSession>>, 
         Ok(())
     }))?;
     let mut watched: Vec<Watched> = Vec::new();
-    let mut covers: HashMap<(String, String, String), Option<Image>> = HashMap::new();
+    let mut covers = CoverCache::default();
     let mut icons = Icons::default();
     let mut last: Vec<MediaSession> = Vec::new();
     let mut failing: HashSet<String> = HashSet::new();
+    let mut hold = VanishHold::default();
+    // Releituras marcadas depois de uma faixa nova (ms desde a época Unix).
+    let mut settle: Vec<i64> = Vec::new();
     let mut pending = Some(true);
     loop {
         if let Some(full) = pending.take() {
@@ -112,7 +116,12 @@ fn run(rx: &Receiver<Job>, tx: &Sender<Job>, shared: &Mutex<Vec<MediaSession>>, 
                     }
                 }
             }
-            let mut snapshot = snapshot(&watched, full, &last, &mut covers, &mut failing);
+            let published = snapshot(&watched, full, &last, &mut covers, &mut failing);
+            let now = now_unix_ms();
+            if full && new_tracks(&last, &published) {
+                settle = COVER_SETTLE_MS.iter().map(|ms| now + ms).collect();
+            }
+            let mut snapshot = hold.apply(published, now);
             icons.fill(&mut snapshot);
             if snapshot != last {
                 last = snapshot.clone();
@@ -122,9 +131,24 @@ fn run(rx: &Receiver<Job>, tx: &Sender<Job>, shared: &Mutex<Vec<MediaSession>>, 
                 notify();
             }
         }
-        let job = match rx.recv() {
-            Ok(job) => job,
-            Err(_) => break,
+        // Sem evento, acorda para reler a capa ou soltar uma sessão segurada.
+        let wake = settle.first().copied().into_iter().chain(hold.deadline()).min();
+        let job = match wake {
+            None => match rx.recv() {
+                Ok(job) => job,
+                Err(_) => break,
+            },
+            Some(at) => match rx.recv_timeout(Duration::from_millis((at - now_unix_ms()).max(0) as u64)) {
+                Ok(job) => job,
+                Err(RecvTimeoutError::Timeout) => {
+                    let now = now_unix_ms();
+                    let reread = settle.first().is_some_and(|t| *t <= now);
+                    settle.retain(|t| *t > now);
+                    pending = Some(reread);
+                    continue;
+                }
+                Err(RecvTimeoutError::Disconnected) => break,
+            },
         };
         // Agrupa a rajada de eventos (o SMTC manda vários de uma vez na troca de faixa).
         let mut full = None;
@@ -150,15 +174,20 @@ fn run_command(watched: &[Watched], c: &MediaCommand) {
     let id = match c {
         MediaCommand::PlayPause(id) | MediaCommand::Next(id) | MediaCommand::Previous(id) | MediaCommand::Seek(id, _) => id,
     };
-    let Some(w) = watched.iter().find(|w| w.session.SourceAppUserModelId().is_ok_and(|s| s == id.as_str())) else { return };
+    let Some(w) = watched.iter().find(|w| w.session.SourceAppUserModelId().is_ok_and(|s| s == id.as_str())) else {
+        tracing::info!(?c, "comando de mídia sem sessão (o app trocou de faixa ou fechou)");
+        return;
+    };
     let result = match c {
         MediaCommand::PlayPause(_) => w.session.TryTogglePlayPauseAsync().and_then(|op| op.get()),
         MediaCommand::Next(_) => w.session.TrySkipNextAsync().and_then(|op| op.get()),
         MediaCommand::Previous(_) => w.session.TrySkipPreviousAsync().and_then(|op| op.get()),
         MediaCommand::Seek(_, seconds) => w.session.TryChangePlaybackPositionAsync((seconds * 1e7) as i64).and_then(|op| op.get()),
     };
-    if let Err(e) = result {
-        tracing::warn!(?c, "comando de mídia falhou: {e}");
+    match result {
+        Ok(true) => {}
+        Ok(false) => tracing::info!(?c, "o app recusou o comando de mídia"),
+        Err(e) => tracing::warn!(?c, "comando de mídia falhou: {e}"),
     }
 }
 
@@ -167,7 +196,7 @@ fn unix_ms(universal: i64) -> i64 {
     universal / 10_000 - 11_644_473_600_000
 }
 
-fn snapshot(watched: &[Watched], full: bool, last: &[MediaSession], covers: &mut HashMap<(String, String, String), Option<Image>>, failing: &mut HashSet<String>) -> Vec<MediaSession> {
+fn snapshot(watched: &[Watched], full: bool, last: &[MediaSession], covers: &mut CoverCache, failing: &mut HashSet<String>) -> Vec<MediaSession> {
     let mut out = Vec::new();
     for w in watched {
         let id = w.session.SourceAppUserModelId().map_or_else(|_| "?".to_string(), |s| s.to_string());
@@ -184,11 +213,11 @@ fn snapshot(watched: &[Watched], full: bool, last: &[MediaSession], covers: &mut
         }
     }
     // Capas de faixas que já não estão em nenhuma sessão saem do cache.
-    covers.retain(|k, _| out.iter().any(|s| s.track_key() == *k));
+    covers.retain(|k| out.iter().any(|s| s.track_key() == *k));
     out
 }
 
-fn read_session(s: &Session, full: bool, last: &[MediaSession], covers: &mut HashMap<(String, String, String), Option<Image>>) -> Result<MediaSession> {
+fn read_session(s: &Session, full: bool, last: &[MediaSession], covers: &mut CoverCache) -> Result<MediaSession> {
     let id = s.SourceAppUserModelId()?.to_string();
     let previous = last.iter().find(|p| p.id == id);
     let playback = s.GetPlaybackInfo()?;
@@ -230,21 +259,16 @@ fn read_session(s: &Session, full: bool, last: &[MediaSession], covers: &mut Has
             session.title = props.Title()?.to_string();
             session.artist = props.Artist()?.to_string();
             session.album = props.AlbumTitle()?.to_string();
-            let key = session.track_key();
-            session.cover = match covers.get(&key) {
-                Some(c) => c.clone(),
-                None => {
-                    let cover = decode_cover(&props).unwrap_or_else(|e| {
-                        tracing::debug!("capa ilegível: {e}");
-                        None
-                    });
-                    // Uma capa ausente agora pode chegar num evento seguinte: só guarda as que vieram.
-                    if cover.is_some() {
-                        covers.insert(key, cover.clone());
-                    }
-                    cover
-                }
-            };
+            // O Brave e o Chrome publicam o título novo antes da miniatura nova: a capa segue os
+            // bytes da miniatura, não só a faixa, senão a da faixa anterior ficaria presa.
+            let thumb = thumbnail(&props);
+            session.cover = covers.resolve(&session.track_key(), thumb.as_ref().map(|(print, _)| *print), || {
+                let (_, stream) = thumb?;
+                crate::imaging::decode_stream(&stream, COVER_PX, true).unwrap_or_else(|e| {
+                    tracing::debug!("capa ilegível: {e}");
+                    None
+                })
+            });
         }
     }
     // Browsers sem posição publicada mandam LastUpdatedTime zerado: trata como amostra de agora.
@@ -258,11 +282,18 @@ pub fn now_unix_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
 
-fn decode_cover(props: &windows::Media::Control::GlobalSystemMediaTransportControlsSessionMediaProperties) -> Result<Option<Image>> {
-    match props.Thumbnail() {
-        Ok(thumb) => crate::imaging::decode(&thumb, COVER_PX, true),
-        Err(_) => Ok(None),
-    }
+/// Miniatura publicada agora: a impressão digital dos bytes e o fluxo, de volta ao início.
+fn thumbnail(props: &windows::Media::Control::GlobalSystemMediaTransportControlsSessionMediaProperties) -> Option<(u64, IRandomAccessStream)> {
+    let read = || -> Result<(u64, IRandomAccessStream)> {
+        let stream = props.Thumbnail()?.OpenReadAsync()?.get()?;
+        let size = u32::try_from(stream.Size()?).unwrap_or(u32::MAX);
+        let buffer = stream.ReadAsync(&Buffer::Create(size)?, size, InputStreamOptions::None)?.get()?;
+        let mut bytes = vec![0; buffer.Length()? as usize];
+        DataReader::FromBuffer(&buffer)?.ReadBytes(&mut bytes)?;
+        stream.Seek(0)?;
+        Ok((fingerprint(&bytes), stream.cast()?))
+    };
+    read().map_err(|e| tracing::debug!("miniatura ilegível: {e}")).ok()
 }
 
 #[cfg(test)]

@@ -101,6 +101,92 @@ impl SourceChooser {
     }
 }
 
+/// Identidade de uma faixa (`MediaSession::track_key`).
+pub type TrackKey = (String, String, String);
+
+/// Capas decodificadas por faixa, lembrando de que miniatura cada uma veio.
+#[derive(Debug, Default)]
+pub struct CoverCache {
+    covers: std::collections::HashMap<TrackKey, (u64, Image)>,
+}
+
+impl CoverCache {
+    /// Capa da faixa `key`. `thumbnail` é a impressão digital dos bytes da miniatura publicada
+    /// agora (`None` sem miniatura); `decode` só roda quando ela não é a da capa guardada.
+    pub fn resolve(&mut self, key: &TrackKey, thumbnail: Option<u64>, decode: impl FnOnce() -> Option<Image>) -> Option<Image> {
+        let cached = self.covers.get(key);
+        // Sem miniatura agora (o navegador a troca em dois passos): a capa da mesma faixa fica.
+        let Some(print) = thumbnail else { return cached.map(|(_, image)| image.clone()) };
+        if let Some((p, image)) = cached
+            && *p == print
+        {
+            return Some(image.clone());
+        }
+        match decode() {
+            Some(image) => {
+                self.covers.insert(key.clone(), (print, image.clone()));
+                Some(image)
+            }
+            None => cached.map(|(_, image)| image.clone()),
+        }
+    }
+
+    /// Esquece as faixas que já não estão em nenhuma sessão.
+    pub fn retain(&mut self, keep: impl Fn(&TrackKey) -> bool) {
+        self.covers.retain(|k, _| keep(k));
+    }
+}
+
+/// Releituras da capa depois de uma faixa nova, em ms: a miniatura definitiva do navegador chega
+/// depois do título, às vezes sem aviso (o fork C++ relê por 3 s pelo mesmo motivo).
+pub const COVER_SETTLE_MS: [i64; 4] = [150, 500, 1_200, 3_000];
+
+/// Alguma sessão de `now` traz uma faixa que `last` não tinha.
+pub fn new_tracks(last: &[MediaSession], now: &[MediaSession]) -> bool {
+    now.iter().filter(|s| s.has_track()).any(|s| !last.iter().any(|l| l.track_key() == s.track_key()))
+}
+
+/// Sessões que sumiram do Windows tocando. O YouTube no Brave tira a sessão do SMTC por uns
+/// 5 s a cada troca de vídeo (próxima, anterior ou o fim de um vídeo do Mix): sem isto a ilha ficava
+/// ociosa, o painel fechava e a capa piscava. A cópia segurada mantém faixa e capa, mas sem
+/// controles, porque não há sessão para receber o comando até ela voltar.
+#[derive(Debug, Default)]
+pub struct VanishHold {
+    previous: Vec<MediaSession>,
+    held: Vec<(MediaSession, i64)>,
+}
+
+impl VanishHold {
+    /// Quanto uma sessão sumida fica na ilha.
+    pub const HOLD_MS: i64 = 10_000;
+
+    /// `published`: o que o Windows mostra agora. Devolve as sessões com as seguradas no fim.
+    pub fn apply(&mut self, published: Vec<MediaSession>, now_ms: i64) -> Vec<MediaSession> {
+        let present = |id: &str| published.iter().any(|s| s.id == id);
+        self.held.retain(|(s, until)| *until > now_ms && !present(&s.id));
+        for s in &self.previous {
+            if s.playback == Playback::Playing && s.has_track() && !present(&s.id) {
+                let held = MediaSession { can_previous: false, can_next: false, can_play_pause: false, can_seek: false, ..s.clone() };
+                self.held.push((held, now_ms + Self::HOLD_MS));
+            }
+        }
+        self.previous = published.clone();
+        let mut out = published;
+        out.extend(self.held.iter().map(|(s, _)| s.clone()));
+        out
+    }
+
+    /// Quando a próxima sessão segurada expira (ms desde a época Unix).
+    pub fn deadline(&self) -> Option<i64> {
+        self.held.iter().map(|(_, until)| *until).min()
+    }
+}
+
+/// Impressão digital (FNV-1a de 64 bits) dos bytes de uma miniatura.
+pub fn fingerprint(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x0000_0100_0000_01b3))
+}
+
 /// Nome para mostrar a partir do AUMID: `Spotify.exe` → Spotify, `SpotifyAB.SpotifyMusic_…!Spotify`
 /// → Spotify, `Brave.Perfil` → Brave, `Microsoft.ZuneMusic_…!Microsoft.ZuneMusic` → ZuneMusic.
 pub fn app_name_from_aumid(aumid: &str) -> String {
@@ -183,6 +269,77 @@ mod tests {
         assert_eq!(app_name_from_aumid("Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic"), "ZuneMusic");
         assert_eq!(app_name_from_aumid("chrome"), "Chrome");
         assert_eq!(app_name_from_aumid(r"C:\Apps\foobar2000.exe"), "Foobar2000");
+    }
+
+    fn pixel(v: u8) -> Option<Image> {
+        Image::new(1, 1, vec![v, v, v, 255])
+    }
+
+    #[test]
+    fn cover_follows_the_thumbnail_bytes_of_the_same_track() {
+        // Navegadores (Brave, Chrome) publicam o título novo um instante antes da miniatura nova:
+        // a primeira leitura da faixa ainda traz a capa da anterior.
+        let mut cache = CoverCache::default();
+        let key = session("brave", Playing).track_key();
+        let stale = cache.resolve(&key, Some(fingerprint(b"capa antiga")), || pixel(1)).expect("capa");
+        let fresh = cache.resolve(&key, Some(fingerprint(b"capa nova")), || pixel(2)).expect("capa");
+        assert_ne!(fresh.id(), stale.id(), "a miniatura nova troca a capa da mesma faixa");
+        let again = cache.resolve(&key, Some(fingerprint(b"capa nova")), || panic!("mesmos bytes não decodificam de novo"));
+        assert_eq!(again.map(|c| c.id()), Some(fresh.id()));
+        let gone = cache.resolve(&key, None, || panic!("sem miniatura não há o que decodificar"));
+        assert_eq!(gone.map(|c| c.id()), Some(fresh.id()), "a miniatura sumiu por um instante: a capa fica");
+        cache.retain(|_| false);
+        assert!(cache.resolve(&key, None, || None).is_none());
+    }
+
+    #[test]
+    fn unreadable_new_thumbnail_keeps_the_cover_of_the_same_track() {
+        let mut cache = CoverCache::default();
+        let key = session("brave", Playing).track_key();
+        let first = cache.resolve(&key, Some(1), || pixel(1)).expect("capa");
+        assert_eq!(cache.resolve(&key, Some(2), || None).map(|c| c.id()), Some(first.id()));
+        assert_ne!(fingerprint(b"a"), fingerprint(b"b"));
+    }
+
+    #[test]
+    fn a_session_that_vanishes_while_playing_is_held_without_controls() {
+        let mut hold = VanishHold::default();
+        let brave = session("brave", Playing);
+        assert_eq!(hold.apply(vec![brave.clone(), session("spotify", Paused)], 0).len(), 2);
+        // Próxima no YouTube: o Brave some do SMTC enquanto o vídeo novo carrega.
+        let gap = hold.apply(vec![session("spotify", Paused)], 1_000);
+        let held = gap.iter().find(|s| s.id == "brave").expect("o Brave fica na ilha");
+        assert_eq!((held.title.as_str(), held.playback), (brave.title.as_str(), Playing));
+        assert!(!held.can_next && !held.can_previous && !held.can_play_pause && !held.can_seek, "sem sessão, sem controles");
+        assert_eq!(hold.deadline(), Some(1_000 + VanishHold::HOLD_MS));
+        // Ele volta com a faixa nova: a cópia sai.
+        let mut next = session("brave", Playing);
+        next.title = "outra".into();
+        let back = hold.apply(vec![session("spotify", Paused), next.clone()], 5_000);
+        assert_eq!(back, vec![session("spotify", Paused), next]);
+        assert_eq!(hold.deadline(), None);
+    }
+
+    #[test]
+    fn held_sessions_expire_and_paused_ones_leave_at_once() {
+        let mut hold = VanishHold::default();
+        hold.apply(vec![session("brave", Playing), session("spotify", Paused)], 0);
+        assert_eq!(hold.apply(vec![], 1_000).iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["brave"], "pausado sai na hora");
+        assert_eq!(hold.apply(vec![], 1_000 + VanishHold::HOLD_MS - 1).len(), 1);
+        assert!(hold.apply(vec![], 1_000 + VanishHold::HOLD_MS).is_empty(), "o app fechou de vez");
+        assert!(hold.apply(vec![], 30_000).is_empty(), "uma vez expirada, não volta a ser segurada");
+    }
+
+    #[test]
+    fn new_tracks_only_when_a_track_key_appears() {
+        let a = session("brave", Playing);
+        let mut moved = a.clone();
+        moved.position_s = 99.0;
+        assert!(!new_tracks(std::slice::from_ref(&a), &[moved]), "só a posição mudou");
+        let mut b = a.clone();
+        b.title = "outra".into();
+        assert!(new_tracks(std::slice::from_ref(&a), &[b]));
+        assert!(new_tracks(&[], &[a]), "sessão nova");
     }
 
     #[test]
