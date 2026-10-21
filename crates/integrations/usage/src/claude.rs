@@ -150,10 +150,11 @@ pub fn should_query(entry: &ClaudeEntry, now_unix: i64) -> bool {
     entry.retry_at.is_none_or(|t| t <= now_unix)
 }
 
-/// Menor intervalo entre duas consultas pedidas pelo botão de atualizar.
-pub const MIN_FORCED: std::time::Duration = std::time::Duration::from_secs(30);
+/// Menor intervalo entre duas consultas pedidas pelo botão de atualizar: a API de uso respondeu 429 a
+/// uma consulta 63 s depois da anterior (2026-10-21).
+pub const MIN_FORCED: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// O botão de atualizar vale: alguma conta não está em pausa depois de um 429. O piso de 30 s entre
+/// O botão de atualizar vale: alguma conta não está em pausa depois de um 429. O piso de 60 s entre
 /// consultas forçadas (`MIN_FORCED`) é do serviço.
 pub fn can_refresh(snapshot: &ClaudeSnapshot, now_unix: i64) -> bool {
     snapshot.accounts.is_empty() || snapshot.accounts.iter().any(|a| should_query(&a.data, now_unix))
@@ -388,7 +389,7 @@ mod tests {
         let mut paused = with(Err(UsageError::Http(429)), None, false);
         paused.data.retry_at = Some(now + 60);
         let snap = |accounts: Vec<Account<ClaudeEntry>>| ClaudeSnapshot { accounts, wsl_stopped: false, at: Some(std::time::Instant::now()) };
-        // Acabou de consultar e mesmo assim vale: o piso de 30 s fica no serviço, senão o botão
+        // Acabou de consultar e mesmo assim vale: o piso de 60 s fica no serviço, senão o botão
         // ficaria apagado até o próximo ciclo (o painel só é redesenhado quando chega dado).
         assert!(can_refresh(&snap(vec![ok.clone()]), now));
         // Todas as contas em pausa depois de um 429.

@@ -17,7 +17,7 @@ const INTERVAL: Duration = Duration::from_secs(300);
 const FRESH: Duration = Duration::from_secs(120);
 const TIMEOUT: Duration = Duration::from_secs(15);
 
-/// `Force` é o botão de atualizar do painel: consulta se a última tiver mais de 30 s.
+/// `Force` é o botão de atualizar do painel: consulta se a última tiver mais de 60 s.
 enum Wake { Refresh, Force, Stop }
 
 /// Resposta de uma consulta e o `Retry-After` de um 429, em segundos.
@@ -106,7 +106,7 @@ fn cycle(discover: &Discover, previous: &[Account<ClaudeEntry>], query: &dyn Fn(
 
 impl ClaudeService {
     /// Consulta ao iniciar, a cada 5 min, no `refresh` (se o dado tiver mais de 2 min) e no
-    /// `refresh_now` (se tiver mais de 30 s). Conta com 429 fica em pausa (`rate_limit_wait`). `discover`
+    /// `refresh_now` (se tiver mais de 60 s). Conta com 429 fica em pausa (`rate_limit_wait`). `discover`
     /// acha as origens (Windows e WSL rodando) a cada consulta; `notify` é chamado (em outra thread)
     /// depois de cada consulta.
     pub fn start(discover: Discover, notify: Arc<dyn Fn() + Send + Sync>) -> std::io::Result<ClaudeService> {
@@ -140,7 +140,7 @@ impl ClaudeService {
                     // Avisa sempre: mesmo sem mudança, o "Atualizado há" do painel muda.
                     notify();
                 } else if matches!(wake, Wake::Force) {
-                    // Botão recusado (menos de 30 s): o painel sai do "Atualizando…".
+                    // Botão recusado (menos de 60 s): o painel sai do "Atualizando…".
                     notify();
                 }
                 wake = match rx.recv_timeout(INTERVAL) {
