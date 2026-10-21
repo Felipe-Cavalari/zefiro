@@ -5,12 +5,13 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicIsize, Ordering};
 use windows::Win32::Foundation::*;
+use windows::Win32::Graphics::Dwm::{DWMWA_USE_HOSTBACKDROPBRUSH, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, DeleteObject, RGN_OR, ScreenToClient, SetWindowRgn};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetCapture, GetKeyState, ReleaseCapture, SetCapture, SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::{PCWSTR, Result, w};
+use windows::core::{BOOL, PCWSTR, Result, w};
 use zefiro_platform::geometry::{Point, Rect};
 
 pub const WM_USER_BASE: u32 = WM_APP + 0x100;
@@ -270,6 +271,13 @@ pub fn create(kind: WindowKind, r: Rect) -> Result<HWND> {
     if kind == WindowKind::Message {
         MESSAGE_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
         return Ok(hwnd);
+    }
+    // Sem isto, o fundo do Windows (`CreateHostBackdropBrush`, o acrílico dos temas) sai preto numa
+    // janela Win32: o Cobalto ficava com cor fixa.
+    let on = BOOL::from(true);
+    // SAFETY: janela recém-criada; o ponteiro aponta para um BOOL local do tamanho informado.
+    if let Err(e) = unsafe { DwmSetWindowAttribute(hwnd, DWMWA_USE_HOSTBACKDROPBRUSH, (&raw const on).cast(), size_of::<BOOL>() as u32) } {
+        tracing::warn!("acrílico indisponível nesta janela: {e}");
     }
     let input_ex = WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST | if kind == WindowKind::Bar { WS_EX_NOACTIVATE } else { WINDOW_EX_STYLE(0) };
     // SAFETY: janela de desenho recém-criada; a de entrada pertence a ela (fica sempre acima).
