@@ -171,17 +171,44 @@ pub fn taskbar_dark() -> bool {
     reg_dword(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "SystemUsesLightTheme").unwrap_or(0) == 0
 }
 
+/// Saída de um processo sem janela, se ele terminar com sucesso dentro de `timeout`; senão ele é
+/// encerrado e volta `None`. Só para saídas curtas (o pipe não é lido enquanto o processo roda).
+pub fn hidden_output(exe: &str, args: &[&str], timeout: std::time::Duration) -> Option<Vec<u8>> {
+    use std::io::Read;
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut child = std::process::Command::new(exe)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .ok()?;
+    let start = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if start.elapsed() < timeout => std::thread::sleep(std::time::Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    };
+    let mut out = Vec::new();
+    child.stdout.take()?.read_to_end(&mut out).ok()?;
+    status.success().then_some(out)
+}
+
 /// Distros do WSL que já estão rodando (minúsculas). Consultar `\\wsl.localhost` de uma distro
 /// parada a liga, então só se confere caminho nas desta lista. Sem WSL, lista vazia.
 pub fn wsl_running_distros() -> Vec<String> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let Ok(out) = std::process::Command::new("wsl.exe").args(["--list", "--running", "--quiet"]).creation_flags(CREATE_NO_WINDOW).output() else { return Vec::new() };
-    if !out.status.success() {
-        return Vec::new();
-    }
+    // Com o serviço do WSL emperrado (depois de hibernar, por exemplo), o `wsl.exe` não volta.
+    let Some(stdout) = hidden_output("wsl.exe", &["--list", "--running", "--quiet"], std::time::Duration::from_secs(3)) else { return Vec::new() };
     // O wsl.exe escreve em UTF-16LE.
-    let wide: Vec<u16> = out.stdout.as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes(*b)).collect();
+    let wide: Vec<u16> = stdout.as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes(*b)).collect();
     String::from_utf16_lossy(&wide).lines().map(|l| l.trim().trim_matches('\0').to_lowercase()).filter(|l| !l.is_empty()).collect()
 }
 
@@ -200,6 +227,20 @@ pub fn find_code_exe() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hidden_output_returns_stdout() {
+        let out = hidden_output("cmd.exe", &["/c", "echo oi"], std::time::Duration::from_secs(5)).expect("saída");
+        assert!(String::from_utf8_lossy(&out).contains("oi"));
+    }
+
+    #[test]
+    fn hidden_output_gives_up_on_a_stuck_process() {
+        // Um `wsl.exe` preso (serviço do WSL emperrado) não pode prender a thread do uso.
+        let t = std::time::Instant::now();
+        assert_eq!(hidden_output("cmd.exe", &["/c", "ping -n 6 127.0.0.1 >nul"], std::time::Duration::from_millis(500)), None);
+        assert!(t.elapsed() < std::time::Duration::from_secs(2), "{:?}", t.elapsed());
+    }
 
     #[test]
     fn reads_system_preferences_without_failing() {

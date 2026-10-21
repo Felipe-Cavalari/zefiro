@@ -222,7 +222,6 @@ fn now_unix() -> i64 {
 pub struct CodexService {
     tx: std::sync::mpsc::Sender<Wake>,
     state: Shared,
-    thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl CodexService {
@@ -230,7 +229,7 @@ impl CodexService {
         let (tx, rx) = std::sync::mpsc::channel();
         let state: Shared = Default::default();
         let shared = state.clone();
-        let thread = std::thread::Builder::new().name("zefiro-codex".into()).spawn(move || {
+        std::thread::Builder::new().name("zefiro-codex".into()).spawn(move || {
             let mut seen: Option<Seen> = None;
             let mut reset_due: Option<i64> = None;
             // Leituras do ciclo anterior: as de uma distro que parou continuam valendo.
@@ -271,7 +270,7 @@ impl CodexService {
                 }
             }
         })?;
-        Ok(CodexService { tx, state, thread: Some(thread) })
+        Ok(CodexService { tx, state })
     }
 
     /// As contas lidas e se há WSL parado.
@@ -285,12 +284,11 @@ impl CodexService {
     }
 }
 
+/// Não espera a thread: ela pode estar presa num `wsl.exe`, num `\wsl.localhost` ou num HTTP, e
+/// quem solta o serviço é a thread da UI. A thread sai sozinha ao ver o `Stop`.
 impl Drop for CodexService {
     fn drop(&mut self) {
         let _ = self.tx.send(Wake::Stop);
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
     }
 }
 
@@ -546,6 +544,21 @@ mod tests {
         drop(svc);
         std::fs::remove_dir_all(&windows).unwrap();
         std::fs::remove_dir_all(&wsl_home).unwrap();
+    }
+
+    #[test]
+    fn dropping_the_service_does_not_wait_for_a_slow_cycle() {
+        // `discover` preso (um `wsl.exe` ou um `\\wsl.localhost` lento): soltar o serviço na thread
+        // da UI não pode esperar por ele.
+        let slow: crate::origins::Discover = std::sync::Arc::new(|| {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            Discovery::default()
+        });
+        let svc = CodexService::start(slow, std::sync::Arc::new(|| {})).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let t = std::time::Instant::now();
+        drop(svc);
+        assert!(t.elapsed() < std::time::Duration::from_millis(500), "{:?}", t.elapsed());
     }
 
     #[test]

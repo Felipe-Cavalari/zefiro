@@ -24,7 +24,6 @@ type Shared = Arc<Mutex<Option<ClaudeSnapshot>>>;
 pub struct ClaudeService {
     tx: Sender<Wake>,
     state: Shared,
-    thread: Option<std::thread::JoinHandle<()>>,
 }
 
 fn now_ms() -> i64 {
@@ -90,7 +89,7 @@ impl ClaudeService {
         let (tx, rx) = mpsc::channel();
         let state: Shared = Default::default();
         let shared = state.clone();
-        let thread = std::thread::Builder::new().name("zefiro-claude".into()).spawn(move || {
+        std::thread::Builder::new().name("zefiro-claude".into()).spawn(move || {
             // SAFETY: WinRT nesta thread, desfeito no fim dela.
             let inited = unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.is_ok();
             let mut last: Option<Instant> = None;
@@ -127,7 +126,7 @@ impl ClaudeService {
                 unsafe { RoUninitialize() };
             }
         })?;
-        Ok(ClaudeService { tx, state, thread: Some(thread) })
+        Ok(ClaudeService { tx, state })
     }
 
     /// As contas, se há WSL parado e quando terminou a última consulta.
@@ -141,11 +140,10 @@ impl ClaudeService {
     }
 }
 
+/// Não espera a thread: ela pode estar presa num `wsl.exe`, num `\wsl.localhost` ou num HTTP, e
+/// quem solta o serviço é a thread da UI. A thread sai sozinha ao ver o `Stop`.
 impl Drop for ClaudeService {
     fn drop(&mut self) {
         let _ = self.tx.send(Wake::Stop);
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
     }
 }
