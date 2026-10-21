@@ -50,55 +50,29 @@ pub fn parse_codex_tail(text: &str) -> Option<CodexUsage> {
     })
 }
 
-/// Percurso das sessões (`sessions/AAAA/MM/DD`): as pastas de data, da mais nova para a mais velha,
-/// até juntar `limit` arquivos e mais uma pasta de dia (a sessão que passou da meia-noite fica na
-/// pasta do dia em que começou). Pastas com outros nomes são sempre percorridas.
-struct Walk { files: Vec<(SystemTime, PathBuf)>, limit: usize, extra_day_done: bool }
-
-impl Walk {
-    fn done(&self) -> bool {
-        self.files.len() >= self.limit && self.extra_day_done
-    }
-
-    fn visit(&mut self, dir: &Path, dated: bool) {
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
-        let before = self.files.len();
-        let (mut dates, mut others) = (Vec::new(), Vec::new());
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Ok(meta) = entry.metadata() else { continue };
-            if meta.is_dir() {
-                let numeric = path.file_name().and_then(|n| n.to_str()).is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
-                if numeric { dates.push(path) } else { others.push(path) }
-            } else if path.extension().is_some_and(|e| e == "jsonl")
-                && let Ok(modified) = meta.modified()
-            {
-                self.files.push((modified, path));
-            }
-        }
-        for other in others {
-            self.visit(&other, false);
-        }
-        dates.sort_by(|a, b| b.cmp(a));
-        let day = dated && dates.is_empty();
-        for date in dates {
-            if self.done() {
-                break;
-            }
-            self.visit(&date, true);
-        }
-        if day && before >= self.limit {
-            self.extra_day_done = true;
+fn collect(dir: &Path, out: &mut Vec<(SystemTime, PathBuf)>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(meta) = entry.metadata() else { continue };
+        if meta.is_dir() {
+            collect(&path, out);
+        } else if path.extension().is_some_and(|e| e == "jsonl")
+            && let Ok(modified) = meta.modified()
+        {
+            out.push((modified, path));
         }
     }
 }
 
-/// Os `.jsonl` das pastas de data mais novas (§6.4 da spec), do mais modificado para o mais velho.
+/// Os `limit` `.jsonl` mais modificados, do mais novo para o mais velho. A árvore é percorrida
+/// inteira: `codex resume` continua gravando no arquivo da pasta do dia em que a sessão começou.
 pub fn recent_sessions(sessions_dir: &Path, limit: usize) -> Vec<(SystemTime, PathBuf)> {
-    let mut walk = Walk { files: Vec::new(), limit, extra_day_done: false };
-    walk.visit(sessions_dir, false);
-    walk.files.sort_by_key(|f| std::cmp::Reverse(f.0));
-    walk.files
+    let mut files = Vec::new();
+    collect(sessions_dir, &mut files);
+    files.sort_by_key(|f| std::cmp::Reverse(f.0));
+    files.truncate(limit);
+    files
 }
 
 /// A conta da sessão: `payload.creator_account_id` do `session_meta` (1ª linha).
@@ -408,14 +382,26 @@ mod tests {
     }
 
     #[test]
-    fn recent_sessions_walks_newest_days_first() {
+    fn recent_sessions_are_newest_first() {
         let dir = temp("days");
         let a = put(&dir, "2026/10/20/a.jsonl", "", 10);
         let b = put(&dir, "2026/10/21/b.jsonl", "", 20);
         let old = put(&dir, "2025/01/01/velho.jsonl", "", 30);
-        let found: Vec<PathBuf> = recent_sessions(&dir, 1).into_iter().map(|(_, p)| p).collect();
-        assert!(found.contains(&a) && found.contains(&b), "{found:?}");
-        assert!(!found.contains(&old), "{found:?}");
+        let found: Vec<PathBuf> = recent_sessions(&dir, 3).into_iter().map(|(_, p)| p).collect();
+        assert_eq!(found, [old, b.clone(), a]);
+        assert_eq!(recent_sessions(&dir, 1).len(), 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn resumed_session_in_old_day_folder_is_found() {
+        // `codex resume` continua gravando no arquivo da pasta do dia em que a sessão começou.
+        let dir = temp("resumed");
+        let resumed = put(&dir, "2026/10/18/retomada.jsonl", "", 100);
+        put(&dir, "2026/10/20/a.jsonl", "", 10);
+        put(&dir, "2026/10/21/b.jsonl", "", 20);
+        assert_eq!(recent_sessions(&dir, 1)[0].1, resumed);
+        assert_eq!(newest_session(&dir).map(|(_, p)| p), Some(resumed));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
