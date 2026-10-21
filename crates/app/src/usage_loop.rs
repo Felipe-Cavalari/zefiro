@@ -174,7 +174,7 @@ impl Loop {
             (false, true) => {
                 tracing::info!("uso do Claude: serviço desligado (chip fora da barra)");
                 self.usage.claude = None;
-                self.ctx.usage.claude = None;
+                self.ctx.usage.set_claude(None, now_unix());
             }
             _ => {}
         }
@@ -189,7 +189,7 @@ impl Loop {
             (false, true) => {
                 tracing::info!("uso do Codex: serviço desligado (chip fora da barra)");
                 self.usage.codex = None;
-                self.ctx.usage.codex = None;
+                self.ctx.usage.set_codex(None, now_unix());
             }
             _ => {}
         }
@@ -201,9 +201,8 @@ impl Loop {
 
     /// Chega quando o uso muda ou uma janela reinicia: a barra só é refeita se o número do chip mudou.
     pub fn usage_codex_changed(&mut self) -> Result<()> {
-        let before = self.ctx.usage.codex_chip();
-        self.ctx.usage.codex = self.usage.codex.as_ref().and_then(CodexService::latest);
-        if self.ctx.usage.codex_chip() != before {
+        let latest = self.usage.codex.as_ref().and_then(CodexService::latest);
+        if self.ctx.usage.set_codex(latest, now_unix()) {
             self.apply_bars(true)?;
         }
         if self.usage_panel_open(PanelKind::Codex) {
@@ -215,9 +214,8 @@ impl Loop {
     /// Chega a cada consulta (a cada 2 min): a barra só é refeita se o número do chip mudou; o
     /// painel aberto é redesenhado sempre (rodapé "Atualizado há").
     pub fn usage_claude_changed(&mut self) -> Result<()> {
-        let before = self.ctx.usage.claude_chip();
-        self.ctx.usage.claude = self.usage.claude.as_ref().and_then(ClaudeService::latest);
-        if self.ctx.usage.claude_chip() != before {
+        let latest = self.usage.claude.as_ref().and_then(ClaudeService::latest);
+        if self.ctx.usage.set_claude(latest, now_unix()) {
             self.apply_bars(true)?;
         }
         if self.usage_panel_open(PanelKind::Claude) {
