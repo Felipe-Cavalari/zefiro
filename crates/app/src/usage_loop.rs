@@ -103,7 +103,7 @@ fn claude_blocks(s: &ClaudeSnapshot, now: i64, offset: i32) -> Vec<UsageBlock> {
             // Conta lembrada de uma distro parada: o último valor bom, sem mensagem de erro.
             let usage = match &a.data.result {
                 Some(Ok(u)) => Ok(Some(u)),
-                Some(Err(_)) if a.stopped => Ok(a.data.last_ok.as_ref()),
+                Some(Err(_)) if a.stopped && a.data.last_ok.is_some() => Ok(a.data.last_ok.as_ref()),
                 Some(Err(e)) => Err(claude_message(*e, renew_at)),
                 None => Ok(None),
             };
@@ -328,6 +328,16 @@ mod tests {
         assert_eq!(stopped[0].message.as_deref(), Some("WSL desligado.\nAbra o WSL para ver o uso de lá."));
         let none = codex_blocks(&CodexSnapshot::default(), NOW, 0);
         assert_eq!(none[0].message.as_deref(), Some("Nenhum uso do Codex encontrado"));
+    }
+
+    #[test]
+    fn stopped_account_without_good_value_shows_its_error() {
+        // O caso do usuário: token do WSL vencido e a distro para; nunca houve valor bom.
+        let s = claude_snapshot(vec![claude(vec![wsl()], Err(UsageError::Expired), Some("a@b.c"), true)], true);
+        let b = &claude_blocks(&s, NOW, 0)[0];
+        assert_eq!(b.message.as_deref(), Some("Login expirado no WSL.
+Abra o Claude Code no WSL para renovar."));
+        assert_eq!(b.subtitle, "a@b.c · WSL · WSL desligado");
     }
 
     #[test]
