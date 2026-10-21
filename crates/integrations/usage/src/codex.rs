@@ -5,6 +5,9 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use crate::format::parse_iso_utc;
+use crate::origins::{Account, OriginKind, sort_accounts};
+
 /// Só o fim de cada arquivo é lido: o último `rate_limits` está perto do fim.
 const TAIL_BYTES: u64 = 256 * 1024;
 /// Sessão recém-aberta ainda sem `rate_limits`: tenta as anteriores, até este limite.
@@ -47,19 +50,144 @@ pub fn parse_codex_tail(text: &str) -> Option<CodexUsage> {
     })
 }
 
-fn collect(dir: &Path, out: &mut Vec<(SystemTime, PathBuf)>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Ok(meta) = entry.metadata() else { continue };
-        if meta.is_dir() {
-            collect(&path, out);
-        } else if path.extension().is_some_and(|e| e == "jsonl")
-            && let Ok(modified) = meta.modified()
-        {
-            out.push((modified, path));
+/// Percurso das sessões (`sessions/AAAA/MM/DD`): as pastas de data, da mais nova para a mais velha,
+/// até juntar `limit` arquivos e mais uma pasta de dia (a sessão que passou da meia-noite fica na
+/// pasta do dia em que começou). Pastas com outros nomes são sempre percorridas.
+struct Walk { files: Vec<(SystemTime, PathBuf)>, limit: usize, extra_day_done: bool }
+
+impl Walk {
+    fn done(&self) -> bool {
+        self.files.len() >= self.limit && self.extra_day_done
+    }
+
+    fn visit(&mut self, dir: &Path, dated: bool) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let before = self.files.len();
+        let (mut dates, mut others) = (Vec::new(), Vec::new());
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = entry.metadata() else { continue };
+            if meta.is_dir() {
+                let numeric = path.file_name().and_then(|n| n.to_str()).is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+                if numeric { dates.push(path) } else { others.push(path) }
+            } else if path.extension().is_some_and(|e| e == "jsonl")
+                && let Ok(modified) = meta.modified()
+            {
+                self.files.push((modified, path));
+            }
+        }
+        for other in others {
+            self.visit(&other, false);
+        }
+        dates.sort_by(|a, b| b.cmp(a));
+        let day = dated && dates.is_empty();
+        for date in dates {
+            if self.done() {
+                break;
+            }
+            self.visit(&date, true);
+        }
+        if day && before >= self.limit {
+            self.extra_day_done = true;
         }
     }
+}
+
+/// Os `.jsonl` das pastas de data mais novas (§6.4 da spec), do mais modificado para o mais velho.
+pub fn recent_sessions(sessions_dir: &Path, limit: usize) -> Vec<(SystemTime, PathBuf)> {
+    let mut walk = Walk { files: Vec::new(), limit, extra_day_done: false };
+    walk.visit(sessions_dir, false);
+    walk.files.sort_by_key(|f| std::cmp::Reverse(f.0));
+    walk.files
+}
+
+/// A conta da sessão: `payload.creator_account_id` do `session_meta` (1ª linha).
+pub fn session_account(first_line: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(first_line.trim()).ok()?;
+    v.get("payload")?.get("creator_account_id")?.as_str().filter(|s| !s.is_empty()).map(str::to_string)
+}
+
+fn first_line(path: &Path) -> Option<String> {
+    use std::io::BufRead;
+    let mut line = String::new();
+    std::io::BufReader::new(std::fs::File::open(path).ok()?).read_line(&mut line).ok()?;
+    Some(line)
+}
+
+/// O uso lido de uma sessão e a conta dela.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodexRead { pub account: Option<String>, pub modified: SystemTime, pub usage: CodexUsage }
+
+/// O uso mais recente de cada conta entre os `MAX_FILES` arquivos mais novos. Sessão sem conta (Codex
+/// antigo) entra na conta da sessão mais nova que tem uma.
+pub fn read_codex_accounts(sessions_dir: &Path) -> Vec<CodexRead> {
+    let files: Vec<(SystemTime, PathBuf, Option<String>)> = recent_sessions(sessions_dir, MAX_FILES)
+        .into_iter()
+        .take(MAX_FILES)
+        .map(|(modified, path)| {
+            let account = first_line(&path).as_deref().and_then(session_account);
+            (modified, path, account)
+        })
+        .collect();
+    let known = files.iter().find_map(|f| f.2.clone());
+    let mut reads: Vec<CodexRead> = Vec::new();
+    for (modified, path, account) in files {
+        let account = account.or_else(|| known.clone());
+        if reads.iter().any(|r| r.account == account) {
+            continue;
+        }
+        if let Some(usage) = tail(&path).as_deref().and_then(parse_codex_tail) {
+            reads.push(CodexRead { account, modified, usage });
+        }
+    }
+    reads
+}
+
+/// Uma conta do Codex: o uso mais recente e quando o arquivo dele mudou.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodexEntry { pub modified: SystemTime, pub usage: CodexUsage }
+
+/// O que o serviço publica.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CodexSnapshot { pub accounts: Vec<Account<CodexEntry>>, pub wsl_stopped: bool }
+
+fn event_time(entry: &CodexEntry) -> (Option<i64>, SystemTime) {
+    (entry.usage.event_at.as_deref().and_then(parse_iso_utc), entry.modified)
+}
+
+/// Junta as origens da mesma conta, ficando com o evento mais recente entre elas.
+pub fn merge_codex(per_origin: Vec<(OriginKind, Vec<CodexRead>)>) -> Vec<Account<CodexEntry>> {
+    let mut accounts: Vec<Account<CodexEntry>> = Vec::new();
+    for (kind, reads) in per_origin {
+        for read in reads {
+            let key = read.account.unwrap_or_else(|| format!("origem:{kind:?}"));
+            let entry = CodexEntry { modified: read.modified, usage: read.usage };
+            match accounts.iter_mut().find(|a| a.key == key) {
+                Some(a) => {
+                    if !a.origins.contains(&kind) {
+                        a.origins.push(kind.clone());
+                        a.origins.sort();
+                    }
+                    if event_time(&entry) > event_time(&a.data) {
+                        a.data = entry;
+                    }
+                }
+                None => accounts.push(Account { key, origins: vec![kind.clone()], stopped: false, data: entry }),
+            }
+        }
+    }
+    sort_accounts(&mut accounts);
+    accounts
+}
+
+/// % do chip com várias contas: a maior janela primária (0 % se já reiniciou).
+pub fn codex_chip_percent(accounts: &[Account<CodexEntry>], now_unix: i64) -> Option<f32> {
+    accounts.iter().filter_map(|a| a.data.usage.primary.map(|w| effective_percent(&w, now_unix))).reduce(f32::max)
+}
+
+/// O próximo reinício de janela entre as contas: a UI refaz o chip nessa hora.
+pub fn next_reset(accounts: &[Account<CodexEntry>], now_unix: i64) -> Option<i64> {
+    accounts.iter().flat_map(|a| [a.data.usage.primary, a.data.usage.secondary]).flatten().map(|w| w.resets_at).filter(|t| *t > now_unix).min()
 }
 
 /// Os últimos `TAIL_BYTES` do arquivo.
@@ -74,17 +202,12 @@ fn tail(path: &Path) -> Option<String> {
 
 /// O `.jsonl` mais recente (recursivo) e quando foi modificado.
 pub fn newest_session(sessions_dir: &Path) -> Option<(SystemTime, PathBuf)> {
-    let mut files = Vec::new();
-    collect(sessions_dir, &mut files);
-    files.into_iter().max_by(|a, b| a.0.cmp(&b.0))
+    recent_sessions(sessions_dir, 1).into_iter().next()
 }
 
 /// O uso mais recente: do arquivo mais novo para o mais velho, até `MAX_FILES`.
 pub fn read_codex(sessions_dir: &Path) -> Option<(PathBuf, SystemTime, CodexUsage)> {
-    let mut files = Vec::new();
-    collect(sessions_dir, &mut files);
-    files.sort_by_key(|f| std::cmp::Reverse(f.0));
-    files.into_iter().take(MAX_FILES).find_map(|(modified, path)| {
+    recent_sessions(sessions_dir, MAX_FILES).into_iter().take(MAX_FILES).find_map(|(modified, path)| {
         let usage = parse_codex_tail(&tail(&path)?)?;
         Some((path, modified, usage))
     })
@@ -170,6 +293,7 @@ impl Drop for CodexService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::origins::OriginKind;
 
     const SESSION: &str = include_str!("../tests/fixtures/codex_session.jsonl");
 
@@ -226,6 +350,116 @@ mod tests {
         assert_eq!(window_name(2880), "2 dias");
         assert_eq!(window_name(120), "2 horas");
     }
+    /// Sessão mínima: `session_meta` (com a conta, se houver) e um evento com `rate_limits`.
+    fn session(account: Option<&str>, used: f32, event_at: &str) -> String {
+        let meta = match account {
+            Some(a) => format!(r#"{{"type": "session_meta", "payload": {{"creator_account_id": "{a}"}}}}"#),
+            None => r#"{"type": "session_meta", "payload": {"cwd": "C:\\"}}"#.to_string(),
+        };
+        format!("{meta}\n{{\"timestamp\": \"{event_at}\", \"payload\": {{\"rate_limits\": {{\"plan_type\": \"plus\", \"primary\": {{\"used_percent\": {used}, \"window_minutes\": 300, \"resets_at\": 4102444800}}}}}}}}\n")
+    }
+
+    /// Grava `text` em `dir/rel` com a data de modificação `secs` depois de 2026-01-01.
+    fn put(dir: &Path, rel: &str, text: &str, secs: u64) -> PathBuf {
+        let path = dir.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, text).unwrap();
+        let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_767_225_600 + secs);
+        std::fs::File::options().write(true).open(&path).unwrap().set_modified(at).unwrap();
+        path
+    }
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("zefiro-codex-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    fn read(account: Option<&str>, used: f32, event_at: &str) -> CodexRead {
+        CodexRead { account: account.map(String::from), modified: SystemTime::UNIX_EPOCH, usage: parse_codex_tail(&session(None, used, event_at)).unwrap() }
+    }
+
+    #[test]
+    fn session_account_from_meta() {
+        assert_eq!(session_account(r#"{"type": "session_meta", "payload": {"creator_account_id": "c1"}}"#).as_deref(), Some("c1"));
+        assert_eq!(session_account(r#"{"type": "session_meta", "payload": {}}"#), None);
+        assert_eq!(session_account("cortada"), None);
+    }
+
+    #[test]
+    fn recent_sessions_walks_newest_days_first() {
+        let dir = temp("days");
+        let a = put(&dir, "2026/10/20/a.jsonl", "", 10);
+        let b = put(&dir, "2026/10/21/b.jsonl", "", 20);
+        let old = put(&dir, "2025/01/01/velho.jsonl", "", 30);
+        let found: Vec<PathBuf> = recent_sessions(&dir, 1).into_iter().map(|(_, p)| p).collect();
+        assert!(found.contains(&a) && found.contains(&b), "{found:?}");
+        assert!(!found.contains(&old), "{found:?}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn session_from_yesterday_modified_today_is_found() {
+        let dir = temp("midnight");
+        let a = put(&dir, "2026/10/20/a.jsonl", "", 50);
+        put(&dir, "2026/10/21/b.jsonl", "", 20);
+        assert_eq!(recent_sessions(&dir, 1)[0].1, a);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn two_accounts_in_one_origin() {
+        let dir = temp("two");
+        put(&dir, "2026/10/20/velho.jsonl", &session(Some("c1"), 80.0, "2026-10-20T10:00:00Z"), 10);
+        put(&dir, "2026/10/21/novo.jsonl", &session(Some("c2"), 42.0, "2026-10-21T10:00:00Z"), 20);
+        let mut reads = read_codex_accounts(&dir);
+        reads.sort_by(|a, b| a.account.cmp(&b.account));
+        assert_eq!(reads.iter().map(|r| (r.account.as_deref(), r.usage.primary.unwrap().used_percent)).collect::<Vec<_>>(), [(Some("c1"), 80.0), (Some("c2"), 42.0)]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn file_without_account_joins_newest_known() {
+        let dir = temp("anon");
+        put(&dir, "2026/10/20/conta.jsonl", &session(Some("c1"), 80.0, "2026-10-20T10:00:00Z"), 10);
+        put(&dir, "2026/10/21/sem.jsonl", &session(None, 12.0, "2026-10-21T10:00:00Z"), 20);
+        let reads = read_codex_accounts(&dir);
+        assert_eq!(reads.len(), 1);
+        assert_eq!(reads[0].account.as_deref(), Some("c1"));
+        assert_eq!(reads[0].usage.primary.unwrap().used_percent, 12.0);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn same_account_across_origins_keeps_newest_event() {
+        let wsl = OriginKind::Wsl("Ubuntu".into());
+        let merged = merge_codex(vec![
+            (wsl.clone(), vec![read(Some("c1"), 12.0, "2026-10-21T10:00:00Z")]),
+            (OriginKind::Windows, vec![read(Some("c1"), 80.0, "2026-10-16T02:56:30Z")]),
+        ]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].origins, vec![OriginKind::Windows, wsl.clone()]);
+        assert_eq!(merged[0].data.usage.primary.unwrap().used_percent, 12.0);
+        let two = merge_codex(vec![(OriginKind::Windows, vec![read(Some("c1"), 1.0, "2026-10-21T10:00:00Z")]), (wsl, vec![read(Some("c2"), 2.0, "2026-10-21T10:00:00Z")])]);
+        assert_eq!(two.len(), 2);
+    }
+
+    #[test]
+    fn chip_and_next_reset() {
+        let now = 1000;
+        let entry = |used: f32, resets_at: i64| Account {
+            key: format!("{used}"),
+            origins: vec![OriginKind::Windows],
+            stopped: false,
+            data: CodexEntry { modified: SystemTime::UNIX_EPOCH, usage: CodexUsage { primary: Some(Window { used_percent: used, window_minutes: 300, resets_at }), ..Default::default() } },
+        };
+        let accounts = [entry(80.0, now + 100), entry(30.0, now + 500)];
+        assert_eq!(codex_chip_percent(&accounts, now), Some(80.0));
+        assert_eq!(next_reset(&accounts, now), Some(now + 100));
+        assert_eq!(codex_chip_percent(&[entry(80.0, now), entry(30.0, now + 500)], now), Some(30.0));
+        assert_eq!(codex_chip_percent(&[], now), None);
+    }
+
     #[test]
     fn service_reads_on_start_and_rereads_on_refresh() {
         let dir = std::env::temp_dir().join(format!("zefiro-codex-svc-{}", std::process::id()));
