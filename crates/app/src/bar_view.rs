@@ -142,7 +142,7 @@ fn chip_content(ctx: &AppCtx, id: &str, device: &str, height: BarHeight, chip_h:
             level_chip(Level { glyph: ICON_BRIGHTNESS, text: "", dim: p.is_none() }, chip_h, font_px, scale, t, &ctx.text)
         }
         // Claude, Codex e VS Code: o ícone da marca (SVG) no lugar do glifo.
-        "codex" => with_svg_icon(zefiro_bar::usage::usage_chip(crate::usage_loop::CODEX_GLYPH, ctx.usage.codex.as_ref().and_then(|(_, u)| crate::usage_loop::codex_percent(u)), chip_h, font_px, scale, t, &ctx.text), icons::CODEX),
+        "codex" => with_svg_icon(zefiro_bar::usage::usage_chip(crate::usage_loop::CODEX_GLYPH, ctx.usage.codex_chip(), chip_h, font_px, scale, t, &ctx.text), icons::CODEX),
         "claude" => with_svg_icon(zefiro_bar::usage::usage_chip(crate::usage_loop::CLAUDE_GLYPH, ctx.usage.claude_chip(), chip_h, font_px, scale, t, &ctx.text), icons::CLAUDE_CODE),
         "vscode" => with_svg_icon(level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text), icons::VSCODE),
         "notifications" => zefiro_bar::chips::bell_chip(ctx.system.notifications, chip_h, font_px, scale, t, &ctx.text),

@@ -8,7 +8,8 @@ use zefiro_bar::controller::PanelKind;
 use zefiro_bar::usage::{UsageRow, usage_panel};
 use zefiro_integration_clock::windows::utc_offset_seconds;
 use zefiro_integration_usage::claude::{Limit, UsageError};
-use zefiro_integration_usage::codex::{CodexService, CodexUsage, Window, effective_percent, window_name};
+use zefiro_integration_usage::codex::{CodexService, Window, effective_percent, window_name};
+use zefiro_integration_usage::origins::{Discovery, Origin, OriginKind};
 use zefiro_integration_usage::format::{format_absolute, format_relative, format_short, parse_iso_utc};
 use zefiro_platform_windows::claude::ClaudeService;
 use zefiro_platform_windows::window;
@@ -33,10 +34,6 @@ fn home() -> PathBuf {
     std::env::var_os("USERPROFILE").map(PathBuf::from).unwrap_or_default()
 }
 
-/// % da janela primária, 0 se ela já reiniciou.
-pub fn codex_percent(u: &CodexUsage) -> Option<f32> {
-    u.primary.map(|w| effective_percent(&w, now_unix()))
-}
 
 /// "reinicia em 2 h 14 min" para janelas de até um dia; "reinicia qui 22 out, 11:08" para as
 /// maiores; "reiniciada" se já passou.
@@ -103,7 +100,9 @@ impl Loop {
         match (codex, self.usage.codex.is_some()) {
             (true, false) => {
                 tracing::info!("uso do Codex: serviço ligado");
-                self.usage.codex = CodexService::start(home().join(".codex").join("sessions"), Arc::new(|| window::post_user(USER_CODEX)))
+                let windows = Origin { kind: OriginKind::Windows, home: home() };
+                let discover = Arc::new(move || Discovery { origins: vec![windows.clone()], ..Default::default() });
+                self.usage.codex = CodexService::start(discover, Arc::new(|| window::post_user(USER_CODEX)))
                     .map_err(|e| tracing::warn!("uso do Codex indisponível: {e}"))
                     .ok();
             }
@@ -182,8 +181,8 @@ impl Loop {
                 }
             };
         }
-        match &self.ctx.usage.codex {
-            Some((_, u)) => {
+        match self.ctx.usage.codex.as_ref().and_then(|s| s.accounts.first()).map(|a| &a.data.usage) {
+            Some(u) => {
                 let title = u.plan.as_deref().map_or("Codex".to_string(), |p| format!("Codex · {}", capitalized(p)));
                 let rows: Vec<UsageRow> = [u.primary, u.secondary].iter().flatten().map(|w| codex_row(w, now, offset)).collect();
                 let footer = u.event_at.as_deref().and_then(parse_iso_utc).map(|t| format!("Último uso do Codex: {}", format_short(t, offset))).unwrap_or_default();
