@@ -57,7 +57,7 @@ serde_json = "1"
 windows-core = "=0.61.2"
 windows-numerics = "=0.2.0"
 windows = { version = "=0.61.3", features = [
-  "Foundation", "Foundation_Collections", "Foundation_Numerics", "Graphics", "Graphics_DirectX", "Graphics_Imaging", "ApplicationModel", "Web", "Web_Http", "Web_Http_Headers", "Devices", "Devices_Bluetooth", "Devices_Enumeration", "Media", "Media_Control", "UI_Notifications", "UI_Notifications_Management", "Storage", "Storage_Streams", "System", "UI",
+  "Foundation", "Foundation_Collections", "Foundation_Numerics", "Graphics", "Graphics_DirectX", "Graphics_Imaging", "ApplicationModel", "Web", "Web_Http", "Web_Http_Filters", "Web_Http_Headers", "Devices", "Devices_Bluetooth", "Devices_Enumeration", "Media", "Media_Control", "UI_Notifications", "UI_Notifications_Management", "Storage", "Storage_Streams", "System", "UI",
   "UI_Composition", "UI_Composition_Desktop",
   "Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Direct2D", "Win32_Graphics_Direct2D_Common",
   "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_DirectWrite", "Win32_Graphics_Dwm",
