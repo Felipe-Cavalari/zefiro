@@ -82,7 +82,7 @@ Sem o cache, o Zefiro passou a ir à rede de verdade a cada 2 min por conta, e a
 
 - **Intervalo de 5 min** (era 2). Abrir o painel só consulta de novo se o dado tiver mais de 2 min.
 - **Pausa no 429, por conta.** A espera é o `Retry-After` ou, sem ele, 5, 10, 20 e 30 min para 429 seguidos, sempre entre 1 e 30 min (`rate_limit_wait`). Durante a pausa, o painel mantém o último valor bom e o rodapé diz "Muitas consultas. Tento de novo às 19:56." Sem valor bom, o bloco diz isso no lugar das linhas.
-- **Botão de atualizar** (`E72C`) no canto do título do painel do Claude, só no Claude: o Codex lê arquivos locais, e abrir o painel já relê.
+- **Botão de atualizar** (`E72C`) no canto do título dos painéis do Claude e do Codex. No Codex, que lê arquivos locais, ele não tem piso: relê na hora, e o serviço passou a responder a todo pedido do painel, mesmo sem mudança, para o botão sair do estado "atualizando".
   - O serviço só aceita o pedido se a última consulta tiver mais de 60 s (`MIN_FORCED`). Um clique cedo demais só tira o painel do "Atualizando…".
   - O botão fica apagado enquanto atualiza ou com todas as contas em pausa. Apagá-lo também nos 60 s depois de cada consulta o deixaria apagado até o próximo ciclo, porque o painel só é redesenhado quando chega dado.
 - **Codex com uma conta só:** o subtítulo diz as origens ("Último uso do Codex: 20/10 15:18 · Windows · WSL"), porque o título não diz.

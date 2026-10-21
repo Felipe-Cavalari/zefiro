@@ -27,6 +27,7 @@ pub struct UsageRuntime {
     claude: Option<ClaudeService>,
     /// O botão de atualizar foi tocado e a resposta ainda não chegou.
     claude_refreshing: bool,
+    codex_refreshing: bool,
 }
 
 pub fn now_unix() -> i64 {
@@ -229,6 +230,7 @@ impl Loop {
 
     /// Chega quando o uso muda ou uma janela reinicia: a barra só é refeita se o número do chip mudou.
     pub fn usage_codex_changed(&mut self) -> Result<()> {
+        self.usage.codex_refreshing = false;
         let latest = self.usage.codex.as_ref().and_then(CodexService::latest);
         if self.ctx.usage.set_codex(latest, now_unix()) {
             self.apply_bars(true)?;
@@ -267,19 +269,33 @@ impl Loop {
         }
     }
 
-    /// Botão de atualizar do painel do Claude. `true` se o clique foi nele.
+    /// Botão de atualizar dos painéis do Claude e do Codex. `true` se o clique foi nele.
     pub fn usage_click(&mut self, p: Point, scale: f32) -> Result<bool> {
-        if !self.usage_panel_open(PanelKind::Claude) || !refresh_button_rect(scale).contains(p) {
+        if !refresh_button_rect(scale).contains(p) {
             return Ok(false);
         }
-        if self.claude_refresh_enabled()
-            && let Some(service) = &self.usage.claude
-        {
-            service.refresh_now();
-            self.usage.claude_refreshing = true;
-            self.redraw_open_panel()?;
+        if self.usage_panel_open(PanelKind::Claude) {
+            if self.claude_refresh_enabled()
+                && let Some(service) = &self.usage.claude
+            {
+                service.refresh_now();
+                self.usage.claude_refreshing = true;
+                self.redraw_open_panel()?;
+            }
+            return Ok(true);
         }
-        Ok(true)
+        if self.usage_panel_open(PanelKind::Codex) {
+            // O Codex lê arquivos locais: sem limite de consultas, o botão só espera a resposta.
+            if !self.usage.codex_refreshing
+                && let Some(service) = &self.usage.codex
+            {
+                service.refresh();
+                self.usage.codex_refreshing = true;
+                self.redraw_open_panel()?;
+            }
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     fn claude_refresh_enabled(&self) -> bool {
@@ -297,7 +313,7 @@ impl Loop {
             };
         }
         let blocks = codex_blocks(self.ctx.usage.codex.as_ref().unwrap_or(&CodexSnapshot::default()), now, offset);
-        usage_panel(&blocks, "", None, scale, tokens, text)
+        usage_panel(&blocks, "", Some(!self.usage.codex_refreshing), scale, tokens, text)
     }
 }
 

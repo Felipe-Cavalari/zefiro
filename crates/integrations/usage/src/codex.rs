@@ -218,7 +218,7 @@ fn now_unix() -> i64 {
 
 /// Thread `zefiro-codex`: a cada 120 s, quando pedem (`refresh`) e logo depois do reinício de uma
 /// janela, descobre as origens (`discover`), relê as que mudaram e avisa `notify` (em outra thread)
-/// quando o uso muda ou uma janela reinicia.
+/// quando o uso muda, uma janela reinicia ou o painel pediu (`refresh`).
 pub struct CodexService {
     tx: std::sync::mpsc::Sender<Wake>,
     state: Shared,
@@ -234,7 +234,10 @@ impl CodexService {
             let mut reset_due: Option<i64> = None;
             // Leituras do ciclo anterior: as de uma distro que parou continuam valendo.
             let mut last_reads: Vec<(OriginKind, Vec<CodexRead>)> = Vec::new();
+            // Pedido do painel (abrir ou o botão de atualizar): responde mesmo sem mudança.
+            let mut asked = false;
             loop {
+                let mut told = false;
                 let found = discover();
                 let origins: Vec<&Origin> = found.origins.iter().filter(|o| o.home.join(".codex").join("sessions").is_dir()).collect();
                 let newest: Vec<Option<(SystemTime, PathBuf)>> = origins.iter().map(|o| newest_session(&o.home.join(".codex").join("sessions"))).collect();
@@ -256,18 +259,20 @@ impl CodexService {
                     let snapshot = CodexSnapshot { accounts, wsl_stopped: found.wsl_stopped };
                     reset_due = next_reset(&snapshot.accounts, now_unix());
                     let changed = shared.lock().map(|mut s| s.replace(snapshot.clone()).as_ref() != Some(&snapshot)).unwrap_or(false);
-                    if changed || reset_passed {
-                        notify();
-                    }
+                    told = changed || reset_passed;
                 } else if reset_passed {
                     reset_due = shared.lock().ok().and_then(|s| s.as_ref().and_then(|s| next_reset(&s.accounts, now_unix())));
+                    told = true;
+                }
+                if told || asked {
                     notify();
                 }
                 let wait = reset_due.map_or(INTERVAL, |t| INTERVAL.min(std::time::Duration::from_secs((t - now_unix()).max(0) as u64 + 1)));
-                match rx.recv_timeout(wait) {
-                    Ok(Wake::Refresh) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                asked = match rx.recv_timeout(wait) {
+                    Ok(Wake::Refresh) => true,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => false,
                     Ok(Wake::Stop) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                }
+                };
             }
         })?;
         Ok(CodexService { tx, state })
@@ -511,6 +516,19 @@ mod tests {
     }
 
     #[test]
+    fn refresh_always_answers_even_without_changes() {
+        // O botão de atualizar põe o painel em "atualizando": sem resposta, ele ficaria preso.
+        let (home, d) = windows_home("answer");
+        put(&home, ".codex/sessions/a.jsonl", SESSION, 10);
+        let (svc, rx, _) = start(d);
+        rx.recv_timeout(std::time::Duration::from_secs(3)).expect("aviso inicial");
+        svc.refresh();
+        rx.recv_timeout(std::time::Duration::from_secs(3)).expect("resposta ao refresh sem mudança");
+        drop(svc);
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
     fn service_notifies_at_reset_without_new_file() {
         let (home, d) = windows_home("reset");
         let soon = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 2;
@@ -534,7 +552,7 @@ mod tests {
         assert_eq!(svc.latest().unwrap().accounts[0].data.usage.primary.unwrap().used_percent, 45.0);
         *shared.lock().unwrap() = Discovery { origins: vec![both[0].clone()], running: Vec::new(), wsl_stopped: true };
         svc.refresh();
-        // Sem aviso: o uso não mudou (o evento do WSL continua valendo).
+        // Responde ao refresh; o evento do WSL continua valendo.
         let _ = rx.recv_timeout(std::time::Duration::from_millis(500));
         let snap = svc.latest().unwrap();
         assert_eq!(snap.accounts.len(), 1);
