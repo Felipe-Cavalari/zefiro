@@ -2,7 +2,6 @@
 //! Windows e nas distros do WSL rodando. O arquivo de credenciais é relido a cada consulta (o Claude
 //! Code renova o token sozinho); o Zefiro nunca renova nem grava o token, e ele nunca vai para o log.
 
-use std::path::PathBuf;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -30,10 +29,9 @@ fn now_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
 
-/// Uso de uma conta, com o primeiro token válido entre as credenciais dela.
-fn query(credentials: &[PathBuf]) -> Result<ClaudeUsage, UsageError> {
-    let texts: Vec<String> = credentials.iter().map(|p| std::fs::read_to_string(p).unwrap_or_default()).collect();
-    let token = match first_valid_token(&texts, now_ms()) {
+/// Uso de uma conta, com o primeiro token válido entre os textos das credenciais dela.
+fn query(texts: &[String]) -> Result<ClaudeUsage, UsageError> {
+    let token = match first_valid_token(texts, now_ms()) {
         TokenState::Valid(token) => token,
         TokenState::Expired => return Err(UsageError::Expired),
         TokenState::Missing => return Err(UsageError::Missing),
@@ -58,13 +56,16 @@ fn found(origin: &Origin) -> Option<ClaudeFound> {
 }
 
 /// Um ciclo: descobre as contas, consulta cada uma e lembra as de distros que pararam.
-fn cycle(discover: &Discover, previous: &[Account<ClaudeEntry>]) -> ClaudeSnapshot {
+fn cycle(discover: &Discover, previous: &[Account<ClaudeEntry>], query: &dyn Fn(&[String]) -> Result<ClaudeUsage, UsageError>) -> ClaudeSnapshot {
     let discovery = discover();
     let mut accounts = group_claude(discovery.origins.iter().filter_map(found).collect());
     inherit_claude(previous, &mut accounts);
     let many = many_distros(&accounts);
-    for account in &mut accounts {
-        let result = query(&account.data.credentials);
+    // Tudo de `\\wsl.localhost` é lido agora, logo depois de ver a distro rodando: depois do HTTP
+    // das outras contas ela pode ter parado, e ler de novo a ligaria.
+    let texts: Vec<Vec<String>> = accounts.iter().map(|a| a.data.credentials.iter().map(|p| std::fs::read_to_string(p).unwrap_or_default()).collect()).collect();
+    for (account, texts) in accounts.iter_mut().zip(texts) {
+        let result = query(&texts);
         let old = previous.iter().find(|p| p.key == account.key).and_then(|p| p.data.result.as_ref());
         // Só registra quando o erro muda (sem login, seriam 720 linhas por dia).
         if let Err(e) = &result
@@ -98,7 +99,7 @@ impl ClaudeService {
             while let Wake::Refresh = wake {
                 if last.is_none_or(|t| t.elapsed() >= FRESH) {
                     let previous = shared.lock().ok().and_then(|s| s.as_ref().map(|s| s.accounts.clone())).unwrap_or_default();
-                    let snapshot = cycle(&discover, &previous);
+                    let snapshot = cycle(&discover, &previous, &query);
                     last = Some(Instant::now());
                     let text = accounts_summary("Claude", &snapshot.accounts);
                     if text != summary {
@@ -145,5 +146,43 @@ impl ClaudeService {
 impl Drop for ClaudeService {
     fn drop(&mut self) {
         let _ = self.tx.send(Wake::Stop);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use zefiro_integration_usage::origins::{Discovery, OriginKind};
+
+    /// Pasta pessoal de teste com credenciais inventadas (token falso, válido até 2100).
+    fn home(name: &str, uuid: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("zefiro-claude-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join(".claude")).unwrap();
+        std::fs::write(dir.join(".claude").join(".credentials.json"), r#"{"claudeAiOauth": {"accessToken": "t-falso", "expiresAt": 4102444800000}}"#).unwrap();
+        std::fs::write(dir.join(".claude.json"), format!(r#"{{"oauthAccount": {{"accountUuid": "{uuid}"}}}}"#)).unwrap();
+        dir
+    }
+
+    #[test]
+    fn credentials_are_read_before_any_query() {
+        // Ler `\wsl.localhost` depois do HTTP das outras contas pode cair numa distro que acabou de
+        // parar e ligá-la de novo: as credenciais são lidas todas logo depois de descobrir as origens.
+        let (win, wsl) = (home("win", "u1"), home("wsl", "u2"));
+        let origins = vec![Origin { kind: OriginKind::Windows, home: win.clone() }, Origin { kind: OriginKind::Wsl("U".into()), home: wsl.clone() }];
+        let discover: Discover = Arc::new(move || Discovery { origins: origins.clone(), running: vec!["U".into()], wsl_stopped: false });
+        let wsl_credentials = wsl.join(".claude").join(".credentials.json");
+        let query = |texts: &[String]| -> Result<ClaudeUsage, UsageError> {
+            let _ = std::fs::remove_file(&wsl_credentials);
+            match first_valid_token(texts, now_ms()) {
+                TokenState::Valid(_) => Ok(ClaudeUsage::default()),
+                _ => Err(UsageError::Missing),
+            }
+        };
+        let snapshot = cycle(&discover, &[], &query);
+        assert_eq!(snapshot.accounts.len(), 2);
+        assert!(snapshot.accounts.iter().all(|a| matches!(a.data.result, Some(Ok(_)))), "{:?}", snapshot.accounts.iter().map(|a| &a.data.result).collect::<Vec<_>>());
+        std::fs::remove_dir_all(&win).unwrap();
+        std::fs::remove_dir_all(&wsl).unwrap();
     }
 }

@@ -10,8 +10,9 @@ use windows::core::{HSTRING, PWSTR};
 use zefiro_integration_usage::origins::{Discovery, Origin, OriginKind, is_ignored_distro, proper_names, wsl_origins};
 
 const LXSS: &str = r"Software\Microsoft\Windows\CurrentVersion\Lxss";
-/// O Claude e o Codex consultam a cada 120 s: com este cache, os dois dividem um `wsl.exe`.
-const RUNNING_TTL: Duration = Duration::from_secs(100);
+/// Só para o Claude e o Codex dividirem o `wsl.exe` quando consultam juntos (ao abrir a barra). Um
+/// cache longo faria um ciclo ler uma distro que já parou, e a leitura a ligaria.
+const RUNNING_TTL: Duration = Duration::from_secs(3);
 
 static RUNNING: Mutex<Option<(Instant, Vec<String>)>> = Mutex::new(None);
 
@@ -80,4 +81,15 @@ pub fn discover(windows_home: &Path) -> Discovery {
     let mut origins = vec![Origin { kind: OriginKind::Windows, home: windows_home.to_path_buf() }];
     origins.extend(wsl_origins(&running, &root));
     Discovery { origins, running, wsl_stopped }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn running_cache_is_short() {
+        // Um cache longo faria um ciclo ler `\\wsl.localhost` de uma distro que já parou (e a ligaria).
+        assert!(RUNNING_TTL <= Duration::from_secs(5), "{RUNNING_TTL:?}");
+    }
 }
