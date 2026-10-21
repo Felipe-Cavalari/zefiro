@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use windows::core::Result;
 use zefiro_bar::controller::PanelKind;
-use zefiro_bar::usage::{UsageRow, usage_panel};
+use zefiro_bar::usage::{UsageBlock, UsageRow, usage_panel};
 use zefiro_integration_clock::windows::utc_offset_seconds;
 use zefiro_integration_usage::claude::{Limit, UsageError};
 use zefiro_integration_usage::codex::{CodexService, Window, effective_percent, window_name};
@@ -71,6 +71,12 @@ fn updated_ago(at: std::time::Instant) -> String {
 
 fn codex_row(w: &Window, now: i64, offset: i32) -> UsageRow {
     UsageRow { label: window_name(w.window_minutes), percent: Some(effective_percent(w, now)), detail: reset_detail(w.resets_at, w.window_minutes, now, offset) }
+}
+
+/// Painel de uma conta só (até a Task 9 ligar os blocos por conta).
+fn one_block(title: &str, rows: &[UsageRow], message: Option<&str>, footer: &str, scale: f32, tokens: &zefiro_resources::tokens::Tokens, m: &dyn zefiro_platform::text::TextMeasurer) -> DisplayList {
+    let block = UsageBlock { title: title.into(), subtitle: String::new(), rows: rows.to_vec(), message: message.map(String::from) };
+    usage_panel(&[block], footer, scale, tokens, m)
 }
 
 fn capitalized(s: &str) -> String {
@@ -164,8 +170,8 @@ impl Loop {
         if kind == PanelKind::Claude {
             let first = self.ctx.usage.claude.as_ref().and_then(|s| Some((s.at?, s.accounts.first()?.data.result.as_ref()?)));
             return match first {
-                None => usage_panel("Claude", &[], Some("Carregando…"), "", scale, tokens),
-                Some((at, Err(e))) => usage_panel("Claude", &[], Some(&claude_message(*e)), &updated_ago(at), scale, tokens),
+                None => one_block("Claude", &[], Some("Carregando…"), "", scale, tokens, &self.ctx.text),
+                Some((at, Err(e))) => one_block("Claude", &[], Some(&claude_message(*e)), &updated_ago(at), scale, tokens, &self.ctx.text),
                 Some((at, Ok(u))) => {
                     let mut rows = Vec::new();
                     if let Some(l) = &u.five_hour {
@@ -177,7 +183,7 @@ impl Loop {
                     for (name, l) in &u.extra {
                         rows.push(claude_row(format!("{name} (7 dias)"), l, 10080, now, offset));
                     }
-                    usage_panel("Claude", &rows, None, &updated_ago(at), scale, tokens)
+                    one_block("Claude", &rows, None, &updated_ago(at), scale, tokens, &self.ctx.text)
                 }
             };
         }
@@ -186,9 +192,9 @@ impl Loop {
                 let title = u.plan.as_deref().map_or("Codex".to_string(), |p| format!("Codex · {}", capitalized(p)));
                 let rows: Vec<UsageRow> = [u.primary, u.secondary].iter().flatten().map(|w| codex_row(w, now, offset)).collect();
                 let footer = u.event_at.as_deref().and_then(parse_iso_utc).map(|t| format!("Último uso do Codex: {}", format_short(t, offset))).unwrap_or_default();
-                usage_panel(&title, &rows, None, &footer, scale, tokens)
+                one_block(&title, &rows, None, &footer, scale, tokens, &self.ctx.text)
             }
-            None => usage_panel("Codex", &[], Some("Nenhum uso do Codex encontrado"), "", scale, tokens),
+            None => one_block("Codex", &[], Some("Nenhum uso do Codex encontrado"), "", scale, tokens, &self.ctx.text),
         }
     }
 }

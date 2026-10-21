@@ -32,42 +32,78 @@ pub fn usage_chip(glyph: &str, percent: Option<f32>, chip_h: f32, font_px: f32, 
 const WIDTH: f32 = 340.0;
 const ROW_H: f32 = 58.0;
 
-/// Painel com título, uma linha por janela (rótulo, %, barra e detalhe) e o rodapé. `message`
-/// (login expirado, sem dado…) substitui as linhas.
-pub fn usage_panel(title: &str, rows: &[UsageRow], message: Option<&str>, footer: &str, scale: f32, tokens: &Tokens) -> DisplayList {
+/// Uma conta no painel: título ("Claude · Pro"), subtítulo apagado ("a@b.c · Windows", pode ser
+/// vazio) e as linhas de uso, ou `message` (login expirado, sem dado…) no lugar delas.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageBlock { pub title: String, pub subtitle: String, pub rows: Vec<UsageRow>, pub message: Option<String> }
+
+/// Espaço entre dois blocos; a linha divisória fica no meio dele.
+const BLOCK_GAP: f32 = 12.0;
+
+/// `text` cortado com "…" para caber em `max_w`.
+fn fit(text: &str, style: &TextStyle, max_w: f32, m: &dyn TextMeasurer) -> String {
+    if m.measure(text, style).w <= max_w {
+        return text.to_string();
+    }
+    let mut cut: String = text.to_string();
+    while !cut.is_empty() && m.measure(&format!("{cut}…"), style).w > max_w {
+        cut.pop();
+    }
+    format!("{}…", cut.trim_end())
+}
+
+/// Painel com um bloco por conta (título, subtítulo, uma linha por janela com rótulo, %, barra e
+/// detalhe) e o rodapé. Com um bloco sem subtítulo, é o painel de uma conta só de antes.
+pub fn usage_panel(blocks: &[UsageBlock], footer: &str, scale: f32, tokens: &Tokens, m: &dyn TextMeasurer) -> DisplayList {
     let px = |v: f32| (v * scale).round();
     let text = |size: f32, weight: FontWeight| TextStyle { size: size * scale, weight, family: Family::Text };
-    let message_lines: Vec<&str> = message.map(|m| m.lines().collect()).unwrap_or_default();
-    let body_h = if message.is_some() { 20.0 + message_lines.len().max(1) as f32 * 20.0 } else { rows.len().max(1) as f32 * ROW_H };
+    let lines = |b: &UsageBlock| -> Vec<String> { b.message.as_deref().map(|msg| msg.lines().map(String::from).collect()).unwrap_or_default() };
+    let header_h = |b: &UsageBlock| if b.subtitle.is_empty() { 44.0 } else { 62.0 };
+    let body_h = |b: &UsageBlock| if b.message.is_some() { 20.0 + lines(b).len().max(1) as f32 * 20.0 } else { b.rows.len().max(1) as f32 * ROW_H };
+    let blocks_h: f32 = blocks.iter().map(|b| header_h(b) + body_h(b)).sum::<f32>() + blocks.len().saturating_sub(1) as f32 * BLOCK_GAP;
     let footer_h = if footer.is_empty() { 0.0 } else { 26.0 };
-    let size = Size { w: px(WIDTH), h: px(44.0 + body_h + footer_h + 10.0) };
+    let size = Size { w: px(WIDTH), h: px(blocks_h + footer_h + 10.0) };
     let mut list = DisplayList::new(size);
-    list.push(DrawOp::Text { rect: Rect::new(px(20.0), px(14.0), size.w - px(40.0), px(22.0)), text: title.into(), style: text(13.0, FontWeight::SemiBold), color: tokens.text_secondary, align: Align::Leading });
-    if message.is_some() {
-        // Uma linha por quebra de linha: o texto do painel não quebra sozinho.
-        for (i, line) in message_lines.iter().enumerate() {
-            list.push(DrawOp::Text { rect: Rect::new(px(20.0), px(48.0 + i as f32 * 20.0), size.w - px(40.0), px(20.0)), text: (*line).into(), style: text(12.5, FontWeight::Regular), color: tokens.text, align: Align::Leading });
+    let mut y = 0.0;
+    for (index, b) in blocks.iter().enumerate() {
+        if index > 0 {
+            list.push(DrawOp::RoundRect { rect: Rect::new(px(20.0), px(y + BLOCK_GAP / 2.0), size.w - px(40.0), px(1.0)), radius: 0.0, color: tokens.hairline });
+            y += BLOCK_GAP;
         }
-    } else {
-        for (i, row) in rows.iter().enumerate() {
-            let top = px(44.0 + i as f32 * ROW_H);
-            list.push(DrawOp::Text { rect: Rect::new(px(20.0), top, size.w - px(110.0), px(18.0)), text: row.label.clone(), style: text(12.0, FontWeight::Regular), color: tokens.text_secondary, align: Align::Leading });
-            let percent = row.percent.map(|p| format!("{p:.0}%")).unwrap_or_else(|| "—".into());
-            list.push(DrawOp::Text { rect: Rect::new(size.w - px(80.0), top, px(60.0), px(18.0)), text: percent, style: text(13.0, FontWeight::SemiBold), color: tokens.text, align: Align::Trailing });
-            let track = Rect::new(px(20.0), top + px(24.0), size.w - px(40.0), px(5.0));
-            list.push(DrawOp::RoundRect { rect: track, radius: track.h / 2.0, color: tokens.raised_strong });
-            if let Some(p) = row.percent {
-                let fill = (p.clamp(0.0, 100.0) / 100.0 * track.w).max(track.h);
-                let color = if is_high(p) { tokens.accent } else { tokens.text_secondary };
-                list.push(DrawOp::RoundRect { rect: Rect::new(track.x, track.y, fill, track.h), radius: track.h / 2.0, color });
+        list.push(DrawOp::Text { rect: Rect::new(px(20.0), px(y + 14.0), size.w - px(40.0), px(22.0)), text: b.title.clone(), style: text(13.0, FontWeight::SemiBold), color: tokens.text_secondary, align: Align::Leading });
+        if !b.subtitle.is_empty() {
+            let style = text(11.0, FontWeight::Regular);
+            let shown = fit(&b.subtitle, &style, size.w - px(40.0), m);
+            list.push(DrawOp::Text { rect: Rect::new(px(20.0), px(y + 36.0), size.w - px(40.0), px(16.0)), text: shown, style, color: tokens.text_tertiary, align: Align::Leading });
+        }
+        let top = y + header_h(b);
+        if b.message.is_some() {
+            // Uma linha por quebra de linha: o texto do painel não quebra sozinho.
+            for (i, line) in lines(b).into_iter().enumerate() {
+                list.push(DrawOp::Text { rect: Rect::new(px(20.0), px(top + 4.0 + i as f32 * 20.0), size.w - px(40.0), px(20.0)), text: line, style: text(12.5, FontWeight::Regular), color: tokens.text, align: Align::Leading });
             }
-            if !row.detail.is_empty() {
-                list.push(DrawOp::Text { rect: Rect::new(px(20.0), top + px(34.0), size.w - px(40.0), px(16.0)), text: row.detail.clone(), style: text(11.5, FontWeight::Regular), color: tokens.text_tertiary, align: Align::Leading });
+        } else {
+            for (i, row) in b.rows.iter().enumerate() {
+                let top = px(top + i as f32 * ROW_H);
+                list.push(DrawOp::Text { rect: Rect::new(px(20.0), top, size.w - px(110.0), px(18.0)), text: row.label.clone(), style: text(12.0, FontWeight::Regular), color: tokens.text_secondary, align: Align::Leading });
+                let percent = row.percent.map(|p| format!("{p:.0}%")).unwrap_or_else(|| "—".into());
+                list.push(DrawOp::Text { rect: Rect::new(size.w - px(80.0), top, px(60.0), px(18.0)), text: percent, style: text(13.0, FontWeight::SemiBold), color: tokens.text, align: Align::Trailing });
+                let track = Rect::new(px(20.0), top + px(24.0), size.w - px(40.0), px(5.0));
+                list.push(DrawOp::RoundRect { rect: track, radius: track.h / 2.0, color: tokens.raised_strong });
+                if let Some(p) = row.percent {
+                    let fill = (p.clamp(0.0, 100.0) / 100.0 * track.w).max(track.h);
+                    let color = if is_high(p) { tokens.accent } else { tokens.text_secondary };
+                    list.push(DrawOp::RoundRect { rect: Rect::new(track.x, track.y, fill, track.h), radius: track.h / 2.0, color });
+                }
+                if !row.detail.is_empty() {
+                    list.push(DrawOp::Text { rect: Rect::new(px(20.0), top + px(34.0), size.w - px(40.0), px(16.0)), text: row.detail.clone(), style: text(11.5, FontWeight::Regular), color: tokens.text_tertiary, align: Align::Leading });
+                }
             }
         }
+        y = top + body_h(b);
     }
     if !footer.is_empty() {
-        let top = px(44.0 + body_h);
+        let top = px(y);
         list.push(DrawOp::RoundRect { rect: Rect::new(px(20.0), top, size.w - px(40.0), px(1.0)), radius: 0.0, color: tokens.hairline });
         list.push(DrawOp::Text { rect: Rect::new(px(20.0), top + px(6.0), size.w - px(40.0), px(18.0)), text: footer.into(), style: text(11.0, FontWeight::Regular), color: tokens.text_tertiary, align: Align::Leading });
     }
@@ -119,13 +155,28 @@ mod tests {
         assert_eq!(chip(Some(5.0)).content_w, chip(Some(100.0)).content_w);
     }
 
-    #[test]
-    fn panel_lists_rows_with_details() {
-        let rows = [
+    fn rows() -> Vec<UsageRow> {
+        vec![
             UsageRow { label: "5 horas".into(), percent: Some(80.0), detail: "reinicia em 2 h 14 min".into() },
             UsageRow { label: "7 dias".into(), percent: Some(19.0), detail: "reinicia qui 22 out, 11:08".into() },
-        ];
-        let l = usage_panel("Codex · plus", &rows, None, "Último uso do Codex: 16/10 23:56", 1.0, &tokens());
+        ]
+    }
+
+    fn block(title: &str, subtitle: &str, rows: Vec<UsageRow>, message: Option<&str>) -> UsageBlock {
+        UsageBlock { title: title.into(), subtitle: subtitle.into(), rows, message: message.map(String::from) }
+    }
+
+    fn panel(blocks: &[UsageBlock], footer: &str) -> DisplayList {
+        usage_panel(blocks, footer, 1.0, &tokens(), &FixedWidthMeasurer)
+    }
+
+    fn text_rect(l: &DisplayList, wanted: &str) -> Rect {
+        l.ops.iter().find_map(|o| if let DrawOp::Text { text, rect, .. } = o { (text == wanted).then_some(*rect) } else { None }).unwrap_or_else(|| panic!("falta {wanted}"))
+    }
+
+    #[test]
+    fn panel_lists_rows_with_details() {
+        let l = panel(&[block("Codex · plus", "", rows(), None)], "Último uso do Codex: 16/10 23:56");
         let t = texts(&l);
         for s in ["Codex · plus", "5 horas", "80%", "reinicia em 2 h 14 min", "7 dias", "19%", "Último uso do Codex: 16/10 23:56"] {
             assert!(t.contains(&s.to_string()), "falta {s}");
@@ -134,19 +185,52 @@ mod tests {
     }
 
     #[test]
+    fn one_block_without_subtitle_matches_old_layout() {
+        // Valores do painel de antes dos blocos (uma conta, sem subtítulo).
+        let l = panel(&[block("Claude", "", rows(), None)], "Atualizado agora");
+        assert_eq!((l.size.w, l.size.h), (340.0, 196.0));
+        assert_eq!(text_rect(&l, "Claude"), Rect::new(20.0, 14.0, 300.0, 22.0));
+        assert_eq!(text_rect(&l, "5 horas"), Rect::new(20.0, 44.0, 230.0, 18.0));
+        assert_eq!(text_rect(&l, "7 dias").y, 102.0);
+        assert_eq!(text_rect(&l, "Atualizado agora").y, 166.0);
+    }
+
+    #[test]
+    fn subtitle_is_cut_with_ellipsis() {
+        let long = "a".repeat(200);
+        let l = panel(&[block("Claude · Pro", &long, rows(), None)], "");
+        let shown = texts(&l).into_iter().find(|t| t.starts_with('a')).expect("subtítulo");
+        assert!(shown.ends_with('…'), "{shown}");
+        let style = TextStyle { size: 11.0, weight: FontWeight::Regular, family: Family::Text };
+        assert!(FixedWidthMeasurer.measure(&shown, &style).w <= 300.0);
+        assert_eq!(text_rect(&l, "5 horas").y, 62.0);
+    }
+
+    #[test]
+    fn two_blocks_stack_with_hairline() {
+        let one = panel(&[block("Claude · Pro", "a@b.c · Windows", rows(), None)], "");
+        let two = panel(&[block("Claude · Pro", "a@b.c · Windows", rows(), None), block("Claude · Max", "c@d.e · WSL", rows(), None)], "");
+        assert_eq!(two.size.h, one.size.h * 2.0 - 10.0 + 12.0);
+        let second = text_rect(&two, "Claude · Max");
+        let last_of_first = two.ops.iter().filter_map(|o| if let DrawOp::Text { rect, .. } = o { Some(rect.y) } else { None }).filter(|y| *y < second.y).fold(0.0, f32::max);
+        assert!(second.y > last_of_first);
+        let hairline = tokens().hairline;
+        assert!(two.ops.iter().any(|o| matches!(o, DrawOp::RoundRect { rect, color, .. } if *color == hairline && rect.y < second.y && rect.y > last_of_first)));
+    }
+
+    #[test]
     fn panel_message_replaces_rows() {
-        let rows = [UsageRow { label: "5 horas".into(), percent: Some(80.0), detail: String::new() }];
-        let l = usage_panel("Codex", &rows, Some("Nenhum uso do Codex encontrado"), "", 1.0, &tokens());
+        let l = panel(&[block("Codex", "", rows(), Some("Nenhum uso do Codex encontrado"))], "");
         let t = texts(&l);
         assert!(t.contains(&"Nenhum uso do Codex encontrado".to_string()));
         assert!(!t.contains(&"5 horas".to_string()));
     }
 
     #[test]
-    fn panel_message_breaks_lines() {
-        let l = usage_panel("Claude", &[], Some("Login do Claude Code expirado.\nAbra o Claude Code para renovar."), "", 1.0, &tokens());
-        let t = texts(&l);
-        assert!(t.contains(&"Login do Claude Code expirado.".to_string()));
-        assert!(t.contains(&"Abra o Claude Code para renovar.".to_string()));
+    fn message_block_breaks_lines() {
+        let l = panel(&[block("Claude", "", Vec::new(), Some("WSL desligado.
+Abra o WSL para ver o uso de lá."))], "");
+        let (a, b) = (text_rect(&l, "WSL desligado."), text_rect(&l, "Abra o WSL para ver o uso de lá."));
+        assert!(a.y < b.y);
     }
 }
