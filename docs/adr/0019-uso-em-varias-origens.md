@@ -78,7 +78,7 @@ Ambiente: Windows 11 Pro 26200, dois monitores 1920×1080 a 100 %, perfil do usu
 
 ## Consequências
 
-- **Pendente de validação na tela:** `wsl --shutdown` com a barra aberta, para conferir o bloco "WSL desligado" e que o WSL não volta a ligar sozinho. Depende do sim do usuário, porque derruba o Docker e os terminais do WSL.
+- **Pendente de validação na tela:** o bloco "WSL desligado" e o WSL que não volta a ligar sozinho. Em 2026-10-21, `wsl --shutdown` às 19:41:28 e o Ubuntu rodava de novo às 19:41:33, ligado pelo `claude.exe` (o Claude Desktop mantém um servidor remoto no WSL: `wsl.exe -d Ubuntu-24.04 --exec … ~/.claude/remote/srv/…`), não pelo Zefiro. Com o Claude Desktop aberto, a distro não fica parada. A regra fica coberta pelos testes `running_cache_is_short`, `credentials_are_read_before_any_query` e `service_keeps_*_when_distro_stops`; a conferência na tela precisa do Claude Desktop fechado.
 - **Minor adiados** (lista no ledger do plano):
   - `wsl_stopped` fica ligado com outra distro rodando;
   - falta a linha de log de contas do Codex;
