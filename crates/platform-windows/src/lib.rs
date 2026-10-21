@@ -37,3 +37,4 @@ pub mod volume;
 pub mod weather;
 pub mod window;
 pub mod windows_terminal;
+pub mod wsl;
