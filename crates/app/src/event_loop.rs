@@ -64,6 +64,8 @@ pub const USER_POWER: u32 = 22;
 pub const USER_UPDATE: u32 = 23;
 /// A thread do Terminal terminou de ler os perfis.
 pub const USER_TERMINAL: u32 = 24;
+/// O processo do chat mandou sinais (texto chegando, fim do turno, erro).
+pub const USER_CHAT: u32 = 25;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
@@ -87,6 +89,8 @@ pub const TIMER_POWER: usize = 11;
 pub const TIMER_FULLSCREEN: usize = 12;
 /// HUD de debug: uma atualização por segundo, só com ele aberto.
 pub const TIMER_HUD: usize = 13;
+/// Chat sem uso: encerra o processo do `claude` (10 min).
+pub const TIMER_CHAT_IDLE: usize = 14;
 const CYCLE_HALF_MS: u32 = 450;
 
 const VK_ESCAPE: u32 = 0x1B;
@@ -121,6 +125,7 @@ pub struct Loop {
     pub(crate) usage: crate::usage_loop::UsageRuntime,
     pub(crate) vscode: crate::vscode_loop::VsCodeRuntime,
     pub(crate) terminal: crate::terminal_loop::TerminalRuntime,
+    pub(crate) chat: crate::chat_loop::ChatRuntime,
     pub(crate) power: crate::power_loop::PowerRuntime,
     pub(crate) system: crate::system_loop::SystemRuntime,
     /// Ciclos de medição: (total, feitos).
@@ -144,7 +149,7 @@ impl Loop {
             panels.push(PanelView::create(&ctx, b.monitor())?);
         }
         let today = now_local().date;
-        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), debug: Default::default(), update: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), terminal: Default::default(), power: Default::default(), system: Default::default(), cycles: None })
+        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), debug: Default::default(), update: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), terminal: Default::default(), chat: Default::default(), power: Default::default(), system: Default::default(), cycles: None })
     }
 
     pub(crate) fn bar_index(&self, hwnd: isize) -> Option<usize> { self.bars.iter().position(|b| b.hwnd().0 as isize == hwnd) }
@@ -181,6 +186,7 @@ impl Loop {
             PanelKind::Claude | PanelKind::Codex => self.usage_panel_list(kind, scale),
             PanelKind::VsCode => self.vscode_panel_list(scale),
             PanelKind::Terminal => self.terminal_panel_list(scale),
+            PanelKind::Chat => self.chat_panel_list(scale),
             PanelKind::Power => self.power_panel_list(scale),
         }
     }
@@ -215,6 +221,7 @@ impl Loop {
                     self.devices_panel_closed();
                     self.power_panel_closed();
                     self.terminal_panel_closed();
+                    self.chat_panel_closed();
                 }
                 PanelEffect::Open(p) => {
                     if p.kind == PanelKind::Overflow {
@@ -227,6 +234,7 @@ impl Loop {
                     self.usage_prepare(p.kind);
                     self.vscode_prepare(p.kind);
                     self.terminal_prepare(p.kind);
+                    self.chat_prepare(p.kind)?;
                     self.power_prepare(p.kind);
                     if p.kind.tabbed() {
                         self.island_panel_opening();
@@ -487,6 +495,8 @@ impl Loop {
                         self.island_panel_click(Point { x: x - ox, y: y - oy })?;
                     } else if self.power_click(Point { x: x - ox, y: y - oy })? {
                         // Botão de energia (armar, confirmar ou agir).
+                    } else if self.chat_click(Point { x: x - ox, y: y - oy })? {
+                        // Chat: enviar, parar, conversa nova ou copiar.
                     } else if self.terminal_up(Point { x: x - ox, y: y - oy })? {
                         // Perfil do Windows Terminal aberto (ou clique fora das linhas).
                     } else if self.usage_click(Point { x: x - ox, y: y - oy }, scale)? {
@@ -541,6 +551,7 @@ impl Loop {
                     let (ox, oy) = self.panels[i].content_origin();
                     self.devices_move(Point { x: x - ox, y: y - oy })?;
                     self.terminal_move(Point { x: x - ox, y: y - oy })?;
+                    self.chat_move(Point { x: x - ox, y: y - oy })?;
                     // Menu do Z: o item sob o mouse ganha o destaque (só redesenha quando muda).
                     let scale = self.bars[i].scale();
                     if self.effective_open_kind() == Some(PanelKind::Menu)
@@ -564,6 +575,7 @@ impl Loop {
             WinEvent::MouseLeave { hwnd } => {
                 if self.panel_index(hwnd).is_some() {
                     self.terminal_leave()?;
+                    self.chat_leave()?;
                 }
                 if let Some(i) = self.bar_index(hwnd) {
                     self.bars[i].set_hover(&self.ctx, None)?;
@@ -586,7 +598,7 @@ impl Loop {
                 if self.panel_index(hwnd).is_none() {
                     return Ok(true);
                 }
-                if self.terminal_key(vk)? || self.vscode_key(vk)? {
+                if self.chat_key(vk)? || self.terminal_key(vk)? || self.vscode_key(vk)? {
                     return Ok(true);
                 }
                 // Esc na tela de temas volta ao menu; no menu, fecha.
@@ -642,7 +654,7 @@ impl Loop {
                 if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind.tabbed()) {
                     return self.island_wheel(delta).map(|_| true);
                 }
-                if self.panel_index(hwnd).is_some() && (self.terminal_wheel(delta)? || self.vscode_wheel(delta)?) {
+                if self.panel_index(hwnd).is_some() && (self.chat_wheel(delta)? || self.terminal_wheel(delta)? || self.vscode_wheel(delta)?) {
                     return Ok(true);
                 }
                 if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind == PanelKind::Overflow) {
@@ -678,8 +690,14 @@ impl Loop {
             WinEvent::User { code: USER_CLAUDE } => self.usage_claude_changed()?,
             WinEvent::User { code: USER_VSCODE } => self.vscode_loaded()?,
             WinEvent::User { code: USER_TERMINAL } => self.terminal_loaded()?,
+            WinEvent::User { code: USER_CHAT } => self.chat_signals()?,
+            WinEvent::Timer { id: TIMER_CHAT_IDLE } => self.chat_idle(),
             WinEvent::Tray { mouse } => self.tray_event(mouse)?,
-            WinEvent::Character { code, .. } => self.vscode_char(code)?,
+            WinEvent::Character { code, .. } => {
+                if !self.chat_char(code)? {
+                    self.vscode_char(code)?;
+                }
+            }
             WinEvent::User { code: USER_POWER } => self.power_user_loaded()?,
             WinEvent::Timer { id: TIMER_POWER } => self.power_timer()?,
             WinEvent::User { code: USER_PRIVACY } => self.island_privacy_changed()?,
@@ -805,6 +823,7 @@ pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
 /// depois a ilha, que pode levar até 3 s para fechar.
 fn shutdown(l: &mut Loop) {
     l.debug_shutdown();
+    l.chat_shutdown();
     for b in l.bars.drain(..) {
         b.destroy();
     }

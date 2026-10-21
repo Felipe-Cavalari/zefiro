@@ -11,6 +11,7 @@ members = [
   "crates/integrations/vscode",
   "crates/integrations/terminal",
   "crates/integrations/update",
+  "crates/integrations/chat",
   "crates/modules/bar",
   "crates/modules/island-host",
   "crates/modules/island",
@@ -41,6 +42,7 @@ zefiro-integration-usage = { path = "crates/integrations/usage" }
 zefiro-integration-vscode = { path = "crates/integrations/vscode" }
 zefiro-integration-terminal = { path = "crates/integrations/terminal" }
 zefiro-integration-update = { path = "crates/integrations/update" }
+zefiro-integration-chat = { path = "crates/integrations/chat" }
 zefiro-bar = { path = "crates/modules/bar" }
 zefiro-island-host = { path = "crates/modules/island-host" }
 zefiro-island = { path = "crates/modules/island" }

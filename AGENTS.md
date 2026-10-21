@@ -44,8 +44,9 @@ Leia antes de mudar qualquer coisa:
 | `crates/integrations/usage` | Uso do Claude (resposta do endpoint, token, contas) e do Codex (fim dos `.jsonl`, contas, thread `CodexService`), origens Windows/WSL (`origins.rs`) e datas em pt-BR, portável (ADR-0011, ADR-0019) |
 | `crates/integrations/vscode` | Projetos recentes do VS Code pelo `workspaceStorage`, portável (ADR-0011) |
 | `crates/integrations/terminal` | Perfis do Windows Terminal pelo `settings.json` e fragmentos (JSONC, ocultos, fontes desativadas), ordem e ocultos do `[terminal]` e os argumentos do `wt.exe`, portável (ADR-0015) |
+| `crates/integrations/chat` | Chat com o Claude, portável: linhas do `claude -p` em stream-json, argumentos (Windows e WSL), escolha da origem e a conversa em JSON (ADR-0020) |
 | `crates/integrations/update` | Atualização pelo GitHub Releases, portável: versão, última release, URL confiável e SHA-256 (ADR-0014) |
-| `crates/modules/bar` | Chips, menu do Zefiro, calendário, chips e painéis de som, microfone e brilho (`devices.rs`), uso (`usage.rs`), VS Code (`vscode.rs`), energia (`power.rs`), sino e lua (`chips.rs`) e o controlador de painéis |
+| `crates/modules/bar` | Chips, menu do Zefiro, calendário, chips e painéis de som, microfone e brilho (`devices.rs`), uso (`usage.rs`), chat (`chat.rs`: campo, quebra de linha e painel), VS Code (`vscode.rs`), energia (`power.rs`), sino e lua (`chips.rs`) e o controlador de painéis |
 | `crates/modules/island` (`zefiro-island`) | Ilha embutida, portável: mídia e escolha da fonte, estados, avisos, visões em `DisplayList`, abas (clima, hardware, letras), menu, visualizador e cor da capa (ADR-0009) |
 | `crates/modules/island-host` | Ilha externa (`engine = "externa"`): gravação do `island.ini`/`island-state.ini`, política de reinício e o processo |
 | `crates/platform-windows` | Janelas, AppBar, compositor (Windows.UI.Composition), `MorphShape`, Direct2D/DirectWrite em WARP, monitores, preferências do sistema e os serviços (mídia, volume de saída e entrada, dispositivos de áudio, brilho por DDC/CI…) |
@@ -80,7 +81,8 @@ elease` só checa com `ZEFIRO_UPDATE_CHECK=1`.
   - `acrylic = true | false` (na raiz): a chave "Acrílico" do menu do Z, por cima do `[material] backdrop` do tema; sem a chave, o tema decide
   - `[bar] height = completa | compacta`
   - `[bar] format = faixa | pilulas | ilhas | fluent | vidro`
-  - `[bar.sections] start/center/end`: ids do catálogo (`zefiro`, `clock`, `audio`, `mic`, `brightness`, `claude`, `codex`, `vscode`, `terminal`, `notifications`, `dnd`, `island`, `player`, `weather`, `hardware`, `power`)
+  - `[bar.sections] start/center/end`: ids do catálogo (`zefiro`, `clock`, `audio`, `mic`, `brightness`, `claude`, `codex`, `vscode`, `terminal`, `chat`, `notifications`, `dnd`, `island`, `player`, `weather`, `hardware`, `power`)
+  - `[chat] origin = auto | windows | wsl | <distro>` e `model` (vazio = o do Claude Code)
   - `[terminal] order/hidden`: `guid`s dos perfis do Windows Terminal, gravados pelo painel do chip (lápis → Concluir)
 - `ZEFIRO_CONFIG_DIR=<pasta>` troca a pasta da configuração: use um perfil isolado para testes, sem mexer no do usuário.
 - Os temas do usuário ficam em `%APPDATA%\zefiro\themes\`.
@@ -110,6 +112,7 @@ elease` só checa com `ZEFIRO_UPDATE_CHECK=1`.
 - **Claude:** o Zefiro só lê `~/.claude/.credentials.json` (a cada consulta) e nunca renova nem grava o token, porque isso derrubaria o login do Claude Code. O token nunca vai para log, teste ou sonda (ADR-0011).
 - **HTTP sem cache:** o `HttpClient` do Windows com o filtro padrão devolve do cache a 1ª resposta do processo (era o chip do Claude parado até reiniciar a barra). `http::client()` usa `HttpBaseProtocolFilter` com `NoCache`; sonda `http_cache_probe` (ADR-0019).
 - **Uso no WSL (ADR-0019):** os chips `claude` e `codex` juntam as contas do Windows e das distros rodando (`wsl::discover`). Ler `\\wsl.localhost\<distro>` de uma distro parada a **liga**: só se lê distro que está em `wsl --list --running`, com cache de 3 s, e o Claude lê todas as credenciais logo depois de descobrir as origens. `docker-desktop*` e `/root` ficam de fora. O e-mail da conta só aparece no painel; o log diz "2 contas (Windows, WSL)". `ZEFIRO_USAGE_WINDOWS_HOME=<pasta>` simula um tester que só usa o WSL.
+- **Chat (ADR-0020):** um `claude -p --input-format stream-json --output-format stream-json` vivo por conversa, sem ferramentas e sem hooks/plugins/MCP do usuário (`--setting-sources ""`). Sobe ao abrir o painel, sai com 10 min sem uso e retoma por `--resume` (sessões em `%LOCALAPPDATA%\zefiro\chat` ou `~/.cache/zefiro-chat` no WSL). Parar é um `control_request` `interrupt`. O campo é desenhado pelo painel (não é o EDIT); `WM_CHAR` chega por `chat_char`. A conversa fica em `conversa.json` e nunca vai para o log. Sonda: `chat_probe` (`ZEFIRO_CHAT_ORIGIN=<distro>`).
 - **Notificações:** sem identidade de pacote o `ClearNotifications` falha (0x80070490); limpar remove uma a uma. A central abre com Win+N por `SendInput`.
 - **Sondas de tela sem roubar o mouse:** `PostMessage` na janela `ZefiroInput` simula cliques, mas não dá ao Zefiro o direito de trazer janelas para frente; para isso é preciso entrada real (`SendInput`).
 - **DPI:** o processo é Per-Monitor v2 (`system::enable_per_monitor_dpi`, chamado no início do `main`).

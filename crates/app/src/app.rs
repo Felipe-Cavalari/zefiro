@@ -45,6 +45,8 @@ pub struct SystemState {
     pub notifications: usize,
     /// Não perturbe ativo.
     pub dnd: bool,
+    /// Ponto no chip do chat: o Claude está respondendo ou há resposta não lida.
+    pub chat_badge: bool,
 }
 
 /// O que os chips de uso mostram: as contas do Claude e do Codex no Windows e no WSL.

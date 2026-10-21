@@ -6,6 +6,7 @@ pub mod appbar;
 pub mod audio_devices;
 pub mod bluetooth;
 pub mod brightness;
+pub mod chat;
 pub mod claude;
 pub mod audio_capture;
 pub mod bar_context;

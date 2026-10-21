@@ -931,6 +931,7 @@ dependencies = [
  "winresource",
  "zefiro-bar",
  "zefiro-core",
+ "zefiro-integration-chat",
  "zefiro-integration-clock",
  "zefiro-integration-devices",
  "zefiro-integration-terminal",
@@ -950,6 +951,7 @@ name = "zefiro-bar"
 version = "1.1.1"
 dependencies = [
  "zefiro-core",
+ "zefiro-integration-chat",
  "zefiro-integration-clock",
  "zefiro-integration-usage",
  "zefiro-platform",
@@ -969,6 +971,14 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "zefiro-integration-chat"
+version = "1.1.1"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1047,6 +1057,7 @@ dependencies = [
  "windows",
  "windows-core",
  "windows-numerics",
+ "zefiro-integration-chat",
  "zefiro-integration-devices",
  "zefiro-integration-update",
  "zefiro-integration-usage",

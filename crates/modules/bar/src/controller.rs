@@ -1,7 +1,7 @@
 //! Quem abre e quem fecha: um painel por vez.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PanelKind { Menu, Calendar, Overflow, Island, Audio, Mic, Brightness, Claude, Codex, VsCode, Terminal, Power, Player, Weather, Hardware }
+pub enum PanelKind { Menu, Calendar, Overflow, Island, Audio, Mic, Brightness, Claude, Codex, VsCode, Terminal, Chat, Power, Player, Weather, Hardware }
 
 impl PanelKind {
     /// Painel com abas da ilha: a própria ilha ou um dos chips que levam uma aba dela.
@@ -32,6 +32,7 @@ pub fn panel_kind_for(chip: &str) -> Option<PanelKind> {
         "codex" => Some(PanelKind::Codex),
         "vscode" => Some(PanelKind::VsCode),
         "terminal" => Some(PanelKind::Terminal),
+        "chat" => Some(PanelKind::Chat),
         "power" => Some(PanelKind::Power),
         "player" => Some(PanelKind::Player),
         "weather" => Some(PanelKind::Weather),
@@ -96,6 +97,7 @@ mod tests {
         assert_eq!(panel_kind_for("codex"), Some(PanelKind::Codex));
         assert_eq!(panel_kind_for("vscode"), Some(PanelKind::VsCode));
         assert_eq!(panel_kind_for("terminal"), Some(PanelKind::Terminal));
+        assert_eq!(panel_kind_for("chat"), Some(PanelKind::Chat));
         assert_eq!(panel_kind_for("power"), Some(PanelKind::Power));
         for id in ["notifications", "dnd"] {
             assert_eq!(panel_kind_for(id), None);

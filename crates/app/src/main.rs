@@ -2,6 +2,7 @@
 
 mod app;
 mod bar_view;
+mod chat_loop;
 mod config_worker;
 mod debug_loop;
 mod editor_view;

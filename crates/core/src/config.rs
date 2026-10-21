@@ -28,6 +28,10 @@ seconds = false
 
 [update]
 check = true          # procura versão nova no GitHub Releases (1 vez por dia); instalar é pelo menu do Z
+
+[chat]
+origin = "auto"       # auto | windows | wsl | nome da distro: de onde vem o `claude` do chip "chat"
+model  = ""           # vazio = o modelo que o Claude Code usaria; ou "sonnet", "opus"…
 "#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -70,6 +74,20 @@ pub struct Config {
     pub clock: ClockConfig,
     pub update: UpdateConfig,
     pub terminal: TerminalConfig,
+    pub chat: ChatConfig,
+}
+
+/// Chat com o Claude (chip `chat`). `origin`: `auto` (o Windows; sem ele, uma distro do WSL rodando
+/// que tenha `claude`), `windows`, `wsl` (a distro padrão) ou o nome de uma distro. `model`: vazio
+/// usa o modelo que o Claude Code usaria.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct ChatConfig { pub origin: String, pub model: String }
+
+impl Default for ChatConfig {
+    fn default() -> Self {
+        ChatConfig { origin: "auto".into(), model: String::new() }
+    }
 }
 
 /// Perfis do Windows Terminal no painel do chip `terminal`, por `guid`: os visíveis nesta ordem (os
@@ -214,7 +232,7 @@ pub struct ClockConfig { pub format: String, pub seconds: bool }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { theme: "obsidian".into(), acrylic: None, bar: BarConfig::default(), island: IslandConfig::default(), clock: ClockConfig::default(), update: UpdateConfig::default(), terminal: TerminalConfig::default() }
+        Config { theme: "obsidian".into(), acrylic: None, bar: BarConfig::default(), island: IslandConfig::default(), clock: ClockConfig::default(), update: UpdateConfig::default(), terminal: TerminalConfig::default(), chat: ChatConfig::default() }
     }
 }
 

@@ -161,3 +161,11 @@ fn only_terminal_changed() {
     b.theme = "cobalto".into();
     assert!(!a.same_except_terminal(&b));
 }
+
+#[test]
+fn chat_section_defaults_to_auto_and_is_parsed() {
+    let c = parse_config(DEFAULT_CONFIG).unwrap();
+    assert_eq!((c.chat.origin.as_str(), c.chat.model.as_str()), ("auto", ""));
+    let c = parse_config("[chat]\norigin = \"Ubuntu-24.04\"\nmodel = \"sonnet\"\n").unwrap();
+    assert_eq!((c.chat.origin.as_str(), c.chat.model.as_str()), ("Ubuntu-24.04", "sonnet"));
+}
