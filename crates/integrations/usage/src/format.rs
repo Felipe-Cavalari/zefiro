@@ -84,6 +84,12 @@ pub fn format_short(unix: i64, utc_offset_s: i32) -> String {
 }
 
 /// A partir de 80 % o chip e a barra do painel ficam na cor de destaque.
+/// Hora local "19:52".
+pub fn format_clock(unix: i64, utc_offset_s: i32) -> String {
+    let day_s = (unix + utc_offset_s as i64).rem_euclid(86_400);
+    format!("{:02}:{:02}", day_s / 3600, day_s % 3600 / 60)
+}
+
 pub fn is_high(percent: f32) -> bool {
     percent >= 80.0
 }
@@ -91,6 +97,14 @@ pub fn is_high(percent: f32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clock_in_local_time() {
+        // 2026-10-21 22:52 UTC = 19:52 em Brasília (UTC−3).
+        assert_eq!(format_clock(1_792_623_120, -3 * 3600), "19:52");
+        assert_eq!(format_clock(1_792_623_120, 0), "22:52");
+        assert_eq!(format_clock(1_792_623_120, 3 * 3600), "01:52");
+    }
 
     #[test]
     fn relative_and_absolute_formats() {

@@ -284,7 +284,7 @@ impl CodexService {
     }
 }
 
-/// Não espera a thread: ela pode estar presa num `wsl.exe`, num `\wsl.localhost` ou num HTTP, e
+/// Não espera a thread: ela pode estar presa num `wsl.exe`, num `\\wsl.localhost` ou num HTTP, e
 /// quem solta o serviço é a thread da UI. A thread sai sozinha ao ver o `Stop`.
 impl Drop for CodexService {
     fn drop(&mut self) {

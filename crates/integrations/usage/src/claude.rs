@@ -78,7 +78,7 @@ pub fn plan_name(credentials_json: &str) -> Option<String> {
 }
 
 /// Uma conta do Claude. `credentials` vem na ordem de preferência (Windows, depois as distros).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ClaudeEntry {
     pub email: Option<String>,
     pub plan: Option<String>,
@@ -86,6 +86,10 @@ pub struct ClaudeEntry {
     pub result: Option<Result<ClaudeUsage, UsageError>>,
     /// Último uso lido com sucesso: o chip continua com ele numa falha passageira.
     pub last_ok: Option<ClaudeUsage>,
+    /// Depois de um 429, a conta só é consultada de novo a partir daqui (unix).
+    pub retry_at: Option<i64>,
+    /// 429 seguidos: cada um dobra a pausa.
+    pub limited: u32,
 }
 
 /// Uma origem com `.claude/.credentials.json`.
@@ -114,7 +118,7 @@ pub fn group_claude(mut found: Vec<ClaudeFound>) -> Vec<Account<ClaudeEntry>> {
                 key,
                 origins: vec![f.origin.kind],
                 stopped: false,
-                data: ClaudeEntry { email: f.identity.email, plan: f.plan, credentials: vec![credentials], result: None, last_ok: None },
+                data: ClaudeEntry { email: f.identity.email, plan: f.plan, credentials: vec![credentials], ..Default::default() },
             }),
         }
     }
@@ -128,8 +132,31 @@ pub fn inherit_claude(previous: &[Account<ClaudeEntry>], current: &mut [Account<
         if let Some(old) = previous.iter().find(|p| p.key == account.key) {
             account.data.result = old.data.result.clone();
             account.data.last_ok = old.data.last_ok.clone();
+            account.data.retry_at = old.data.retry_at;
+            account.data.limited = old.data.limited;
         }
     }
+}
+
+/// Pausa depois de um 429, em segundos: o `Retry-After` do servidor ou 5, 10, 20 e 30 min para 429
+/// seguidos; sempre entre 1 e 30 min.
+pub fn rate_limit_wait(retry_after: Option<u64>, streak: u32) -> i64 {
+    let doubled = 300i64 << streak.saturating_sub(1).min(4);
+    retry_after.map_or(doubled, |s| s.min(1800) as i64).clamp(60, 1800)
+}
+
+/// A conta não está em pausa depois de um 429.
+pub fn should_query(entry: &ClaudeEntry, now_unix: i64) -> bool {
+    entry.retry_at.is_none_or(|t| t <= now_unix)
+}
+
+/// Menor intervalo entre duas consultas pedidas pelo botão de atualizar.
+pub const MIN_FORCED: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// O botão de atualizar vale: alguma conta não está em pausa depois de um 429. O piso de 30 s entre
+/// consultas forçadas (`MIN_FORCED`) é do serviço.
+pub fn can_refresh(snapshot: &ClaudeSnapshot, now_unix: i64) -> bool {
+    snapshot.accounts.is_empty() || snapshot.accounts.iter().any(|a| should_query(&a.data, now_unix))
 }
 
 /// O primeiro token válido entre as credenciais da conta; senão vencido (se algum venceu) ou ausente.
@@ -271,7 +298,7 @@ mod tests {
     }
 
     fn with(result: Result<ClaudeUsage, UsageError>, last_ok: Option<ClaudeUsage>, stopped: bool) -> Account<ClaudeEntry> {
-        Account { key: "k".into(), origins: vec![OriginKind::Windows], stopped, data: ClaudeEntry { email: None, plan: None, credentials: Vec::new(), result: Some(result), last_ok } }
+        Account { key: "k".into(), origins: vec![OriginKind::Windows], stopped, data: ClaudeEntry { result: Some(result), last_ok, ..Default::default() } }
     }
 
     #[test]
@@ -331,5 +358,52 @@ mod tests {
         inherit_claude(&previous, &mut current);
         assert_eq!(current[0].data.last_ok, Some(five_hour(5.0, 9)));
         assert_eq!(current[0].data.result, Some(Ok(five_hour(5.0, 9))));
+    }
+
+    #[test]
+    fn rate_limit_waits_grow_and_respect_retry_after() {
+        assert_eq!(rate_limit_wait(None, 1), 300);
+        assert_eq!(rate_limit_wait(None, 2), 600);
+        assert_eq!(rate_limit_wait(None, 3), 1200);
+        assert_eq!(rate_limit_wait(None, 9), 1800);
+        assert_eq!(rate_limit_wait(Some(90), 1), 90);
+        // Retry-After absurdo ou zero: entre 1 e 30 min.
+        assert_eq!(rate_limit_wait(Some(0), 1), 60);
+        assert_eq!(rate_limit_wait(Some(86_400), 1), 1800);
+    }
+
+    #[test]
+    fn paused_account_is_not_queried() {
+        let mut a = with(Err(UsageError::Http(429)), None, false);
+        a.data.retry_at = Some(1000);
+        assert!(!should_query(&a.data, 999));
+        assert!(should_query(&a.data, 1000));
+        assert!(should_query(&with(Ok(five_hour(1.0, 5)), None, false).data, 0));
+    }
+
+    #[test]
+    fn refresh_button_rules() {
+        let now = 10_000;
+        let ok = with(Ok(five_hour(1.0, 5)), None, false);
+        let mut paused = with(Err(UsageError::Http(429)), None, false);
+        paused.data.retry_at = Some(now + 60);
+        let snap = |accounts: Vec<Account<ClaudeEntry>>| ClaudeSnapshot { accounts, wsl_stopped: false, at: Some(std::time::Instant::now()) };
+        // Acabou de consultar e mesmo assim vale: o piso de 30 s fica no serviço, senão o botão
+        // ficaria apagado até o próximo ciclo (o painel só é redesenhado quando chega dado).
+        assert!(can_refresh(&snap(vec![ok.clone()]), now));
+        // Todas as contas em pausa depois de um 429.
+        assert!(!can_refresh(&snap(vec![paused.clone()]), now));
+        assert!(can_refresh(&snap(vec![paused, ok]), now));
+        assert!(can_refresh(&ClaudeSnapshot::default(), now));
+    }
+
+    #[test]
+    fn inherit_keeps_the_pause() {
+        let mut old = Account { key: "u1".into(), ..with(Err(UsageError::Http(429)), None, false) };
+        old.data.retry_at = Some(77);
+        old.data.limited = 2;
+        let mut current = group_claude(vec![found(OriginKind::Windows, Some("u1"))]);
+        inherit_claude(&[old], &mut current);
+        assert_eq!((current[0].data.retry_at, current[0].data.limited), (Some(77), 2));
     }
 }

@@ -47,6 +47,11 @@ pub fn get(url: &str) -> Result<(u16, String)> {
 /// Como `get`, com cabeçalhos próprios (ex.: `Authorization`) e tempo limite: passado `timeout`, a
 /// requisição é cancelada e volta erro.
 pub fn get_with(url: &str, headers: &[(&str, &str)], timeout: Duration) -> Result<(u16, String)> {
+    get_with_retry_after(url, headers, timeout).map(|(status, body, _)| (status, body))
+}
+
+/// Como `get_with`, e o `Retry-After` em segundos, se veio (num 429, por exemplo).
+pub fn get_with_retry_after(url: &str, headers: &[(&str, &str)], timeout: Duration) -> Result<(u16, String, Option<u64>)> {
     let uri = Uri::CreateUri(&HSTRING::from(url))?;
     let request = HttpRequestMessage::Create(&HttpMethod::Get()?, &uri)?;
     let request_headers = request.Headers()?;
@@ -66,8 +71,9 @@ pub fn get_with(url: &str, headers: &[(&str, &str)], timeout: Duration) -> Resul
     let _ = watchdog.join();
     let response = result?;
     let status = response.StatusCode()?.0 as u16;
+    let retry_after = response.Headers()?.RetryAfter().ok().and_then(|r| r.Delta().ok()).and_then(|d| d.Value().ok()).map(|span| (span.Duration / 10_000_000).max(0) as u64);
     let body = response.Content()?.ReadAsStringAsync()?.get()?.to_string();
-    Ok((status, body))
+    Ok((status, body, retry_after))
 }
 
 /// Status e bytes do corpo (o instalador de uma atualização), com tempo limite.
