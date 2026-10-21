@@ -2,6 +2,9 @@
 //! Claude Code em `~/.claude/.credentials.json`. O token nunca é renovado nem gravado aqui.
 
 use serde_json::Value;
+use std::path::PathBuf;
+
+use crate::origins::{Account, Origin, sort_accounts};
 
 use crate::format::parse_iso_utc;
 
@@ -56,6 +59,106 @@ pub fn chip_percent(result: &Result<ClaudeUsage, UsageError>, last_ok: Option<&C
     usage.and_then(|u| u.five_hour).map(|l| l.percent)
 }
 
+/// Quem é a conta, pelo `oauthAccount` do `~/.claude.json`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClaudeIdentity { pub account_uuid: Option<String>, pub email: Option<String> }
+
+pub fn parse_identity(claude_json: &str) -> ClaudeIdentity {
+    let Ok(json) = serde_json::from_str::<Value>(claude_json) else { return ClaudeIdentity::default() };
+    let field = |name: &str| json["oauthAccount"][name].as_str().filter(|s| !s.is_empty()).map(str::to_string);
+    ClaudeIdentity { account_uuid: field("accountUuid"), email: field("emailAddress") }
+}
+
+/// Plano pelo `subscriptionType` das credenciais: "pro" → "Pro".
+pub fn plan_name(credentials_json: &str) -> Option<String> {
+    let json: Value = serde_json::from_str(credentials_json).ok()?;
+    let plan = json["claudeAiOauth"]["subscriptionType"].as_str().filter(|s| !s.is_empty())?;
+    let mut chars = plan.chars();
+    chars.next().map(|first| first.to_uppercase().chain(chars).collect())
+}
+
+/// Uma conta do Claude. `credentials` vem na ordem de preferência (Windows, depois as distros).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClaudeEntry {
+    pub email: Option<String>,
+    pub plan: Option<String>,
+    pub credentials: Vec<PathBuf>,
+    pub result: Option<Result<ClaudeUsage, UsageError>>,
+    /// Último uso lido com sucesso: o chip continua com ele numa falha passageira.
+    pub last_ok: Option<ClaudeUsage>,
+}
+
+/// Uma origem com `.claude/.credentials.json`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClaudeFound { pub origin: Origin, pub identity: ClaudeIdentity, pub plan: Option<String> }
+
+/// O que o serviço publica: as contas, se há WSL parado e quando terminou a última consulta.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ClaudeSnapshot { pub accounts: Vec<Account<ClaudeEntry>>, pub wsl_stopped: bool, pub at: Option<std::time::Instant> }
+
+/// Junta as origens da mesma conta (`accountUuid`); sem ele, cada origem é uma conta.
+pub fn group_claude(mut found: Vec<ClaudeFound>) -> Vec<Account<ClaudeEntry>> {
+    found.sort_by(|a, b| a.origin.kind.cmp(&b.origin.kind));
+    let mut accounts: Vec<Account<ClaudeEntry>> = Vec::new();
+    for f in found {
+        let key = f.identity.account_uuid.clone().unwrap_or_else(|| format!("origem:{:?}", f.origin.kind));
+        let credentials = f.origin.home.join(".claude").join(".credentials.json");
+        match accounts.iter_mut().find(|a| a.key == key) {
+            Some(a) => {
+                a.origins.push(f.origin.kind);
+                a.data.credentials.push(credentials);
+                a.data.email = a.data.email.take().or(f.identity.email);
+                a.data.plan = a.data.plan.take().or(f.plan);
+            }
+            None => accounts.push(Account {
+                key,
+                origins: vec![f.origin.kind],
+                stopped: false,
+                data: ClaudeEntry { email: f.identity.email, plan: f.plan, credentials: vec![credentials], result: None, last_ok: None },
+            }),
+        }
+    }
+    sort_accounts(&mut accounts);
+    accounts
+}
+
+/// Traz o último resultado de cada conta do ciclo anterior.
+pub fn inherit_claude(previous: &[Account<ClaudeEntry>], current: &mut [Account<ClaudeEntry>]) {
+    for account in current {
+        if let Some(old) = previous.iter().find(|p| p.key == account.key) {
+            account.data.result = old.data.result.clone();
+            account.data.last_ok = old.data.last_ok.clone();
+        }
+    }
+}
+
+/// O primeiro token válido entre as credenciais da conta; senão vencido (se algum venceu) ou ausente.
+pub fn first_valid_token(credentials: &[String], now_ms: i64) -> TokenState {
+    let mut state = TokenState::Missing;
+    for text in credentials {
+        match token_state(text, now_ms) {
+            TokenState::Valid(token) => return TokenState::Valid(token),
+            TokenState::Expired => state = TokenState::Expired,
+            TokenState::Missing => {}
+        }
+    }
+    state
+}
+
+/// % do chip com várias contas: a maior janela de 5 h, com 0 % na janela que já reiniciou.
+pub fn chip_percent_accounts(accounts: &[Account<ClaudeEntry>], now_unix: i64) -> Option<f32> {
+    accounts
+        .iter()
+        .filter_map(|a| {
+            let result = a.data.result.as_ref()?;
+            let percent = chip_percent(result, a.data.last_ok.as_ref())?;
+            let usage = match result { Ok(u) => Some(u), Err(_) => a.data.last_ok.as_ref() };
+            let reset = usage.and_then(|u| u.five_hour).and_then(|l| l.resets_at).is_some_and(|t| t <= now_unix);
+            Some(if reset { 0.0 } else { percent })
+        })
+        .reduce(f32::max)
+}
+
 /// `Some(Ok)` se for uma janela válida, `Some(Err)` se o formato mudou, `None` se nula ou ausente.
 fn limit(v: &Value) -> Option<Result<Limit, UsageError>> {
     let obj = v.as_object()?;
@@ -91,6 +194,7 @@ pub fn parse_claude(json: &str) -> Result<ClaudeUsage, UsageError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::origins::OriginKind;
 
     const USAGE: &str = include_str!("../tests/fixtures/claude_usage.json");
     // Valores inventados; nenhum token real.
@@ -155,5 +259,77 @@ mod tests {
         assert_eq!(chip_percent(&Err(UsageError::Expired), Some(&ok)), None);
         assert_eq!(chip_percent(&Err(UsageError::Missing), Some(&ok)), None);
         assert_eq!(chip_percent(&Err(UsageError::UnknownFormat), Some(&ok)), None);
+    }
+
+    fn found(kind: OriginKind, uuid: Option<&str>) -> ClaudeFound {
+        let home = match &kind { OriginKind::Windows => PathBuf::from("C:\\casa"), OriginKind::Wsl(d) => PathBuf::from(format!("\\\\wsl.localhost\\{d}\\home\\eu")) };
+        ClaudeFound { origin: Origin { kind, home }, identity: ClaudeIdentity { account_uuid: uuid.map(String::from), email: Some("a@b.c".into()) }, plan: Some("Pro".into()) }
+    }
+
+    fn five_hour(percent: f32, resets_at: i64) -> ClaudeUsage {
+        ClaudeUsage { five_hour: Some(Limit { percent, resets_at: Some(resets_at) }), ..Default::default() }
+    }
+
+    fn with(result: Result<ClaudeUsage, UsageError>, last_ok: Option<ClaudeUsage>, stopped: bool) -> Account<ClaudeEntry> {
+        Account { key: "k".into(), origins: vec![OriginKind::Windows], stopped, data: ClaudeEntry { email: None, plan: None, credentials: Vec::new(), result: Some(result), last_ok } }
+    }
+
+    #[test]
+    fn identity_from_claude_json() {
+        let id = parse_identity(r#"{"oauthAccount": {"accountUuid": "u1", "emailAddress": "a@b.c"}}"#);
+        assert_eq!(id, ClaudeIdentity { account_uuid: Some("u1".into()), email: Some("a@b.c".into()) });
+        assert_eq!(parse_identity("{}"), ClaudeIdentity::default());
+        assert_eq!(parse_identity("não é json"), ClaudeIdentity::default());
+    }
+
+    #[test]
+    fn plan_names() {
+        assert_eq!(plan_name(CREDENTIALS).as_deref(), Some("Max"));
+        assert_eq!(plan_name(r#"{"claudeAiOauth": {"subscriptionType": "pro"}}"#).as_deref(), Some("Pro"));
+        assert_eq!(plan_name(r#"{"claudeAiOauth": {}}"#), None);
+    }
+
+    #[test]
+    fn same_uuid_in_two_origins_is_one_account() {
+        let one = group_claude(vec![found(OriginKind::Wsl("Ubuntu".into()), Some("u1")), found(OriginKind::Windows, Some("u1"))]);
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].origins, vec![OriginKind::Windows, OriginKind::Wsl("Ubuntu".into())]);
+        assert!(one[0].data.credentials[0].starts_with("C:\\casa"));
+        assert!(one[0].data.credentials[0].ends_with(".claude/.credentials.json"));
+        assert_eq!(group_claude(vec![found(OriginKind::Windows, Some("u1")), found(OriginKind::Wsl("U".into()), Some("u2"))]).len(), 2);
+        // Sem `.claude.json`: cada origem é uma conta.
+        assert_eq!(group_claude(vec![found(OriginKind::Windows, None), found(OriginKind::Wsl("U".into()), None)]).len(), 2);
+    }
+
+    #[test]
+    fn first_valid_token_skips_expired() {
+        let valid = r#"{"claudeAiOauth": {"accessToken": "t-falso", "expiresAt": 5000}}"#.to_string();
+        let expired = r#"{"claudeAiOauth": {"accessToken": "t-velho", "expiresAt": 10}}"#.to_string();
+        assert_eq!(first_valid_token(&[expired.clone(), valid], 100), TokenState::Valid("t-falso".into()));
+        assert_eq!(first_valid_token(std::slice::from_ref(&expired), 100), TokenState::Expired);
+        assert_eq!(first_valid_token(&[String::new()], 100), TokenState::Missing);
+    }
+
+    #[test]
+    fn chip_is_max_across_accounts() {
+        let now = 1000;
+        let a = with(Ok(five_hour(9.0, now + 60)), None, false);
+        let b = with(Ok(five_hour(17.0, now + 60)), None, false);
+        assert_eq!(chip_percent_accounts(&[a.clone(), b], now), Some(17.0));
+        let reset = with(Ok(five_hour(17.0, now - 1)), None, false);
+        assert_eq!(chip_percent_accounts(&[a.clone(), reset], now), Some(9.0));
+        let stopped = with(Err(UsageError::Network), Some(five_hour(30.0, now + 60)), true);
+        assert_eq!(chip_percent_accounts(&[a, stopped], now), Some(30.0));
+        assert_eq!(chip_percent_accounts(&[with(Err(UsageError::Expired), None, false)], now), None);
+        assert_eq!(chip_percent_accounts(&[], now), None);
+    }
+
+    #[test]
+    fn inherit_keeps_last_ok() {
+        let previous = vec![Account { key: "u1".into(), ..with(Ok(five_hour(5.0, 9)), Some(five_hour(5.0, 9)), false) }];
+        let mut current = group_claude(vec![found(OriginKind::Windows, Some("u1"))]);
+        inherit_claude(&previous, &mut current);
+        assert_eq!(current[0].data.last_ok, Some(five_hour(5.0, 9)));
+        assert_eq!(current[0].data.result, Some(Ok(five_hour(5.0, 9))));
     }
 }
