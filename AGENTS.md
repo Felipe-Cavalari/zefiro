@@ -41,7 +41,7 @@ Leia antes de mudar qualquer coisa:
 | `crates/ui` | Molas (constantes da ilha), `DisplayList`, layout da barra (faixa, pílulas, ilhas com trilho e concordâncias, Fluent com cartões e Vidro flutuante) e regras do painel (pílula → painel) |
 | `crates/integrations/clock` | Grade do mês e formatação de data (pt-BR e Windows) |
 | `crates/integrations/devices` | Brilho e níveis, portável: escrita agrupada do DDC/CI (`Coalescer`), passo da roda e posição no slider (ADR-0010) |
-| `crates/integrations/usage` | Uso do Claude (resposta do endpoint, token) e do Codex (fim dos `.jsonl`, thread `CodexService`) e datas em pt-BR, portável (ADR-0011) |
+| `crates/integrations/usage` | Uso do Claude (resposta do endpoint, token, contas) e do Codex (fim dos `.jsonl`, contas, thread `CodexService`), origens Windows/WSL (`origins.rs`) e datas em pt-BR, portável (ADR-0011, ADR-0019) |
 | `crates/integrations/vscode` | Projetos recentes do VS Code pelo `workspaceStorage`, portável (ADR-0011) |
 | `crates/integrations/terminal` | Perfis do Windows Terminal pelo `settings.json` e fragmentos (JSONC, ocultos, fontes desativadas), ordem e ocultos do `[terminal]` e os argumentos do `wt.exe`, portável (ADR-0015) |
 | `crates/integrations/update` | Atualização pelo GitHub Releases, portável: versão, última release, URL confiável e SHA-256 (ADR-0014) |
@@ -69,7 +69,8 @@ Copy-Item island/build/zefiro-island.exe target/release/
 pwsh -NoProfile -File scripts/package.ps1      # -BuildIsland recompila a ilha C++ antes
 ```
 
-**Releases e atualização (ADR-0014):** o Zefiro instalado consulta o GitHub Releases a cada 24 h e oferece "Atualizar para a x.y.z" no menu do Z. Para publicar: subir a versão no `Cargo.toml`, commit e `git tag vX.Y.Z` + push (só quando o usuário pedir); o `.github/workflows/release.yml` gera e anexa o instalador. Guia: `docs/RELEASES.md`. O build de `targetelease` só checa com `ZEFIRO_UPDATE_CHECK=1`.
+**Releases e atualização (ADR-0014):** o Zefiro instalado consulta o GitHub Releases a cada 24 h e oferece "Atualizar para a x.y.z" no menu do Z. Para publicar: subir a versão no `Cargo.toml`, commit e `git tag vX.Y.Z` + push (só quando o usuário pedir); o `.github/workflows/release.yml` gera e anexa o instalador. Guia: `docs/RELEASES.md`. O build de `target
+elease` só checa com `ZEFIRO_UPDATE_CHECK=1`.
 
 **Instalador:** `installer/zefiro.iss`, por usuário e sem admin, em `%LOCALAPPDATA%\Programs\Zefiro`. A versão vem do `[workspace.package]` do `Cargo.toml`. Ele fecha o Zefiro com `WM_CLOSE` antes de instalar ou desinstalar e nunca apaga `%APPDATA%\zefiro`. O ícone e a versão do exe vêm do `crates/app/build.rs`.
 
@@ -107,6 +108,8 @@ pwsh -NoProfile -File scripts/package.ps1      # -BuildIsland recompila a ilha C
 - **Chip Terminal (ADR-0015):** lê os perfis do Terminal ao abrir o painel e nunca grava nos arquivos dele. A edição (arrastar, olho) é no próprio painel e grava só `[terminal]`; mudança só nessa seção não fecha o painel (`Config::same_except_terminal`). O `wt.exe` é um alias de execução: `Path::exists` dá `false`, use `symlink_metadata`.
 - **Serviços seguem a barra:** Claude, Codex e notificações só rodam com o chip em algum layout (`BarConfig::uses`); `refresh_services()` roda ao salvar o config e ao concluir o modo de edição.
 - **Claude:** o Zefiro só lê `~/.claude/.credentials.json` (a cada consulta) e nunca renova nem grava o token, porque isso derrubaria o login do Claude Code. O token nunca vai para log, teste ou sonda (ADR-0011).
+- **HTTP sem cache:** o `HttpClient` do Windows com o filtro padrão devolve do cache a 1ª resposta do processo (era o chip do Claude parado até reiniciar a barra). `http::client()` usa `HttpBaseProtocolFilter` com `NoCache`; sonda `http_cache_probe` (ADR-0019).
+- **Uso no WSL (ADR-0019):** os chips `claude` e `codex` juntam as contas do Windows e das distros rodando (`wsl::discover`). Ler `\\wsl.localhost\<distro>` de uma distro parada a **liga**: só se lê distro que está em `wsl --list --running`, com cache de 3 s, e o Claude lê todas as credenciais logo depois de descobrir as origens. `docker-desktop*` e `/root` ficam de fora. O e-mail da conta só aparece no painel; o log diz "2 contas (Windows, WSL)". `ZEFIRO_USAGE_WINDOWS_HOME=<pasta>` simula um tester que só usa o WSL.
 - **Notificações:** sem identidade de pacote o `ClearNotifications` falha (0x80070490); limpar remove uma a uma. A central abre com Win+N por `SendInput`.
 - **Sondas de tela sem roubar o mouse:** `PostMessage` na janela `ZefiroInput` simula cliques, mas não dá ao Zefiro o direito de trazer janelas para frente; para isso é preciso entrada real (`SendInput`).
 - **DPI:** o processo é Per-Monitor v2 (`system::enable_per_monitor_dpi`, chamado no início do `main`).
