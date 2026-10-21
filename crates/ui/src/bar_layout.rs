@@ -1,4 +1,4 @@
-//! Layout da barra nas 2 alturas × 3 formatos (spec §5.1; ilhas no ADR-0016).
+//! Layout da barra nas 2 alturas × 5 formatos (spec §5.1; ilhas no ADR-0016; Fluent e Vidro no ADR-0018).
 
 use crate::panel_layout::Shape;
 use zefiro_core::config::{BarFormat, BarHeight};
@@ -19,6 +19,11 @@ pub struct BarMetrics {
     pub rail: f32,
     pub island_radius: f32,
     pub fillet: f32,
+    /// Vidro: distância da barra flutuante ao topo e às laterais, e o canto dela. 0 nos outros.
+    pub margin: f32,
+    pub strip_radius: f32,
+    /// Canto do fundo dos chips (cartão do Fluent, vidro do Vidro); 0 = o do tema (pílula).
+    pub chip_radius: f32,
 }
 
 pub fn metrics(height: BarHeight, format: BarFormat) -> BarMetrics {
@@ -30,13 +35,33 @@ pub fn metrics(height: BarHeight, format: BarFormat) -> BarMetrics {
         // A ilha tem a altura da barra; números do YASB: railheight 4, islandradius 16, edgeradius 8, grouppadding 12.
         (BarHeight::Completa, BarFormat::Ilhas) => (36.0, 36.0, 28.0, 28.0, 12.0, 13.0),
         (BarHeight::Compacta, BarFormat::Ilhas) => (32.0, 32.0, 24.0, 24.0, 12.0, 12.0),
+        // Win11 Fluent Onyx: a faixa com um cartão por chip (4 de folga em cima e embaixo).
+        (BarHeight::Completa, BarFormat::Fluent) => (36.0, 28.0, 28.0, 30.0, 0.0, 13.0),
+        (BarHeight::Compacta, BarFormat::Fluent) => (32.0, 24.0, 24.0, 28.0, 0.0, 12.0),
+        // Frosted Glass Revamp: `band` é a reserva (barra de 34/30 + 6 em cima e embaixo).
+        (BarHeight::Completa, BarFormat::Vidro) => (46.0, 34.0, 26.0, 26.0, 0.0, 13.0),
+        (BarHeight::Compacta, BarFormat::Vidro) => (42.0, 30.0, 22.0, 22.0, 0.0, 12.0),
     };
-    let base = BarMetrics { band, pill, chip_h, island_pill, group_pad, edge: 8.0, chip_pad_x: 10.0, chip_gap: 4.0, font, rail: 0.0, island_radius: 0.0, fillet: 0.0 };
+    let base = BarMetrics { band, pill, chip_h, island_pill, group_pad, edge: 8.0, chip_pad_x: 10.0, chip_gap: 4.0, font, rail: 0.0, island_radius: 0.0, fillet: 0.0, margin: 0.0, strip_radius: 0.0, chip_radius: 0.0 };
     match format {
         // As ilhas das pontas encostam na borda do monitor.
         BarFormat::Ilhas => BarMetrics { edge: 0.0, rail: 4.0, island_radius: 16.0, fillet: 8.0, ..base },
+        BarFormat::Fluent => BarMetrics { chip_pad_x: 12.0, chip_radius: 8.0, ..base },
+        // A borda de 8 conta a partir da barra flutuante.
+        BarFormat::Vidro => BarMetrics { edge: 14.0, margin: 6.0, strip_radius: 16.0, chip_radius: 10.0, ..base },
         _ => base,
     }
+}
+
+/// Fundo que os chips têm sempre, além do hover.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChipBacking {
+    /// Só o hover (faixa, pílulas, ilhas).
+    None,
+    /// Fluent: cartão com o fundo realçado do tema e borda fina.
+    Card,
+    /// Vidro: um fundo bem leve.
+    Frost,
 }
 
 /// Lado da ilha em que fica a concordância (o canto côncavo entre o trilho e a ilha).
@@ -77,6 +102,17 @@ pub struct BarLayout {
     pub regions: [Rect; 3],
     /// Só no formato ilhas; aí `groups` são as ilhas visíveis (do topo ao pé da barra).
     pub islands: Option<Islands>,
+    /// Faixa útil para chips e para a ilha de mídia: abaixo do trilho nas ilhas, dentro da barra
+    /// flutuante no Vidro, a faixa inteira nos outros.
+    pub content_top: f32,
+    pub content_h: f32,
+    /// Canto da faixa (a barra flutuante do Vidro); 0 = reta.
+    pub strip_radius: f32,
+    /// Linha embaixo da faixa (faixa e Fluent).
+    pub divider: bool,
+    pub chip_backing: ChipBacking,
+    /// Canto do fundo dos chips; `None` = o do tema.
+    pub chip_radius: Option<f32>,
 }
 
 impl BarLayout {
@@ -90,10 +126,20 @@ impl BarLayout {
         Shape { rect: Rect::new(r.x - left, r.y - radius, r.w + left + right, r.h + radius), radius }
     }
 
-    /// Topo da pílula da ilha de mídia: centrada na barra, ou abaixo do trilho nas ilhas.
+    /// Topo da pílula da ilha de mídia: centrada na faixa útil (abaixo do trilho, dentro da barra
+    /// flutuante).
     pub fn island_pill_y(&self) -> f32 {
-        let top = self.islands.as_ref().map_or(0.0, |i| i.rail_h);
-        (top + (self.band.h - top - self.island_pill_h) / 2.0).round()
+        (self.content_top + (self.content_h - self.island_pill_h) / 2.0).round()
+    }
+
+    /// O chip `id` tem fundo sempre? No Fluent, o Z, o relógio e a energia ficam sem cartão, como no
+    /// tema do YASB; a ilha e o player nunca, porque já são pílulas.
+    pub fn has_backing(&self, id: &str) -> bool {
+        match self.chip_backing {
+            ChipBacking::None => false,
+            ChipBacking::Card => !matches!(id, "zefiro" | "clock" | "power" | "island" | "player"),
+            ChipBacking::Frost => !matches!(id, "island" | "player"),
+        }
     }
 
     /// Seção do grupo (0 início, 1 centro, 2 fim): a região que contém o meio dele, ou a mais próxima.
@@ -171,7 +217,9 @@ pub fn layout_bar(monitor_w: f32, scale: f32, height: BarHeight, format: BarForm
     let pills = format == BarFormat::Pilulas;
     let group_h = px(m.pill);
     let group_y = ((band.h - group_h) / 2.0).round();
-    let chip_y = if pills { group_y + pad } else { ((band.h - chip_h) / 2.0).round() };
+    let margin = px(m.margin);
+    let (content_top, content_h) = if m.rail > 0.0 { (px(m.rail), band.h - px(m.rail)) } else { (margin, band.h - 2.0 * margin) };
+    let chip_y = if pills { group_y + pad } else { (content_top + (content_h - chip_h) / 2.0).round() };
 
     let mut place = |cs: &[ChipSpec], left: f32| {
         if cs.is_empty() {
@@ -195,7 +243,11 @@ pub fn layout_bar(monitor_w: f32, scale: f32, height: BarHeight, format: BarForm
     BarLayout {
         scale,
         band,
-        strip: (format == BarFormat::Faixa).then_some(band),
+        strip: match format {
+            BarFormat::Faixa | BarFormat::Fluent => Some(band),
+            BarFormat::Vidro => Some(Rect::new(margin, margin, monitor_w - 2.0 * margin, content_h)),
+            BarFormat::Pilulas | BarFormat::Ilhas => None,
+        },
         groups,
         chips,
         island_pill_h: px(m.island_pill),
@@ -204,6 +256,16 @@ pub fn layout_bar(monitor_w: f32, scale: f32, height: BarHeight, format: BarForm
         overflow: Vec::new(),
         regions: [Rect::default(); 3],
         islands: None,
+        content_top,
+        content_h,
+        strip_radius: px(m.strip_radius),
+        divider: matches!(format, BarFormat::Faixa | BarFormat::Fluent),
+        chip_backing: match format {
+            BarFormat::Fluent => ChipBacking::Card,
+            BarFormat::Vidro => ChipBacking::Frost,
+            _ => ChipBacking::None,
+        },
+        chip_radius: (m.chip_radius > 0.0).then(|| px(m.chip_radius)),
     }
 }
 
@@ -216,8 +278,7 @@ pub fn layout_sections(monitor_w: f32, scale: f32, height: BarHeight, format: Ba
     let gap = (m.chip_gap * scale).round();
     let islands = format == BarFormat::Ilhas;
     let pad = if format == BarFormat::Faixa { 0.0 } else { (m.group_pad * scale).round() };
-    let top = (m.rail * scale).round();
-    let chip_y = (top + (layout.band.h - top - layout.chip_h_px) / 2.0).round();
+    let chip_y = (layout.content_top + (layout.content_h - layout.chip_h_px) / 2.0).round();
     let width = |chip: &ChipSpec| (chip.content_w.min(if chip.wide { f32::MAX } else { 160.0 * scale }).max(0.0) + 2.0 * (m.chip_pad_x * scale).round()).ceil();
     let total = |items: &[ChipSpec]| items.iter().map(&width).sum::<f32>() + gap * items.len().saturating_sub(1) as f32 + if items.is_empty() { 0.0 } else { 2.0 * pad };
     // Nas ilhas, a ilha do centro envolve a reserva da ilha de mídia com a margem dos dois lados.
@@ -272,7 +333,7 @@ pub fn layout_sections(monitor_w: f32, scale: f32, height: BarHeight, format: Ba
         match format {
             BarFormat::Pilulas => layout.groups.push(rounded(Rect::new(x, (layout.band.h - m.pill * scale) / 2.0, used, m.pill * scale))),
             BarFormat::Ilhas => layout.groups.push(rounded(Rect::new(x, 0.0, used, layout.band.h))),
-            BarFormat::Faixa => {}
+            BarFormat::Faixa | BarFormat::Fluent | BarFormat::Vidro => {}
         }
         let mut cursor = x + pad;
         let y = chip_y;

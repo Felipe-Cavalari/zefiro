@@ -148,7 +148,7 @@ impl MenuModel {
             MenuPage::Main => {
                 for (title, opts) in [
                     ("Altura", vec![MenuAction::SetHeight(BarHeight::Completa), MenuAction::SetHeight(BarHeight::Compacta)]),
-                    ("Formato", [BarFormat::Faixa, BarFormat::Pilulas, BarFormat::Ilhas].map(MenuAction::SetFormat).to_vec()),
+                    ("Formato", [BarFormat::Faixa, BarFormat::Pilulas, BarFormat::Ilhas, BarFormat::Fluent, BarFormat::Vidro].map(MenuAction::SetFormat).to_vec()),
                 ] {
                     titles.push((title, y));
                     y += s(TITLE_H);
@@ -266,6 +266,8 @@ impl MenuModel {
                         MenuAction::SetHeight(BarHeight::Compacta) => "Compacta",
                         MenuAction::SetFormat(BarFormat::Faixa) => "Faixa",
                         MenuAction::SetFormat(BarFormat::Ilhas) => "Ilhas",
+                        MenuAction::SetFormat(BarFormat::Fluent) => "Fluent",
+                        MenuAction::SetFormat(BarFormat::Vidro) => "Vidro",
                         _ => "Pílulas",
                     };
                     list.push(DrawOp::Text { rect: b.rect, text: label.into(), style: body, color: tokens.text, align: Align::Center });
@@ -428,13 +430,13 @@ mod tests {
     }
 
     #[test]
-    fn format_row_offers_strip_pills_and_islands() {
+    fn format_row_offers_all_five_formats() {
         let mut m = MenuModel::new(BarHeight::Completa, BarFormat::Ilhas, "t2", swatches(8));
         let row: Vec<_> = m.layout(1.0).into_iter().filter(|b| matches!(b.action, MenuAction::SetFormat(_))).collect();
-        assert_eq!(row.iter().map(|b| b.action.clone()).collect::<Vec<_>>(), [BarFormat::Faixa, BarFormat::Pilulas, BarFormat::Ilhas].map(MenuAction::SetFormat));
-        assert!(row.windows(2).all(|w| w[0].rect.right() <= w[1].rect.x + 0.01 && w[0].rect.w == w[1].rect.w), "três colunas iguais");
+        assert_eq!(row.iter().map(|b| b.action.clone()).collect::<Vec<_>>(), [BarFormat::Faixa, BarFormat::Pilulas, BarFormat::Ilhas, BarFormat::Fluent, BarFormat::Vidro].map(MenuAction::SetFormat));
+        assert!(row.windows(2).all(|w| w[0].rect.right() <= w[1].rect.x + 0.01 && w[0].rect.w == w[1].rect.w), "colunas iguais");
         let texts = texts(&m.paint(1.0, &tokens()));
-        assert!(["Faixa", "Pílulas", "Ilhas"].iter().all(|t| texts.contains(&t.to_string())), "{texts:?}");
+        assert!(["Faixa", "Pílulas", "Ilhas", "Fluent", "Vidro"].iter().all(|t| texts.contains(&t.to_string())), "{texts:?}");
         m.key(NavKey::Down);
         m.key(NavKey::Right);
         m.key(NavKey::Right);

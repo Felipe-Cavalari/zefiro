@@ -1,4 +1,4 @@
-//! Uma barra por monitor: faixa, pílulas ou ilhas, chips e transições.
+//! Uma barra por monitor: faixa, pílulas, ilhas, Fluent ou Vidro, chips e transições.
 
 use windows::UI::Composition::Desktop::DesktopWindowTarget;
 use windows::UI::Composition::{CompositionDrawingSurface, ContainerVisual, SpriteVisual, Visual};
@@ -17,7 +17,7 @@ use zefiro_platform_windows::monitors::Monitor;
 use zefiro_platform_windows::fillet::FilletShape;
 use zefiro_platform_windows::morph::MorphShape;
 use zefiro_platform_windows::{appbar, island_zorder, window};
-use zefiro_ui::bar_layout::{BarLayout, ChipSpec, FilletSide, layout_sections, metrics};
+use zefiro_ui::bar_layout::{BarLayout, ChipBacking, ChipSpec, FilletSide, layout_sections, metrics};
 use zefiro_ui::panel_layout::{CHIP_FADE_S, SHADOW_MARGIN_DIP, Shape, pill_radius};
 use zefiro_ui::spring::SpringParams;
 use zefiro_ui::paint::{DisplayList, DrawOp};
@@ -261,7 +261,9 @@ impl BarView {
             }
         }
 
-        self.strip.set_style(&ctx.comp, &ctx.theme.morph_style(self.scale, SurfaceKind::Strip))?;
+        // A barra flutuante do Vidro é uma pílula: com a borda e a sombra do tema.
+        let strip_kind = if layout.strip_radius > 0.0 { SurfaceKind::Pill } else { SurfaceKind::Strip };
+        self.strip.set_style(&ctx.comp, &ctx.theme.morph_style(self.scale, strip_kind))?;
         let group_style = if layout.islands.is_some() { island_style.clone() } else { ctx.theme.morph_style(self.scale, SurfaceKind::Pill) };
         for g in &self.groups {
             g.shape.set_style(&ctx.comp, &group_style)?;
@@ -294,7 +296,7 @@ impl BarView {
         let center = Rect::new(((self.monitor.rect.w - pill_h * 4.0) / 2.0).round(), layout.band.y + ((layout.band.h - pill_h) / 2.0).round(), pill_h * 4.0, pill_h);
         match (layout.strip, &layout.islands) {
             (Some(band), _) => {
-                place(&self.strip, Shape { rect: band, radius: 0.0 })?;
+                place(&self.strip, Shape { rect: band, radius: layout.strip_radius })?;
                 fade(&self.strip, 1.0)?;
             }
             (None, Some(_)) => at_once(self.strip.root(), 0.0)?,
@@ -306,7 +308,7 @@ impl BarView {
         let line = self.scale.max(1.0);
         self.divider.SetOffset(Vector3 { X: 0.0, Y: layout.band.bottom() - line, Z: 0.0 })?;
         self.divider.SetSize(Vector2 { X: self.monitor.rect.w, Y: line })?;
-        self.divider.SetOpacity(if layout.strip.is_some() { 1.0 } else { 0.0 })?;
+        self.divider.SetOpacity(if layout.divider { 1.0 } else { 0.0 })?;
 
         // Grupos, cada um no lugar da sua seção. Um grupo que não existia nasce no lugar final.
         let mut targets: [Option<Rect>; 3] = [None; 3];
@@ -395,7 +397,7 @@ impl BarView {
             } else if is_new || !animate {
                 ctx.comp.move_offset(&chip.pos, b.rect.x + pad, b.rect.y, None)?;
             }
-            let r = Shape { rect: b.rect, radius: pill_radius(b.rect.h, radius_max, style, self.scale) };
+            let r = Shape { rect: b.rect, radius: layout.chip_radius.unwrap_or_else(|| pill_radius(b.rect.h, radius_max, style, self.scale)) };
             if animate { chip.hover.animate(&ctx.comp, r, spring)? } else { chip.hover.set(r)? }
             chip.rect = b.rect;
         }
@@ -651,17 +653,28 @@ impl BarView {
 
     fn refresh_chip_fills(&self, ctx: &AppCtx) -> Result<()> {
         let spring = ctx.theme.spring(SpringParams::SETTLE);
+        let t = &ctx.theme.tokens;
         for c in &self.chips {
             // Player e ilha são pílulas: sem fundo de hover nem de ativo.
             let player = c.id == PLAYER_CHIP || c.id == ISLAND_CHIP;
             let active = !player && self.active.as_deref() == Some(&c.id);
             let hovered = !player && self.hover.as_deref() == Some(&c.id);
+            // Fundo de sempre: o cartão do Fluent (realçado, com borda fina) e o vidro do Vidro (leve).
+            let backing = self.layout.as_ref().filter(|l| l.has_backing(&c.id)).map_or(ChipBacking::None, |l| l.chip_backing);
             let mut style = ctx.theme.morph_style(self.scale, SurfaceKind::Hover);
-            if active {
-                style.fill = ctx.theme.active_fill();
+            if backing == ChipBacking::Card {
+                style.border = Some(t.hairline);
+                style.border_px = self.scale.max(1.0);
             }
+            style.fill = match (active, hovered, backing) {
+                (true, _, _) => ctx.theme.active_fill(),
+                (false, true, ChipBacking::Card) => t.raised_strong,
+                (false, true, _) => t.raised,
+                (false, false, ChipBacking::Frost) => t.raised.with_alpha(t.raised.a * 0.35),
+                (false, false, _) => t.raised,
+            };
             c.hover.set_style(&ctx.comp, &style)?;
-            c.hover.animate_opacity(&ctx.comp, if active || hovered { 1.0 } else { 0.0 }, spring)?;
+            c.hover.animate_opacity(&ctx.comp, if active || hovered || backing != ChipBacking::None { 1.0 } else { 0.0 }, spring)?;
         }
         Ok(())
     }

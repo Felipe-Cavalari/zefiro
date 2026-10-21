@@ -65,6 +65,15 @@ fn missing_keys_take_defaults() {
 }
 
 #[test]
+fn fluent_and_vidro_formats_parse_and_round_trip() {
+    for (text, format) in [("fluent", BarFormat::Fluent), ("vidro", BarFormat::Vidro)] {
+        let c = parse_config(&format!("[bar]\nformat = \"{text}\"\n")).unwrap();
+        assert_eq!(c.bar.format, format);
+        assert_eq!(format.as_str(), text);
+    }
+}
+
+#[test]
 fn islands_format_parses_and_round_trips() {
     let c = parse_config("[bar]\nformat = \"ilhas\"\n").unwrap();
     assert_eq!(c.bar.format, BarFormat::Ilhas);

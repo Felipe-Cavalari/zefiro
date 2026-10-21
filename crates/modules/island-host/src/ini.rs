@@ -17,7 +17,7 @@ pub struct IslandSettings {
     pub theme: IslandTheme,
     pub spring: SpringStyle,
     pub speed: f32,
-    /// Faixa e ilhas: a ilha se funde à barra (sem contorno nem sombra). Nas pílulas ela é uma pílula como as outras.
+    /// Faixa, ilhas, Fluent e Vidro: a ilha se funde à barra (sem contorno nem sombra). Nas pílulas ela é uma pílula como as outras.
     pub merged: bool,
     /// Sombra do tema (`material.shadow`), usada quando a ilha não está fundida.
     pub shadow: bool,
@@ -31,6 +31,10 @@ pub fn island_pill_height(height: BarHeight, format: BarFormat) -> u32 {
         (BarHeight::Compacta, BarFormat::Pilulas) => 24,
         (BarHeight::Completa, BarFormat::Ilhas) => 36,
         (BarHeight::Compacta, BarFormat::Ilhas) => 24,
+        (BarHeight::Completa, BarFormat::Fluent) => 44,
+        (BarHeight::Compacta, BarFormat::Fluent) => 28,
+        (BarHeight::Completa, BarFormat::Vidro) => 36,
+        (BarHeight::Compacta, BarFormat::Vidro) => 24,
     }
 }
 
@@ -200,6 +204,17 @@ mod tests {
         assert_eq!(island_pill_height(BarHeight::Compacta, BarFormat::Pilulas), 24);
         assert_eq!(island_pill_height(BarHeight::Completa, BarFormat::Ilhas), 36);
         assert_eq!(island_pill_height(BarHeight::Compacta, BarFormat::Ilhas), 24);
+    }
+
+    #[test]
+    fn fluent_follows_the_strip_and_vidro_the_pills() {
+        assert_eq!(island_pill_height(BarHeight::Completa, BarFormat::Fluent), 44);
+        assert_eq!(island_pill_height(BarHeight::Compacta, BarFormat::Fluent), 28);
+        assert_eq!(island_pill_height(BarHeight::Completa, BarFormat::Vidro), 36);
+        assert_eq!(island_pill_height(BarHeight::Compacta, BarFormat::Vidro), 24);
+        for f in [BarFormat::Fluent, BarFormat::Vidro] {
+            assert!(settings_for(&theme("obsidian"), BarHeight::Completa, f).merged, "{f:?}: a ilha fica sobre a barra");
+        }
     }
 
     #[test]

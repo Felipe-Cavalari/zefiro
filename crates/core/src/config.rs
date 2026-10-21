@@ -10,7 +10,7 @@ theme = "obsidian"
 
 [bar]
 height = "completa"   # completa | compacta
-format = "faixa"      # faixa | pilulas | ilhas
+format = "faixa"      # faixa | pilulas | ilhas | fluent | vidro
 
 [bar.sections]
 start  = ["zefiro"]
@@ -36,7 +36,7 @@ pub enum BarHeight { Completa, Compacta }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum BarFormat { Faixa, Pilulas, Ilhas }
+pub enum BarFormat { Faixa, Pilulas, Ilhas, Fluent, Vidro }
 
 impl BarHeight {
     pub fn as_str(self) -> &'static str {
@@ -53,6 +53,8 @@ impl BarFormat {
             BarFormat::Faixa => "faixa",
             BarFormat::Pilulas => "pilulas",
             BarFormat::Ilhas => "ilhas",
+            BarFormat::Fluent => "fluent",
+            BarFormat::Vidro => "vidro",
         }
     }
 }
