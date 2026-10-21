@@ -33,6 +33,21 @@ fn the_island_is_a_chip_and_only_shows_where_it_is_placed() {
 }
 
 #[test]
+fn acrylic_choice_is_optional_and_written_as_a_bool() {
+    assert_eq!(parse_config(DEFAULT_CONFIG).unwrap().acrylic, None, "sem a chave, cada tema decide");
+    assert_eq!(parse_config("acrylic = true\n").unwrap().acrylic, Some(true));
+    assert_eq!(parse_config("acrylic = false\n").unwrap().acrylic, Some(false));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "theme = \"cobalto\" # tema\n\n[bar]\nheight = \"compacta\"\n").unwrap();
+    set_value(&path, &["acrylic"], false).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("theme = \"cobalto\" # tema"), "{text}");
+    let c = parse_config(&text).unwrap();
+    assert_eq!((c.acrylic, c.bar.height), (Some(false), BarHeight::Compacta), "a chave fica na raiz, antes de [bar]");
+}
+
+#[test]
 fn island_engine_choice_needs_the_island_enabled() {
     let c = parse_config("[island]\nengine = \"embutida\"\n").unwrap();
     assert!(c.island.embedded() && !c.island.external());

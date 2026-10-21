@@ -76,6 +76,7 @@ pwsh -NoProfile -File scripts/package.ps1      # -BuildIsland recompila a ilha C
 **Arquivos da barra em uso:**
 
 - A configuração fica em `%APPDATA%\zefiro\config.toml` e é recarregada ao salvar.
+  - `acrylic = true | false` (na raiz): a chave "Acrílico" do menu do Z, por cima do `[material] backdrop` do tema; sem a chave, o tema decide
   - `[bar] height = completa | compacta`
   - `[bar] format = faixa | pilulas | ilhas`
   - `[bar.sections] start/center/end`: ids do catálogo (`zefiro`, `clock`, `audio`, `mic`, `brightness`, `claude`, `codex`, `vscode`, `terminal`, `notifications`, `dnd`, `island`, `player`, `weather`, `hardware`, `power`)
@@ -96,7 +97,7 @@ pwsh -NoProfile -File scripts/package.ps1      # -BuildIsland recompila a ilha C
 
 - **Mola no compositor:** `Period = 1/ω`, não 2π/ω. Isso foi medido; com 2π/ω as molas ficam 4–5× lentas (ADR-0007).
 - **Clique atravessando:** `HTTRANSPARENT` só repassa o clique para janelas da mesma thread. Por isso barra e painel têm uma janela de desenho que deixa todo clique passar (`WS_EX_LAYERED | WS_EX_TRANSPARENT`) e uma janela de entrada invisível (`ZefiroInput`) recortada por região nas áreas clicáveis.
-- **Acrílico:** o fundo do Windows (`CreateHostBackdropBrush`) só funciona numa janela Win32 com `DWMWA_USE_HOSTBACKDROPBRUSH` ligado (`window::create`); sem isso ele sai preto e o Cobalto fica com cor fixa.
+- **Acrílico:** o fundo do Windows (`CreateHostBackdropBrush`) só funciona numa janela Win32 com `DWMWA_USE_HOSTBACKDROPBRUSH` ligado (`window::create`); sem isso ele sai preto e o Cobalto fica com cor fixa. Quem decide se há acrílico é `theme_state::backdrop_on` (tema, escolha do menu e a transparência do Windows).
 - **Sombra:** `DropShadow` num `LayerVisual` deixa a janela preta. A sombra usa 7 retângulos concêntricos, como a ilha (`DrawSoftShadow`).
 - **Mover "na hora" no compositor é animação:** `StopAnimation` + `InsertScalar` logo depois de uma mola perde para a parada, que grava o valor do meio do caminho por cima. `Comp::move_offset` usa um quadro-chave de 1 ms (ADR-0010). Pelo mesmo motivo, `set` seguido de `animate` não faz a forma nascer num lugar: use `MorphShape::animate_from` (mola com `InitialValue`, ADR-0016).
 - **Formato ilhas (ADR-0016):** as peças não se sobrepõem, senão a opacidade do tema e o acrílico fazem emenda mais escura. Cada ilha é um `MorphShape` que começa um raio acima da tela (e passa da borda nas pontas), o trilho são retângulos só nos vãos e as concordâncias são `CompositionPath` (`platform-windows/src/fillet.rs`) presas à ilha por expressão. `CompositionMaskBrush` não aceita o fundo do Windows como fonte. Os grupos ficam por seção (`BarLayout::group_slot`).

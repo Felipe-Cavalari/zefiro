@@ -19,6 +19,13 @@ pub struct ThemeState {
     pub animations: bool,
     /// Destaque publicado pela ilha (capa do álbum ou o dela); vale quando o tema diz `accent = "auto"`.
     cover_accent: Option<Rgba>,
+    /// `acrylic` do config (a chave do menu do Z), por cima do tema; `None` = o tema decide.
+    pub acrylic: Option<bool>,
+}
+
+/// O acrílico aparece? A escolha do menu vale por cima do tema; sem a transparência do Windows, nunca.
+pub fn backdrop_on(theme: Backdrop, choice: Option<bool>, transparency: bool) -> bool {
+    transparency && choice.unwrap_or(theme == Backdrop::Acrylic)
 }
 
 impl ThemeState {
@@ -26,7 +33,7 @@ impl ThemeState {
         let (registry, errors) = ThemeRegistry::load(Some(user_dir));
         let theme = registry.get(id).or_else(|| registry.get("obsidian")).cloned().expect("obsidian embutido");
         let tokens = derive_tokens(&theme, system_accent(), None);
-        (ThemeState { registry, theme, tokens, animations: animations_enabled(), cover_accent: None }, errors)
+        (ThemeState { registry, theme, tokens, animations: animations_enabled(), cover_accent: None, acrylic: None }, errors)
     }
 
     /// Relê a pasta do usuário e aplica `id`. Erros mantêm a versão anterior do tema com erro.
@@ -57,8 +64,13 @@ impl ThemeState {
         base.styled(self.theme.animation.spring).with_speed(self.theme.animation.speed)
     }
 
+    /// Acrílico pedido (pelo menu ou pelo tema), sem olhar a transparência do Windows: a chave do menu.
+    pub fn acrylic_wanted(&self) -> bool {
+        backdrop_on(self.theme.material.backdrop, self.acrylic, true)
+    }
+
     pub fn morph_style(&self, scale: f32, kind: SurfaceKind) -> MorphStyle {
-        let backdrop = self.theme.material.backdrop == Backdrop::Acrylic && transparency_enabled();
+        let backdrop = backdrop_on(self.theme.material.backdrop, self.acrylic, transparency_enabled());
         let fill = if backdrop { self.tokens.fill.with_alpha(self.tokens.fill.a * self.theme.material.backdrop_fill) } else { self.tokens.fill };
         // Espalhamento da sombra como na ilha: clamp(14 × escala, 6, 18).
         let shadow = self.theme.material.shadow.then_some((self.tokens.shadow, (14.0 * scale).clamp(6.0, 18.0)));
@@ -97,6 +109,22 @@ mod tests {
         t.reload("obsidian", &dir);
         assert_eq!(t.tokens.accent, derive_tokens(&t.theme, system_accent(), Some(copper)).accent);
         assert!(t.set_cover_accent(None));
+    }
+
+    #[test]
+    fn the_menu_choice_overrides_the_theme_backdrop() {
+        // Sem escolha: o tema decide. Com escolha: vale para qualquer tema. Sem a transparência do
+        // Windows, nunca há acrílico.
+        assert!(backdrop_on(Backdrop::Acrylic, None, true));
+        assert!(!backdrop_on(Backdrop::None, None, true));
+        assert!(backdrop_on(Backdrop::None, Some(true), true));
+        assert!(!backdrop_on(Backdrop::Acrylic, Some(false), true));
+        assert!(!backdrop_on(Backdrop::Acrylic, Some(true), false));
+        let dir = std::env::temp_dir().join(format!("zefiro-theme-acrylic-{}", std::process::id()));
+        let (mut t, _) = ThemeState::load("obsidian", &dir);
+        assert!(!t.acrylic_wanted(), "o Obsidian não tem acrílico");
+        t.acrylic = Some(true);
+        assert!(t.acrylic_wanted(), "o menu liga em qualquer tema");
     }
 
     #[test]

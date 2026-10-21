@@ -155,6 +155,7 @@ impl Loop {
             PanelKind::Menu => {
                 let m = self.menu.get_or_insert_with(|| MenuModel::new(self.ctx.config.bar.height, self.ctx.config.bar.format, &self.ctx.config.theme, swatches(&self.ctx)).with_autostart(zefiro_platform_windows::system::autostart_enabled()));
                 m.set_update(self.update.label.clone());
+                m.set_acrylic(self.ctx.theme.acrylic_wanted(), zefiro_platform_windows::system::transparency_enabled());
                 m.paint(scale, &self.ctx.theme.tokens)
             }
             PanelKind::Calendar => {
@@ -377,6 +378,16 @@ impl Loop {
                 window::post_user(USER_ISLAND);
                 return Ok(());
             }
+            MenuAction::ToggleAcrylic => {
+                // Sem "Efeitos de transparência" no Windows não há acrílico para ligar.
+                if !zefiro_platform_windows::system::transparency_enabled() {
+                    return Ok(());
+                }
+                let on = !self.ctx.theme.acrylic_wanted();
+                self.ctx.config.acrylic = Some(on);
+                self.ctx.theme.acrylic = Some(on);
+                let _ = set_value(&path, &["acrylic"], on);
+            }
             MenuAction::ToggleAutostart => {
                 crate::tray_loop::toggle_autostart();
                 // O menu continua aberto, com a chave na posição nova.
@@ -395,7 +406,7 @@ impl Loop {
                 return self.start_editor(monitor);
             }
         }
-        // Altura/formato/tema: barras animam e o menu continua aberto, na mesma tela, com a nova escolha.
+        // Altura/formato/tema/acrílico: barras animam e o menu continua aberto, na mesma tela, com a nova escolha.
         let themes = swatches(&self.ctx);
         if let Some(m) = &mut self.menu {
             m.set_choices(self.ctx.config.bar.height, self.ctx.config.bar.format, &self.ctx.config.theme);
@@ -714,6 +725,7 @@ impl Loop {
                         self.run_effects(fx)?;
                         let theme_changed = new.theme != self.ctx.config.theme;
                         let external = (self.ctx.config.island.external(), new.island.external());
+                        self.ctx.theme.acrylic = new.acrylic;
                         self.ctx.config = new;
                         // Trocar `[island] engine` liga uma ilha e desliga a outra sem reiniciar a barra.
                         match external {

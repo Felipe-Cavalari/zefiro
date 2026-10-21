@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 pub const DEFAULT_CONFIG: &str = r#"# Zefiro — configuração da barra. Salvar aplica na hora.
 theme = "obsidian"
+# acrylic = true      # liga (true) ou desliga (false) o acrílico em qualquer tema; sem a chave, o tema decide
 
 [bar]
 height = "completa"   # completa | compacta
@@ -58,7 +59,16 @@ impl BarFormat {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
-pub struct Config { pub theme: String, pub bar: BarConfig, pub island: IslandConfig, pub clock: ClockConfig, pub update: UpdateConfig, pub terminal: TerminalConfig }
+pub struct Config {
+    pub theme: String,
+    /// Acrílico escolhido no menu do Z, por cima do tema; `None` = o tema decide (`[material] backdrop`).
+    pub acrylic: Option<bool>,
+    pub bar: BarConfig,
+    pub island: IslandConfig,
+    pub clock: ClockConfig,
+    pub update: UpdateConfig,
+    pub terminal: TerminalConfig,
+}
 
 /// Perfis do Windows Terminal no painel do chip `terminal`, por `guid`: os visíveis nesta ordem (os
 /// que faltam vão para o fim) e os ocultos. Escrita pelo próprio painel (lápis → Concluir).
@@ -202,7 +212,7 @@ pub struct ClockConfig { pub format: String, pub seconds: bool }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { theme: "obsidian".into(), bar: BarConfig::default(), island: IslandConfig::default(), clock: ClockConfig::default(), update: UpdateConfig::default(), terminal: TerminalConfig::default() }
+        Config { theme: "obsidian".into(), acrylic: None, bar: BarConfig::default(), island: IslandConfig::default(), clock: ClockConfig::default(), update: UpdateConfig::default(), terminal: TerminalConfig::default() }
     }
 }
 
@@ -249,7 +259,8 @@ pub fn load_or_create(path: &Path) -> Result<Config, ConfigError> {
 }
 
 /// Grava `value` (string) em `keys` (ex.: `["bar", "height"]`), mantendo comentários e chaves desconhecidas.
-pub fn set_value(path: &Path, keys: &[&str], value: &str) -> std::io::Result<()> {
+pub fn set_value(path: &Path, keys: &[&str], value: impl Into<toml_edit::Value>) -> std::io::Result<()> {
+    let value: toml_edit::Value = value.into();
     let text = std::fs::read_to_string(path).unwrap_or_default();
     let mut doc: toml_edit::DocumentMut = text.parse().map_err(std::io::Error::other)?;
     let (last, tables) = keys.split_last().expect("ao menos uma chave");
@@ -261,11 +272,11 @@ pub fn set_value(path: &Path, keys: &[&str], value: &str) -> std::io::Result<()>
     match table.get_mut(last).and_then(|i| i.as_value_mut()) {
         Some(existing) => {
             let decor = existing.decor().clone();
-            *existing = toml_edit::Value::from(value);
+            *existing = value;
             *existing.decor_mut() = decor;
         }
         None => {
-            table.insert(last, toml_edit::value(value));
+            table.insert(last, toml_edit::Item::Value(value));
         }
     }
     let tmp = path.with_extension("toml.tmp");

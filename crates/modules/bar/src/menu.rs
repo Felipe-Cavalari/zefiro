@@ -9,7 +9,7 @@ use zefiro_resources::tokens::Tokens;
 use zefiro_ui::paint::{DisplayList, DrawOp};
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum MenuAction { SetHeight(BarHeight), SetFormat(BarFormat), SetTheme(String), OpenThemes, BackToMenu, ReloadTheme, OpenThemesFolder, RestartIsland, ToggleAutostart, ToggleHud, ExportDiagnostics, InstallUpdate, Exit, EditBar }
+pub enum MenuAction { SetHeight(BarHeight), SetFormat(BarFormat), SetTheme(String), OpenThemes, BackToMenu, ReloadTheme, OpenThemesFolder, RestartIsland, ToggleAcrylic, ToggleAutostart, ToggleHud, ExportDiagnostics, InstallUpdate, Exit, EditBar }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThemeSwatch { pub id: String, pub name: String, pub background: Rgba, pub text: Rgba, pub border: Option<Rgba> }
@@ -49,11 +49,21 @@ fn theme_actions() -> [(&'static str, MenuAction); 2] {
     [("Recarregar tema", MenuAction::ReloadTheme), ("Abrir pasta de temas", MenuAction::OpenThemesFolder)]
 }
 
+/// Chave liga/desliga à direita da linha: trilho no destaque quando ligada, botão do lado dela.
+fn switch(list: &mut DisplayList, row: Rect, on: bool, scale: f32, tokens: &Tokens) {
+    let s = |v: f32| v * scale;
+    let track = Rect::new(row.right() - s(46.0), row.y + (row.h - s(18.0)) / 2.0, s(34.0), s(18.0));
+    list.push(DrawOp::RoundRect { rect: track, radius: track.h / 2.0, color: if on { tokens.accent } else { tokens.text_tertiary.with_alpha(0.4) } });
+    let knob_x = if on { track.right() - s(9.0) } else { track.x + s(9.0) };
+    list.push(DrawOp::Circle { center: Point { x: knob_x, y: track.y + track.h / 2.0 }, radius: s(7.0), color: Rgba::WHITE });
+}
+
 fn action_label(action: &MenuAction) -> &'static str {
     actions().into_iter().chain(theme_actions()).find(|(_, a)| a == action).map_or("", |(l, _)| l)
 }
 
-pub struct MenuModel { height: BarHeight, format: BarFormat, theme_id: String, themes: Vec<ThemeSwatch>, focus: (usize, usize), autostart: bool, page: MenuPage, update: Option<String> }
+/// `acrylic`: (ligado agora, a transparência do Windows deixa).
+pub struct MenuModel { height: BarHeight, format: BarFormat, theme_id: String, themes: Vec<ThemeSwatch>, focus: (usize, usize), autostart: bool, acrylic: (bool, bool), page: MenuPage, update: Option<String> }
 
 /// Títulos de seção (texto e topo, em px), para o `paint`.
 type Titles = Vec<(&'static str, f32)>;
@@ -66,7 +76,7 @@ const THEME_ROW: usize = 2;
 impl MenuModel {
     pub fn new(height: BarHeight, format: BarFormat, theme_id: &str, themes: Vec<ThemeSwatch>) -> MenuModel {
         let col = if height == BarHeight::Compacta { 1 } else { 0 };
-        MenuModel { height, format, theme_id: theme_id.to_string(), themes, focus: (0, col), autostart: false, page: MenuPage::Main, update: None }
+        MenuModel { height, format, theme_id: theme_id.to_string(), themes, focus: (0, col), autostart: false, acrylic: (false, true), page: MenuPage::Main, update: None }
     }
 
     pub fn page(&self) -> MenuPage {
@@ -101,6 +111,11 @@ impl MenuModel {
     /// Texto da linha de atualização ("Atualizar para a 1.1.0", "Baixando…"); `None` esconde a linha.
     pub fn set_update(&mut self, label: Option<String>) {
         self.update = label;
+    }
+
+    /// Acrílico ligado agora e se o Windows deixa (sem "Efeitos de transparência" a chave some).
+    pub fn set_acrylic(&mut self, on: bool, available: bool) {
+        self.acrylic = (on, available);
     }
 
     pub fn set_autostart(&mut self, on: bool) {
@@ -145,6 +160,7 @@ impl MenuModel {
                     row += 1;
                 }
                 line(&mut out, &mut y, &mut row, MenuAction::OpenThemes);
+                line(&mut out, &mut y, &mut row, MenuAction::ToggleAcrylic);
                 y += s(SECTION_GAP);
                 if self.update.is_some() {
                     line(&mut out, &mut y, &mut row, MenuAction::InstallUpdate);
@@ -288,6 +304,19 @@ impl MenuModel {
                         list.push(DrawOp::Circle { center: c, radius: s(5.5), color: t.background.with_alpha(1.0) });
                     }
                 }
+                MenuAction::ToggleAcrylic => {
+                    if focused {
+                        list.push(DrawOp::RoundRect { rect: b.rect, radius: s(10.0), color: tokens.raised });
+                    }
+                    list.push(DrawOp::Text { rect: b.rect.inset(s(12.0), 0.0), text: "Acrílico".into(), style: body, color: tokens.text, align: Align::Leading });
+                    let (on, available) = self.acrylic;
+                    if available {
+                        switch(&mut list, b.rect, on, scale, tokens);
+                    } else {
+                        let value = Rect::new(b.rect.x, b.rect.y, b.rect.w - s(12.0), b.rect.h);
+                        list.push(DrawOp::Text { rect: value, text: "desligado no Windows".into(), style: small, color: tokens.text_tertiary, align: Align::Trailing });
+                    }
+                }
                 MenuAction::InstallUpdate => {
                     if focused {
                         list.push(DrawOp::RoundRect { rect: b.rect, radius: s(10.0), color: tokens.raised });
@@ -302,11 +331,7 @@ impl MenuModel {
                     }
                     list.push(DrawOp::Text { rect: b.rect.inset(s(12.0), 0.0), text: label.into(), style: body, color: tokens.text, align: Align::Leading });
                     if *action == MenuAction::ToggleAutostart {
-                        // Chave liga/desliga à direita: trilho no destaque quando ligada, botão do lado dela.
-                        let track = Rect::new(b.rect.right() - s(46.0), b.rect.y + (b.rect.h - s(18.0)) / 2.0, s(34.0), s(18.0));
-                        list.push(DrawOp::RoundRect { rect: track, radius: track.h / 2.0, color: if self.autostart { tokens.accent } else { tokens.text_tertiary.with_alpha(0.4) } });
-                        let knob_x = if self.autostart { track.right() - s(9.0) } else { track.x + s(9.0) };
-                        list.push(DrawOp::Circle { center: Point { x: knob_x, y: track.y + track.h / 2.0 }, radius: s(7.0), color: Rgba::WHITE });
+                        switch(&mut list, b.rect, self.autostart, scale, tokens);
                     }
                 }
             }
@@ -340,6 +365,24 @@ mod tests {
     }
 
     #[test]
+    fn acrylic_row_follows_the_theme_row_with_a_switch() {
+        let tokens = zefiro_resources::tokens::derive_tokens(&zefiro_resources::theme::parse_theme("obsidian", "o", zefiro_resources::theme::BUILTIN[0].1).unwrap(), Rgba::rgb(0, 120, 215), None);
+        let lit = |m: &MenuModel| m.paint(1.0, &tokens).ops.iter().filter(|o| matches!(o, DrawOp::RoundRect { color, .. } if *color == tokens.accent)).count();
+        let mut m = model();
+        let boxes = m.layout(1.0);
+        let theme = boxes.iter().find(|b| b.action == MenuAction::OpenThemes).unwrap();
+        let acrylic = boxes.iter().find(|b| b.action == MenuAction::ToggleAcrylic).expect("a linha existe");
+        assert_eq!(acrylic.row, theme.row + 1, "logo abaixo de Tema");
+        assert_eq!(lit(&m), 0, "desligado: a chave fica apagada");
+        m.set_acrylic(true, true);
+        assert_eq!(lit(&m), 1, "ligado: a chave acende");
+        assert!(texts(&m.paint(1.0, &tokens)).contains(&"Acrílico".to_string()));
+        m.set_acrylic(true, false);
+        assert_eq!(lit(&m), 0, "sem a transparência do Windows, nada acende");
+        assert!(texts(&m.paint(1.0, &tokens)).contains(&"desligado no Windows".to_string()));
+    }
+
+    #[test]
     fn hover_moves_the_highlight_and_reports_only_changes() {
         let mut m = model();
         let edit = m.layout(1.0).into_iter().find(|b| b.action == MenuAction::EditBar).unwrap();
@@ -370,6 +413,8 @@ mod tests {
         assert_eq!(m.key(NavKey::Enter), Some(MenuAction::SetFormat(BarFormat::Faixa)));
         m.key(NavKey::Down); // a linha "Tema", coluna volta a 0
         assert_eq!(m.key(NavKey::Enter), Some(MenuAction::OpenThemes));
+        m.key(NavKey::Down); // Acrílico
+        assert_eq!(m.key(NavKey::Enter), Some(MenuAction::ToggleAcrylic));
         m.key(NavKey::Down); // primeira ação
         assert_eq!(m.key(NavKey::Enter), Some(MenuAction::EditBar));
         for _ in 0..10 {

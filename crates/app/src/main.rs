@@ -60,7 +60,8 @@ fn run(started: Instant) -> windows::core::Result<()> {
         tracing::error!(line = ?e.line, "config.toml inválido: {}; usando padrões", e.message);
         zefiro_core::config::Config::default()
     });
-    let (theme, errors) = theme_state::ThemeState::load(&config.theme, &themes_dir);
+    let (mut theme, errors) = theme_state::ThemeState::load(&config.theme, &themes_dir);
+    theme.acrylic = config.acrylic;
     for e in errors {
         tracing::warn!(source = %e.source, line = ?e.line, "tema com erro: {}", e.message);
     }
