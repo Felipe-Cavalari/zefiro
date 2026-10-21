@@ -85,12 +85,16 @@ pub fn sort_accounts<T>(accounts: &mut [Account<T>]) {
     accounts.sort_by(|a, b| a.origins.iter().min().cmp(&b.origins.iter().min()));
 }
 
+/// Origem de uma distro que não está rodando (o Windows nunca está parado).
+pub fn is_stopped(kind: &OriginKind, running: &[String]) -> bool {
+    matches!(kind, OriginKind::Wsl(d) if !running.iter().any(|r| r.eq_ignore_ascii_case(d)))
+}
+
 /// Repõe, marcadas `stopped`, as contas que só existiam em distros que pararam de rodar: o limite
 /// delas continua valendo. Contas do Windows nunca são repostas (o Windows sempre é lido).
 pub fn carry_stopped<T: Clone>(previous: &[Account<T>], current: &mut Vec<Account<T>>, running: &[String]) {
-    let stopped_distro = |k: &OriginKind| matches!(k, OriginKind::Wsl(d) if !running.iter().any(|r| r.eq_ignore_ascii_case(d)));
     for old in previous {
-        if !current.iter().any(|c| c.key == old.key) && !old.origins.is_empty() && old.origins.iter().all(stopped_distro) {
+        if !current.iter().any(|c| c.key == old.key) && !old.origins.is_empty() && old.origins.iter().all(|k| is_stopped(k, running)) {
             current.push(Account { stopped: true, ..old.clone() });
         }
     }

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::format::parse_iso_utc;
-use crate::origins::{Account, Discover, Origin, OriginKind, carry_stopped, sort_accounts};
+use crate::origins::{Account, Discover, Origin, OriginKind, is_stopped, sort_accounts};
 
 /// Só o fim de cada arquivo é lido: o último `rate_limits` está perto do fim.
 const TAIL_BYTES: u64 = 256 * 1024;
@@ -233,6 +233,8 @@ impl CodexService {
         let thread = std::thread::Builder::new().name("zefiro-codex".into()).spawn(move || {
             let mut seen: Option<Seen> = None;
             let mut reset_due: Option<i64> = None;
+            // Leituras do ciclo anterior: as de uma distro que parou continuam valendo.
+            let mut last_reads: Vec<(OriginKind, Vec<CodexRead>)> = Vec::new();
             loop {
                 let found = discover();
                 let origins: Vec<&Origin> = found.origins.iter().filter(|o| o.home.join(".codex").join("sessions").is_dir()).collect();
@@ -241,10 +243,17 @@ impl CodexService {
                 let reset_passed = reset_due.is_some_and(|t| t <= now_unix());
                 if seen.as_ref() != Some(&key) {
                     seen = Some(key);
-                    let per_origin = origins.iter().map(|o| (o.kind.clone(), read_codex_accounts(&o.home.join(".codex").join("sessions")))).collect();
+                    let mut per_origin: Vec<(OriginKind, Vec<CodexRead>)> = origins.iter().map(|o| (o.kind.clone(), read_codex_accounts(&o.home.join(".codex").join("sessions")))).collect();
+                    for (kind, reads) in std::mem::take(&mut last_reads) {
+                        if is_stopped(&kind, &found.running) && !per_origin.iter().any(|(k, _)| *k == kind) {
+                            per_origin.push((kind, reads));
+                        }
+                    }
+                    last_reads = per_origin.clone();
                     let mut accounts = merge_codex(per_origin);
-                    let previous = shared.lock().ok().and_then(|s| s.as_ref().map(|s| s.accounts.clone())).unwrap_or_default();
-                    carry_stopped(&previous, &mut accounts, &found.running);
+                    for account in &mut accounts {
+                        account.stopped = account.origins.iter().all(|k| is_stopped(k, &found.running));
+                    }
                     let snapshot = CodexSnapshot { accounts, wsl_stopped: found.wsl_stopped };
                     reset_due = next_reset(&snapshot.accounts, now_unix());
                     let changed = shared.lock().map(|mut s| s.replace(snapshot.clone()).as_ref() != Some(&snapshot)).unwrap_or(false);
@@ -506,13 +515,37 @@ mod tests {
     #[test]
     fn service_notifies_at_reset_without_new_file() {
         let (home, d) = windows_home("reset");
-        let soon = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 1;
+        let soon = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 2;
         put(&home, ".codex/sessions/a.jsonl", &session(Some("c1"), 80.0, "2026-10-21T10:00:00Z").replace("4102444800", &soon.to_string()), 10);
         let (svc, rx, _) = start(d);
         rx.recv_timeout(std::time::Duration::from_secs(3)).expect("aviso inicial");
-        rx.recv_timeout(std::time::Duration::from_secs(4)).expect("aviso no reinício da janela");
+        rx.recv_timeout(std::time::Duration::from_secs(5)).expect("aviso no reinício da janela");
         drop(svc);
         std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn service_keeps_wsl_event_of_merged_account_when_distro_stops() {
+        let (windows, wsl_home) = (temp("merged-win"), temp("merged-wsl"));
+        put(&windows, ".codex/sessions/a.jsonl", &session(Some("c1"), 80.0, "2026-10-16T02:56:30Z"), 10);
+        put(&wsl_home, ".codex/sessions/b.jsonl", &session(Some("c1"), 45.0, "2026-10-21T10:00:00Z"), 20);
+        let wsl = OriginKind::Wsl("U".into());
+        let both = vec![Origin { kind: OriginKind::Windows, home: windows.clone() }, Origin { kind: wsl.clone(), home: wsl_home.clone() }];
+        let (svc, rx, shared) = start(Discovery { origins: both.clone(), running: vec!["U".into()], wsl_stopped: false });
+        rx.recv_timeout(std::time::Duration::from_secs(3)).expect("aviso inicial");
+        assert_eq!(svc.latest().unwrap().accounts[0].data.usage.primary.unwrap().used_percent, 45.0);
+        *shared.lock().unwrap() = Discovery { origins: vec![both[0].clone()], running: Vec::new(), wsl_stopped: true };
+        svc.refresh();
+        // Sem aviso: o uso não mudou (o evento do WSL continua valendo).
+        let _ = rx.recv_timeout(std::time::Duration::from_millis(500));
+        let snap = svc.latest().unwrap();
+        assert_eq!(snap.accounts.len(), 1);
+        assert_eq!(snap.accounts[0].data.usage.primary.unwrap().used_percent, 45.0);
+        assert_eq!(snap.accounts[0].origins, vec![OriginKind::Windows, wsl]);
+        assert!(!snap.accounts[0].stopped, "a conta continua no Windows");
+        drop(svc);
+        std::fs::remove_dir_all(&windows).unwrap();
+        std::fs::remove_dir_all(&wsl_home).unwrap();
     }
 
     #[test]
