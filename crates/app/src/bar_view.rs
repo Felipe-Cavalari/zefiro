@@ -29,8 +29,8 @@ use crate::island_view::IslandView;
 use crate::theme_state::SurfaceKind;
 use zefiro_island::view::{Collapsed, PillContent, RESERVE_DESIGN_W, activity_pill, idle_pill, media_pill, player_idle_pill, timer_pill, with_privacy};
 
-/// Id do "chip" da ilha embutida (clique, painel e foco usam o mesmo caminho dos chips).
-pub const ISLAND_CHIP: &str = "island";
+/// Id do chip da ilha embutida (ADR-0017): clique, painel e foco usam o mesmo caminho dos chips.
+pub const ISLAND_CHIP: &str = zefiro_core::config::ISLAND_CHIP;
 /// Chip do player: a pílula de mídia da ilha num chip comum, em qualquer seção e monitor.
 pub const PLAYER_CHIP: &str = "player";
 
@@ -196,12 +196,19 @@ impl BarView {
         let chip_h = (m.chip_h * self.scale).round();
         let font_px = m.font * self.scale * ctx.theme.theme.font.scale;
         let pad = (m.chip_pad_x * self.scale).round();
+        // O chip da ilha só existe com a ilha embutida; a externa (C++) mora no centro do principal.
+        let shown = |id: &&str| zefiro_bar::catalog::descriptor(id).is_some() && (*id != ISLAND_CHIP || ctx.config.island.embedded());
+        let island_reserve = (RESERVE_DESIGN_W * (m.island_pill * self.scale).round() / 44.0).round();
         let mut contents: Vec<(String, ChipContent)> = sections
             .ids()
-            .filter(|id| zefiro_bar::catalog::descriptor(id).is_some())
+            .filter(shown)
             .map(|id| {
                 let content = if id == PLAYER_CHIP {
                     player_chip(&player_content(ctx, chip_h, self.player_hover), pad, chip_h, font_px, &ctx.theme.tokens)
+                } else if id == ISLAND_CHIP {
+                    // O chip reserva a largura máxima da ilha: os vizinhos não andam quando ela espia.
+                    let pill = island_content(ctx, (m.island_pill * self.scale).round());
+                    ChipContent { content_w: (island_reserve - 2.0 * pad).max(0.0), ..player_chip(&pill, pad, chip_h, font_px, &ctx.theme.tokens) }
                 } else {
                     chip_content(ctx, id, &self.monitor.device, cfg.height, chip_h, font_px, self.scale)
                 };
@@ -209,17 +216,12 @@ impl BarView {
             })
             .collect();
         let spec = |ids: &[String]| {
-            ids.iter().filter(|id| zefiro_bar::catalog::descriptor(id).is_some())
-                .map(|id| ChipSpec { id: id.clone(), content_w: contents.iter().find(|(c, _)| c == id).map_or(0.0, |(_, c)| c.content_w), wide: id == PLAYER_CHIP })
+            ids.iter().filter(|id| shown(&id.as_str()))
+                .map(|id| ChipSpec { id: id.clone(), content_w: contents.iter().find(|(c, _)| c == id).map_or(0.0, |(_, c)| c.content_w), wide: id == PLAYER_CHIP || id == ISLAND_CHIP })
                 .collect::<Vec<_>>()
         };
         let specs = [spec(&sections.start), spec(&sections.center), spec(&sections.end)];
-        let hosts_island = self.hosts_island(ctx);
-        let reservation = if hosts_island {
-            Some((RESERVE_DESIGN_W * (m.island_pill * self.scale).round() / 44.0).round())
-        } else {
-            (self.monitor.primary && ctx.config.island.external()).then(|| window::island_reservation().unwrap_or(self.monitor.rect.w))
-        };
+        let reservation = (self.monitor.primary && ctx.config.island.external()).then(|| window::island_reservation().unwrap_or(self.monitor.rect.w));
         let layout = layout_sections(self.monitor.rect.w, self.scale, cfg.height, cfg.format, [&specs[0], &specs[1], &specs[2]], reservation);
         // Um grupo por seção (início, centro, fim) e um pedaço do trilho por vão entre as ilhas.
         while self.groups.len() < 3 {
@@ -377,7 +379,7 @@ impl BarView {
                 hover.set_opacity(0.0)?;
                 let surface = ctx.comp.surface(content.list.size.w, content.list.size.h)?;
                 let sprite = ctx.comp.sprite_for(&surface, content.list.size.w, content.list.size.h)?;
-                if id == PLAYER_CHIP {
+                if id == PLAYER_CHIP || id == ISLAND_CHIP {
                     // Quem aparece é a pílula; a nota da superfície é só para o arraste.
                     sprite.SetOpacity(0.0)?;
                 }
@@ -409,9 +411,9 @@ impl BarView {
         let height_px = layout.band.h as i32;
         let (hwnd, mon, reserve) = (self.hwnd, self.monitor.rect, self.appbar);
         self.layout = Some(layout);
-        match (hosts_island, self.island.is_some()) {
+        match (self.hosts_island(), self.island.is_some()) {
             (true, false) => {
-                let view = IslandView::new(ctx, &self.root, &ctx.theme.morph_style(self.scale, SurfaceKind::Pill))?;
+                let view = IslandView::new(ctx, &self.root, &ctx.theme.morph_style(self.scale, SurfaceKind::Merged))?;
                 self.island = Some(view);
             }
             (false, true) => {
@@ -423,7 +425,7 @@ impl BarView {
         }
         let has_player = self.layout.as_ref().is_some_and(|l| l.chips.iter().any(|c| c.id == PLAYER_CHIP));
         match (has_player, self.player.is_some()) {
-            (true, false) => self.player = Some(IslandView::new(ctx, &self.root, &ctx.theme.morph_style(self.scale, SurfaceKind::Strip))?),
+            (true, false) => self.player = Some(IslandView::new(ctx, &self.root, &ctx.theme.morph_style(self.scale, SurfaceKind::Merged))?),
             (false, true) => {
                 if let Some(view) = self.player.take() {
                     self.root.Children()?.Remove(view.root())?;
@@ -465,9 +467,9 @@ impl BarView {
         }
     }
 
-    /// A ilha embutida mora no centro da barra do monitor principal.
-    pub fn hosts_island(&self, ctx: &AppCtx) -> bool {
-        self.monitor.primary && ctx.config.island.embedded()
+    /// A ilha embutida aparece onde o chip `island` está no layout desta barra (fora do "…").
+    pub fn hosts_island(&self) -> bool {
+        self.layout.as_ref().is_some_and(|l| l.chips.iter().any(|c| c.id == ISLAND_CHIP))
     }
 
     /// Redesenha só a ilha (mídia, espiada, visualizador), sem refazer o layout da barra.
@@ -478,10 +480,10 @@ impl BarView {
         };
         let pill_h = layout.island_pill_h;
         let content = island_content(ctx, pill_h);
-        let rect = Rect::new(((self.monitor.rect.w - content.size.w) / 2.0).round(), layout.island_pill_y(), content.size.w, pill_h);
-        // Na faixa e nas ilhas, a ilha se funde à barra (sem contorno nem sombra); nas pílulas, é uma pílula.
-        let kind = if layout.islands.is_some() { SurfaceKind::Island } else if layout.merges_island() { SurfaceKind::Strip } else { SurfaceKind::Pill };
-        let style = ctx.theme.morph_style(self.scale, kind);
+        let Some(rect) = layout.island_pill_rect(content.size.w) else { return Ok(()) };
+        // A ilha fica sobre a faixa, o grupo ou a ilha do formato: sem fundo próprio, senão a segunda
+        // camada a 96 % fica mais escura que o resto da barra.
+        let style = ctx.theme.morph_style(self.scale, SurfaceKind::Merged);
         let radius = pill_radius(pill_h, ctx.theme.theme.shape.radius_max * self.scale, ctx.theme.theme.shape.style, self.scale);
         view.update(ctx, content, rect, radius, &style, animate && ctx.theme.animations)?;
         let mut interactive = self.interactive_base.clone();
@@ -490,14 +492,13 @@ impl BarView {
         Ok(())
     }
 
-    /// Redesenha a pílula do player no retângulo do chip. Na faixa ou nas pílulas, ela se funde à
-    /// barra, como a ilha na faixa.
+    /// Redesenha a pílula do player no retângulo do chip, sem fundo próprio, como a ilha.
     pub fn refresh_player(&mut self, ctx: &AppCtx, animate: bool) -> Result<()> {
         let (Some(layout), Some(view)) = (&self.layout, &mut self.player) else { return Ok(()) };
         let Some(chip) = layout.chips.iter().find(|c| c.id == PLAYER_CHIP) else { return Ok(()) };
         let content = player_content(ctx, chip.rect.h, self.player_hover);
         let rect = Rect::new(chip.rect.x, chip.rect.y, content.size.w, chip.rect.h);
-        let style = ctx.theme.morph_style(self.scale, if layout.islands.is_some() { SurfaceKind::Island } else { SurfaceKind::Strip });
+        let style = ctx.theme.morph_style(self.scale, SurfaceKind::Merged);
         let radius = pill_radius(rect.h, ctx.theme.theme.shape.radius_max * self.scale, ctx.theme.theme.shape.style, self.scale);
         view.update(ctx, content, rect, radius, &style, animate && ctx.theme.animations)
     }
@@ -651,8 +652,8 @@ impl BarView {
     fn refresh_chip_fills(&self, ctx: &AppCtx) -> Result<()> {
         let spring = ctx.theme.spring(SpringParams::SETTLE);
         for c in &self.chips {
-            // O player é uma pílula, como a ilha: sem fundo de hover nem de ativo.
-            let player = c.id == PLAYER_CHIP;
+            // Player e ilha são pílulas: sem fundo de hover nem de ativo.
+            let player = c.id == PLAYER_CHIP || c.id == ISLAND_CHIP;
             let active = !player && self.active.as_deref() == Some(&c.id);
             let hovered = !player && self.hover.as_deref() == Some(&c.id);
             let mut style = ctx.theme.morph_style(self.scale, SurfaceKind::Hover);

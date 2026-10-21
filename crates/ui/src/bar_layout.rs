@@ -104,6 +104,13 @@ impl BarLayout {
         (0..3).min_by(|&a, &b| distance(&self.regions[a]).total_cmp(&distance(&self.regions[b]))).unwrap_or(0)
     }
 
+    /// Pílula da ilha embutida com `content_w` de largura, centrada no chip `island` (que reserva a
+    /// largura máxima dela). `None` sem o chip neste layout.
+    pub fn island_pill_rect(&self, content_w: f32) -> Option<Rect> {
+        let chip = self.chips.iter().find(|c| c.id == "island")?.rect;
+        Some(Rect::new((chip.center_x() - content_w / 2.0).round(), self.island_pill_y(), content_w, self.island_pill_h))
+    }
+
     /// A ilha de mídia se funde à barra (sem contorno nem sombra): na faixa e nas ilhas.
     pub fn merges_island(&self) -> bool {
         self.strip.is_some() || self.islands.is_some()

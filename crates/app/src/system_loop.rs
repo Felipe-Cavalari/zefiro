@@ -21,7 +21,7 @@ impl Loop {
     pub fn system_services(&mut self) {
         dnd::watch(Arc::new(|| window::post_user(USER_DND)));
         self.ctx.system.dnd = dnd::active();
-        let wanted = self.ctx.config.island.embedded() || self.ctx.config.bar.uses("notifications");
+        let wanted = self.ctx.config.shows_embedded_island() || self.ctx.config.bar.uses("notifications");
         match (wanted, self.system.notifications.is_some()) {
             (true, false) => {
                 self.system.notifications = NotificationWatcher::start(Arc::new(|| window::post_user(USER_NOTIFICATION)))

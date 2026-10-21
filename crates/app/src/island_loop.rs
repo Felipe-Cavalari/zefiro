@@ -62,15 +62,16 @@ pub struct IslandRuntime {
 }
 
 impl Loop {
-    /// A mídia serve à ilha embutida ou a algum chip do player.
+    /// A mídia serve à ilha embutida (o chip `island` na barra) ou a algum chip do player.
     fn media_wanted(&self) -> bool {
-        self.ctx.config.island.embedded() || self.ctx.config.bar.uses(PLAYER_CHIP)
+        self.ctx.config.shows_embedded_island() || self.ctx.config.bar.uses(PLAYER_CHIP)
     }
 
-    /// Liga ou desliga os serviços conforme `[island] engine` e os chips da barra (no início e
-    /// quando a configuração muda). Mídia e clima também servem aos chips do player e do clima.
+    /// Liga ou desliga os serviços conforme `[island] engine`, o chip `island` e os outros chips da
+    /// barra (no início e quando a configuração muda). Mídia e clima também servem aos chips do
+    /// player e do clima.
     pub fn island_services(&mut self) -> Result<()> {
-        let embedded = self.ctx.config.island.embedded();
+        let embedded = self.ctx.config.shows_embedded_island();
         let media = self.media_wanted();
         let weather = embedded || self.ctx.config.bar.uses("weather");
         if media && self.island.media.is_none() {
@@ -144,7 +145,7 @@ impl Loop {
     }
 
     pub fn island_device(&mut self, arrived: bool, volume: bool) -> Result<()> {
-        if !self.ctx.config.island.embedded() {
+        if !self.ctx.config.shows_embedded_island() {
             return Ok(());
         }
         let name = if volume { "Pendrive" } else { "Dispositivo serial" };
@@ -155,7 +156,7 @@ impl Loop {
 
     pub fn island_notifications(&mut self) -> Result<()> {
         let Some(w) = &self.system.notifications else { return Ok(()) };
-        if !self.ctx.config.island.embedded() {
+        if !self.ctx.config.shows_embedded_island() {
             // Só o chip usa o serviço: descarta os avisos para a fila não crescer.
             w.take();
             return Ok(());
@@ -186,7 +187,7 @@ impl Loop {
     }
 
     pub fn island_dnd_changed(&mut self) -> Result<()> {
-        if !self.ctx.config.island.embedded() {
+        if !self.ctx.config.shows_embedded_island() {
             return Ok(());
         }
         let now = self.ctx.now();
@@ -195,7 +196,7 @@ impl Loop {
     }
 
     pub fn island_clipboard(&mut self) -> Result<()> {
-        if !self.ctx.config.island.embedded() {
+        if !self.ctx.config.shows_embedded_island() {
             return Ok(());
         }
         if let Some(text) = system_events::clipboard_text() {
@@ -207,7 +208,7 @@ impl Loop {
     }
 
     pub fn island_lock_key(&mut self, caps: bool) -> Result<()> {
-        if !self.ctx.config.island.embedded() {
+        if !self.ctx.config.shows_embedded_island() {
             return Ok(());
         }
         let now = self.ctx.now();
@@ -228,7 +229,7 @@ impl Loop {
 
     /// Volume ou mudo mudou (por qualquer app, tecla ou o mixer): aviso de 1,8 s na pílula.
     pub fn island_volume_changed(&mut self) -> Result<()> {
-        if !self.ctx.config.island.embedded() {
+        if !self.ctx.config.shows_embedded_island() {
             return Ok(());
         }
         let Some(v) = self.ctx.devices.speaker else { return Ok(()) };
@@ -239,7 +240,7 @@ impl Loop {
 
     /// Brilho mudado pela barra (roda ou slider): aviso de 1,8 s na pílula.
     pub fn island_brightness_changed(&mut self, percent: u32) -> Result<()> {
-        if !self.ctx.config.island.embedded() {
+        if !self.ctx.config.shows_embedded_island() {
             return Ok(());
         }
         let now = self.ctx.now();

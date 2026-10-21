@@ -18,6 +18,21 @@ fn default_config_parses_to_the_spec_defaults() {
 }
 
 #[test]
+fn the_island_is_a_chip_and_only_shows_where_it_is_placed() {
+    let c = parse_config(DEFAULT_CONFIG).unwrap();
+    assert_eq!(c.bar.sections.center, vec!["island".to_string()], "instalação nova: a ilha no centro");
+    assert!(c.shows_embedded_island());
+    let no_center_key = parse_config("[bar.sections]\nstart = [\"zefiro\"]\nend = [\"clock\"]\n").unwrap();
+    assert!(no_center_key.shows_embedded_island(), "sem a chave center, o centro padrão tem a ilha");
+    let free = parse_config("[bar.sections]\ncenter = [\"hardware\"]\n").unwrap();
+    assert!(!free.shows_embedded_island(), "centro com outros chips: sem ilha");
+    let external = parse_config("[island]\nengine = \"externa\"\n").unwrap();
+    assert!(!external.shows_embedded_island(), "a externa não é o chip");
+    let monitors = parse_config("[bar]\nlayout_mode = \"per_monitor\"\n[bar.sections]\ncenter = []\n[bar.monitors.a.sections]\nstart = [\"island\"]\ncenter = []\nend = []\n").unwrap();
+    assert!(monitors.shows_embedded_island(), "em qualquer seção de qualquer monitor");
+}
+
+#[test]
 fn island_engine_choice_needs_the_island_enabled() {
     let c = parse_config("[island]\nengine = \"embutida\"\n").unwrap();
     assert!(c.island.embedded() && !c.island.external());
@@ -36,9 +51,7 @@ fn missing_keys_take_defaults() {
 
 #[test]
 fn islands_format_parses_and_round_trips() {
-    let c = parse_config("[bar]
-format = \"ilhas\"
-").unwrap();
+    let c = parse_config("[bar]\nformat = \"ilhas\"\n").unwrap();
     assert_eq!(c.bar.format, BarFormat::Ilhas);
     assert_eq!(BarFormat::Ilhas.as_str(), "ilhas");
 }

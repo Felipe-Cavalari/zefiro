@@ -111,7 +111,7 @@ impl Loop {
             session: &editor.session,
             monitors: &names,
             monitor: editor.monitor,
-            island_locked: bar.monitor().primary && editor.session.draft.island.enabled,
+            island_locked: bar.monitor().primary && editor.session.draft.island.external(),
             scale,
             width: (WIDTH_DIP * scale).min(bar.monitor().rect.w - 16.0 * scale),
         };
@@ -292,7 +292,7 @@ impl Loop {
             EditorAction::MoveSection(section) => if let Some(id) = &editor.ui.selected {
                 let len = section.items(editor.session.sections()).len();
                 error = editor.session.move_item(id, section, len).err();
-                if section == Section::Center && self.bars[editor.monitor].monitor().primary && editor.session.draft.island.enabled {
+                if section == Section::Center && self.bars[editor.monitor].monitor().primary && editor.session.draft.island.external() {
                     editor.ui.message = "Oculto neste monitor enquanto a ilha estiver ligada".into();
                 }
             },
@@ -498,7 +498,7 @@ impl Loop {
                         }
                         if drag.active {
                             let point = Point { x, y };
-                            let blocked = self.bars[index].monitor().primary && editor.session.draft.island.enabled;
+                            let blocked = self.bars[index].monitor().primary && editor.session.draft.island.external();
                             let section = self.bars[index].edit_regions().iter().position(|r| r.contains(point));
                             let target = section.filter(|s| !(*s == 1 && blocked)).map(|s| {
                                 let section = Section::ALL[s];

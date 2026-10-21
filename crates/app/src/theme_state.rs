@@ -10,7 +10,7 @@ use zefiro_resources::tokens::{Tokens, derive_tokens};
 use zefiro_ui::spring::SpringParams;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SurfaceKind { Strip, Pill, Panel, Hover, Island }
+pub enum SurfaceKind { Strip, Pill, Panel, Hover, Island, Merged }
 
 pub struct ThemeState {
     pub registry: ThemeRegistry,
@@ -68,6 +68,9 @@ impl ThemeState {
             // Ilhas, trilho e concordâncias são peças da mesma superfície: sem profundidade (o
             // degradê de cada peça faria emenda com a vizinha), sem contorno e sem sombra.
             SurfaceKind::Island => MorphStyle { fill, depth: false, border: None, border_px: 0.0, shadow: None, backdrop },
+            // Ilha e player sobre a faixa, um grupo ou uma ilha: o fundo é o de baixo. Uma segunda
+            // camada a 96 % deixava a pílula mais escura que o resto da barra.
+            SurfaceKind::Merged => MorphStyle { fill: fill.with_alpha(0.0), depth: false, border: None, border_px: 0.0, shadow: None, backdrop: false },
             SurfaceKind::Hover => MorphStyle { fill: self.tokens.raised, depth: false, border: None, border_px: 0.0, shadow: None, backdrop: false },
         }
     }
@@ -94,5 +97,16 @@ mod tests {
         t.reload("obsidian", &dir);
         assert_eq!(t.tokens.accent, derive_tokens(&t.theme, system_accent(), Some(copper)).accent);
         assert!(t.set_cover_accent(None));
+    }
+
+    #[test]
+    fn merged_surfaces_have_no_fill_of_their_own() {
+        let dir = std::env::temp_dir().join(format!("zefiro-theme-merged-{}", std::process::id()));
+        let (t, _) = ThemeState::load("obsidian", &dir);
+        // Ilha e player ficam sobre a faixa, um grupo ou uma ilha: uma segunda camada a 96 % deixava a
+        // pílula mais escura que o resto da barra.
+        let s = t.morph_style(1.0, SurfaceKind::Merged);
+        assert_eq!(s.fill.a, 0.0);
+        assert!(s.border.is_none() && s.shadow.is_none() && !s.depth && !s.backdrop);
     }
 }

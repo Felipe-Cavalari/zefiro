@@ -1,11 +1,14 @@
 use zefiro_core::config::*;
 
 #[test]
-fn legacy_config_keeps_shared_layout_and_empty_center() {
+fn legacy_config_keeps_shared_layout_and_the_island_in_the_center() {
     let config = parse_config(DEFAULT_CONFIG).unwrap();
     assert_eq!(config.bar.layout_mode, LayoutMode::Shared);
-    assert!(config.bar.sections.center.is_empty());
+    assert_eq!(config.bar.sections.center, [ISLAND_CHIP]);
     assert!(config.bar.monitors.is_empty());
+    // Config de antes do chip, sem a chave `center`: a ilha continua onde estava (ADR-0017).
+    let old = parse_config("[bar.sections]\nstart = [\"zefiro\"]\nend = [\"clock\"]\n").unwrap();
+    assert_eq!(old.bar.sections.center, [ISLAND_CHIP]);
 }
 
 #[test]

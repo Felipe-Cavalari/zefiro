@@ -12,7 +12,7 @@ fn edits_change_only_draft_and_move_instead_of_duplicate() {
     assert!(editor.add("clock", Section::End).is_err());
     editor.remove("clock").unwrap();
     editor.add("clock", Section::Center).unwrap();
-    assert_eq!(editor.draft.bar.sections.center, ["clock"]);
+    assert_eq!(editor.draft.bar.sections.center, ["island", "clock"], "a ilha é o chip padrão do centro");
 }
 
 #[test]
@@ -104,10 +104,10 @@ fn reapply_then_save(editor: &mut EditorSession) -> String {
 #[test]
 fn save_after_reapply_does_not_conflict_on_fields_changed_only_outside() {
     use zefiro_core::config::parse_config;
-    let base = zefiro_core::config::DEFAULT_CONFIG.replace("end   = [\"clock\"]", "center = []\nend   = [\"clock\"]");
+    let base = zefiro_core::config::DEFAULT_CONFIG.replace("center = [\"island\"]", "center = []");
     let mut editor = EditorSession::new(parse_config(&base).unwrap(), base.clone());
     editor.remove("zefiro").unwrap();
-    let latest = base.replace("end   = [\"clock\"]", "end   = []");
+    let latest = base.replace("end    = [\"clock\"]", "end    = []");
     editor.external_change(parse_config(&latest).unwrap(), latest.clone());
     assert!(editor.conflict);
     let saved = parse_config(&reapply_then_save(&mut editor)).unwrap();

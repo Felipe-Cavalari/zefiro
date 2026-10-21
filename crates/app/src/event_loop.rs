@@ -199,7 +199,7 @@ impl Loop {
                         b.set_active(&self.ctx, None)?;
                     }
                     for b in &self.bars {
-                        for id in zefiro_bar::catalog::ITEMS.iter().map(|i| i.id).chain([crate::bar_view::ISLAND_CHIP]) {
+                        for id in zefiro_bar::catalog::ITEMS.iter().map(|i| i.id) {
                             b.fade_chip(&self.ctx, id, true)?;
                         }
                     }

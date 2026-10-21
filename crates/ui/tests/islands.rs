@@ -154,3 +154,15 @@ fn other_formats_have_no_islands() {
         assert_eq!(l.island_pill_y(), 3.0);
     }
 }
+
+#[test]
+fn island_pill_is_centered_in_the_island_chip_below_the_rail() {
+    let island = ChipSpec { id: "island".into(), content_w: 200.0, wide: true };
+    let l = ilhas(1.0, [&[chip("zefiro", 12.0)], &[island], &[]], None);
+    let slot = chip_rect(&l, "island");
+    assert_eq!(slot.w, 220.0, "a reserva inteira, para os vizinhos não andarem quando ela espia");
+    let pill = l.island_pill_rect(120.0).unwrap();
+    assert_eq!(pill, Rect::new((slot.center_x() - 60.0).round(), 6.0, 120.0, 28.0));
+    let none = ilhas(1.0, [&[chip("zefiro", 12.0)], &[], &[]], None);
+    assert!(none.island_pill_rect(120.0).is_none(), "sem o chip, sem ilha");
+}

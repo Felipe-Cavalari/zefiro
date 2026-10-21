@@ -12,9 +12,9 @@ height = "completa"   # completa | compacta
 format = "faixa"      # faixa | pilulas | ilhas
 
 [bar.sections]
-start = ["zefiro"]
-end   = ["clock"]
-# o centro é a ilha (monitor principal)
+start  = ["zefiro"]
+center = ["island"]   # a ilha é um chip: tire do layout para liberar o centro
+end    = ["clock"]
 
 [island]
 enabled = true
@@ -131,6 +131,9 @@ impl Sections {
     }
 }
 
+/// Id do chip da ilha embutida (ADR-0017): ela só aparece onde o chip está.
+pub const ISLAND_CHIP: &str = "island";
+
 impl BarConfig {
     /// Algum layout (o compartilhado ou o de algum monitor) mostra o item `id`? Os serviços de cada
     /// chip só rodam quando ele está na barra.
@@ -175,6 +178,14 @@ pub struct IslandConfig { pub enabled: bool, pub exe: String, pub engine: Island
 #[serde(rename_all = "lowercase")]
 pub enum IslandEngine { Externa, #[default] Embutida }
 
+impl Config {
+    /// A ilha embutida aparece em algum layout: engine embutida e o chip `island` na barra. Os
+    /// serviços que só servem a ela (avisos, privacidade, timer) seguem isto.
+    pub fn shows_embedded_island(&self) -> bool {
+        self.island.embedded() && self.bar.uses(ISLAND_CHIP)
+    }
+}
+
 impl IslandConfig {
     pub fn embedded(&self) -> bool {
         self.enabled && self.engine == IslandEngine::Embutida
@@ -203,7 +214,7 @@ impl Default for BarConfig {
 
 impl Default for Sections {
     fn default() -> Self {
-        Sections { start: vec!["zefiro".into()], center: Vec::new(), end: vec!["clock".into()] }
+        Sections { start: vec!["zefiro".into()], center: vec![ISLAND_CHIP.into()], end: vec!["clock".into()] }
     }
 }
 
