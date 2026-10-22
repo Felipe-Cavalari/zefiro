@@ -94,6 +94,10 @@ fn clean_bar_switches_sit_above_the_buttons_on_both_pages() {
     for b in layout.buttons.iter().filter(|b| matches!(b.action, EditorAction::Monitor(_) | EditorAction::ToggleMode)) {
         assert!(!b.enabled, "{:?} fica apagado", b.action);
     }
+    // Ligado, só sobra a barra do principal: a chave continua, senão não dá para desligar.
+    let layout = EditorPanel::default().layout(&cx(&s, &one, false), &FixedWidthMeasurer);
+    let primary = layout.buttons.iter().find(|b| b.action == EditorAction::TogglePrimaryOnly).expect("a chave continua com uma barra só");
+    assert!(primary.enabled && primary.kind == zefiro_bar::editor_panel::ButtonKind::Switch { on: true });
     // Ilha externa: ocultar automaticamente fica apagado.
     s.draft.island.engine = zefiro_core::config::IslandEngine::Externa;
     let layout = EditorPanel::default().layout(&cx(&s, &two, false), &FixedWidthMeasurer);

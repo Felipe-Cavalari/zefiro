@@ -199,7 +199,10 @@ impl EditorPanel {
         let external = session.draft.island.external();
         let autohide_label = if external { "Ocultar automaticamente · indisponível com a ilha externa" } else { "Ocultar automaticamente" };
         let mut switches = vec![(EditorAction::ToggleAutohide, autohide_label, session.draft.bar.autohide && !external, enabled && !external)];
-        if cx.monitors.len() > 1 {
+        // Com a opção ligada só existe a barra do principal (um monitor na lista): a chave continua
+        // para dar para desligar.
+        let primary_only = session.confirmed.bar.display == BarDisplay::Principal || session.draft.bar.display == BarDisplay::Principal;
+        if cx.monitors.len() > 1 || primary_only {
             switches.push((EditorAction::TogglePrimaryOnly, "Só no monitor principal", session.draft.bar.display == BarDisplay::Principal, enabled));
         }
         for (action, label, on, enabled) in switches {
