@@ -70,6 +70,9 @@ pub struct Conversation {
     /// Codex: a mensagem do agente que está chegando (um turno pode ter várias).
     #[serde(skip)]
     item: Option<String>,
+    /// Acabou de entrar a linha em branco entre duas mensagens.
+    #[serde(skip)]
+    boundary: bool,
     /// Imagens sendo geradas neste turno.
     #[serde(skip)]
     generating: usize,
@@ -117,6 +120,7 @@ impl Conversation {
         }
         self.stopping = false;
         self.item = None;
+        self.boundary = false;
         self.generating = 0;
         self.messages.push(Message { role: Role::User, text: text.chars().take(MAX_PROMPT).collect(), state: State::Done, note: None, images });
         self.messages.push(Message { role: Role::Claude, text: String::new(), state: State::Waiting, note: None, images: Vec::new() });
@@ -157,7 +161,23 @@ impl Conversation {
         if let Some(m) = self.reply_mut()
             && !m.text.is_empty()
         {
+            // As quebras do fim da mensagem anterior não somam com a linha em branco.
+            m.text.truncate(m.text.trim_end_matches(['\n', '\r']).len());
             m.text.push_str("\n\n");
+            self.boundary = true;
+        }
+    }
+
+    /// Acrescenta texto à resposta em andamento. Logo depois da linha em branco entre duas
+    /// mensagens, as quebras do começo da próxima também não somam.
+    fn push_text(&mut self, text: &str) {
+        let text = if self.boundary { text.trim_start_matches(['\n', '\r']) } else { text };
+        if !text.is_empty() {
+            self.boundary = false;
+        }
+        if let Some(m) = self.reply_mut() {
+            m.text.push_str(text);
+            m.state = State::Streaming;
         }
     }
 
@@ -189,18 +209,13 @@ impl Conversation {
                     return false;
                 }
                 self.next_item(item.as_ref());
-                let Some(m) = self.reply_mut() else { return false };
-                m.text.push_str(text);
-                m.state = State::Streaming;
+                self.push_text(text);
                 true
             }
             // Mensagem inteira de um item que não mandou pedaços (no Codex, outra mensagem do turno).
             Event::Assistant { text, item: Some(item) } if self.reply_mut().is_some() && self.item.as_ref() != Some(item) => {
                 self.next_item(Some(item));
-                if let Some(m) = self.reply_mut() {
-                    m.text.push_str(text);
-                    m.state = State::Streaming;
-                }
+                self.push_text(text);
                 true
             }
             Event::Assistant { text, .. } | Event::Finished { text: Some(text), error: None } if self.reply_mut().is_some_and(|m| m.text.is_empty()) => {
@@ -374,6 +389,17 @@ mod tests {
         assert!(c.ask("outra"));
         assert!(c.apply(&item_delta("m3", "Oi")), "o item da resposta anterior não conta");
         assert_eq!(c.messages[3].text, "Oi");
+        // Quebras de linha nas pontas das mensagens não somam: fica uma linha em branco só.
+        c.apply(&item_delta("m3", ".\n"));
+        c.apply(&item_delta("m4", "\n"));
+        c.apply(&item_delta("m4", "\nPronto!"));
+        assert_eq!(c.messages[3].text, "Oi.\n\nPronto!");
+        c.apply(&item_delta("m4", "\n\nfim"));
+        assert_eq!(c.messages[3].text, "Oi.\n\nPronto!\n\nfim", "dentro da mesma mensagem, o texto fica como veio");
+        c.apply(&Event::Finished { text: None, error: None });
+        assert!(c.ask("mais"));
+        c.apply(&item_delta("m5", "\nOi"));
+        assert_eq!(c.messages[5].text, "\nOi", "a primeira mensagem da resposta fica como veio");
     }
 
     #[test]
