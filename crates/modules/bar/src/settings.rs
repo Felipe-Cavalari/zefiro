@@ -7,9 +7,11 @@ use zefiro_resources::tokens::Tokens;
 use zefiro_ui::paint::{DisplayList, DrawOp};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SettingsAction { ToggleAutostart, ToggleHud, RestartIsland, ExportDiagnostics }
+pub enum SettingsAction { Back, ToggleAutostart, ToggleHud, RestartIsland, ExportDiagnostics }
 
-const ITEMS: [(&str, SettingsAction); 4] = [
+/// A primeira linha volta ao menu do Z, como o "‹ Tema" da tela de temas.
+const ITEMS: [(&str, SettingsAction); 5] = [
+    ("‹ Configurações", SettingsAction::Back),
     ("Iniciar com o Windows", SettingsAction::ToggleAutostart),
     ("HUD de debug", SettingsAction::ToggleHud),
     ("Reiniciar a ilha", SettingsAction::RestartIsland),
@@ -18,7 +20,8 @@ const ITEMS: [(&str, SettingsAction); 4] = [
 
 const W: f32 = 300.0;
 const PAD: f32 = 16.0;
-const TITLE_H: f32 = 28.0;
+/// Espaço entre o "‹ Configurações" e os itens, como na tela de temas.
+const BACK_GAP: f32 = 4.0;
 const ROW_H: f32 = 32.0;
 const FOOTER_H: f32 = 28.0;
 
@@ -29,17 +32,21 @@ pub struct SettingsItemBox { pub rect: Rect, pub action: SettingsAction }
 pub struct SettingsModel { pub autostart: bool, pub hud: bool, version: String, focus: usize }
 
 impl SettingsModel {
+    /// O destaque começa no primeiro item, não no voltar.
     pub fn new(autostart: bool, hud: bool, version: &str) -> SettingsModel {
-        SettingsModel { autostart, hud, version: version.to_string(), focus: 0 }
+        SettingsModel { autostart, hud, version: version.to_string(), focus: 1 }
     }
 
     pub fn layout(&self, scale: f32) -> Vec<SettingsItemBox> {
         let s = |v: f32| v * scale;
-        ITEMS.iter().enumerate().map(|(i, (_, action))| SettingsItemBox { rect: Rect::new(s(PAD), s(PAD + TITLE_H) + s(ROW_H) * i as f32, s(W - 2.0 * PAD), s(ROW_H)), action: *action }).collect()
+        ITEMS.iter().enumerate().map(|(i, (_, action))| {
+            let gap = if i == 0 { 0.0 } else { BACK_GAP };
+            SettingsItemBox { rect: Rect::new(s(PAD), s(PAD + gap) + s(ROW_H) * i as f32, s(W - 2.0 * PAD), s(ROW_H)), action: *action }
+        }).collect()
     }
 
     pub fn size(&self, scale: f32) -> Size {
-        Size { w: W * scale, h: (2.0 * PAD + TITLE_H + ROW_H * ITEMS.len() as f32 + FOOTER_H) * scale }
+        Size { w: W * scale, h: (2.0 * PAD + BACK_GAP + ROW_H * ITEMS.len() as f32 + FOOTER_H) * scale }
     }
 
     pub fn hit(&self, p: Point, scale: f32) -> Option<SettingsAction> {
@@ -68,15 +75,14 @@ impl SettingsModel {
         let s = |v: f32| v * scale;
         let size = self.size(scale);
         let mut list = DisplayList::new(size);
-        let title = TextStyle { size: s(14.0), weight: FontWeight::SemiBold, family: Family::Text };
         let body = TextStyle { size: s(13.0), weight: FontWeight::Regular, family: Family::Text };
         let small = TextStyle { size: s(11.0), weight: FontWeight::Regular, family: Family::Text };
-        list.push(DrawOp::Text { rect: Rect::new(s(PAD), s(PAD), s(W - 2.0 * PAD), s(20.0)), text: "Configurações".into(), style: title, color: tokens.text, align: Align::Leading });
         for (i, b) in self.layout(scale).iter().enumerate() {
             if i == self.focus {
                 list.push(DrawOp::RoundRect { rect: b.rect, radius: s(10.0), color: tokens.raised });
             }
-            list.push(DrawOp::Text { rect: b.rect.inset(s(12.0), 0.0), text: ITEMS[i].0.into(), style: body, color: tokens.text, align: Align::Leading });
+            let color = if b.action == SettingsAction::Back { tokens.text_secondary } else { tokens.text };
+            list.push(DrawOp::Text { rect: b.rect.inset(s(12.0), 0.0), text: ITEMS[i].0.into(), style: body, color, align: Align::Leading });
             match b.action {
                 SettingsAction::ToggleAutostart => crate::menu::switch(&mut list, b.rect, self.autostart, scale, tokens),
                 SettingsAction::ToggleHud => crate::menu::switch(&mut list, b.rect, self.hud, scale, tokens),
@@ -105,9 +111,9 @@ mod tests {
     #[test]
     fn lists_the_rare_items_in_order_with_the_version() {
         let m = SettingsModel::new(false, false, "1.3.0");
-        assert_eq!(m.layout(1.0).iter().map(|b| b.action).collect::<Vec<_>>(), [SettingsAction::ToggleAutostart, SettingsAction::ToggleHud, SettingsAction::RestartIsland, SettingsAction::ExportDiagnostics]);
+        assert_eq!(m.layout(1.0).iter().map(|b| b.action).collect::<Vec<_>>(), [SettingsAction::Back, SettingsAction::ToggleAutostart, SettingsAction::ToggleHud, SettingsAction::RestartIsland, SettingsAction::ExportDiagnostics]);
         let t = texts(&m.paint(1.0, &tokens()));
-        assert!(t.contains(&"Configurações".to_string()) && t.contains(&"Zefiro 1.3.0".to_string()), "{t:?}");
+        assert!(t.contains(&"‹ Configurações".to_string()) && t.contains(&"Zefiro 1.3.0".to_string()), "como o ‹ Tema: {t:?}");
         for b in m.layout(1.0) {
             assert!(b.rect.bottom() <= m.size(1.0).h, "cabe no painel");
             assert_eq!(m.hit(Point { x: b.rect.center_x(), y: b.rect.y + b.rect.h / 2.0 }, 1.0), Some(b.action));
@@ -126,14 +132,18 @@ mod tests {
     #[test]
     fn keyboard_walks_and_clamps() {
         let mut m = SettingsModel::new(false, false, "x");
-        assert_eq!(m.key(None), Some(SettingsAction::ToggleAutostart));
+        assert_eq!(m.key(None), Some(SettingsAction::ToggleAutostart), "começa no primeiro item, não no voltar");
         for _ in 0..9 {
             m.key(Some(true));
         }
         assert_eq!(m.key(None), Some(SettingsAction::ExportDiagnostics));
         m.key(Some(false));
         assert_eq!(m.key(None), Some(SettingsAction::RestartIsland));
-        let p = m.layout(1.0)[1].rect;
+        for _ in 0..9 {
+            m.key(Some(false));
+        }
+        assert_eq!(m.key(None), Some(SettingsAction::Back), "↑ no topo chega ao ‹ Configurações");
+        let p = m.layout(1.0)[2].rect;
         assert!(m.hover(Point { x: p.center_x(), y: p.y + 1.0 }, 1.0));
         assert_eq!(m.key(None), Some(SettingsAction::ToggleHud));
     }

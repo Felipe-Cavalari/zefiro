@@ -432,6 +432,12 @@ impl Loop {
     /// Item das Configurações: vale na hora; as chaves continuam no painel aberto, na posição nova.
     fn settings_action(&mut self, a: SettingsAction) -> Result<()> {
         match a {
+            // O menu do Z abre no lugar, como o "‹ Tema" volta da tela de temas.
+            SettingsAction::Back => {
+                let monitor = self.controller.open().map_or(0, |p| p.monitor);
+                let fx = self.controller.handle(PanelInput::ChipClick { monitor, chip: "zefiro".into() });
+                return self.run_effects(fx);
+            }
             SettingsAction::ToggleAutostart => {
                 crate::tray_loop::toggle_autostart();
                 if let Some(m) = &mut self.settings {
@@ -634,6 +640,10 @@ impl Loop {
                 // Esc na tela de temas volta ao menu; no menu, fecha.
                 if vk == VK_ESCAPE && self.effective_open_kind() == Some(PanelKind::Menu) && self.menu.as_ref().is_some_and(|m| m.page() == zefiro_bar::menu::MenuPage::Themes) {
                     return self.menu_action(MenuAction::BackToMenu).map(|_| true);
+                }
+                // Esc nas Configurações também volta ao menu.
+                if vk == VK_ESCAPE && self.effective_open_kind() == Some(PanelKind::Settings) {
+                    return self.settings_action(SettingsAction::Back).map(|_| true);
                 }
                 if vk == VK_ESCAPE {
                     let fx = self.controller.handle(PanelInput::Escape);
