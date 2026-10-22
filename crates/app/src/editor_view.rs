@@ -159,6 +159,8 @@ impl Loop {
         self.refresh_services();
         self.apply_bars(true)?;
         self.schedule_clock();
+        // Ocultar automaticamente e só no principal valem ao concluir (a prévia não os aplica).
+        self.clean_bar_sync()?;
         window::post_user(USER_CONFIG_CHANGED);
         Ok(())
     }

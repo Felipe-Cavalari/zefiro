@@ -12,15 +12,33 @@ use crate::event_loop::{Loop, TIMER_AUTOHIDE};
 #[derive(Default)]
 pub struct AutoHideRuntime {
     on: bool,
+    /// `[bar] display` com que as barras foram criadas.
+    display: zefiro_core::config::BarDisplay,
     /// Retângulos de todos os monitores (com ou sem barra): decidem onde o topo é borda de verdade.
     screens: Vec<Rect>,
     timer: bool,
 }
 
 impl Loop {
+    /// Aplica "Ocultar automaticamente" e "Só no monitor principal" se o que está valendo for diferente
+    /// da config. Compara com o aplicado, não com a config anterior: o Editar barra põe o rascunho em
+    /// `ctx.config` durante a prévia, então ao Concluir a config "nova" já é igual à de antes.
+    pub fn clean_bar_sync(&mut self) -> Result<()> {
+        if self.ctx.config.bar.display != self.autohide.display {
+            self.autohide.display = self.ctx.config.bar.display;
+            // Recria as barras pelo mesmo caminho da troca de monitores.
+            window::set_timer(crate::event_loop::TIMER_DISPLAY, 1);
+        }
+        if self.ctx.config.autohide() != self.autohide.on {
+            self.autohide_sync()?;
+        }
+        Ok(())
+    }
+
     /// Início, config ou monitores mudaram: liga ou desliga, refaz a reserva da AppBar e relê os monitores.
     pub fn autohide_sync(&mut self) -> Result<()> {
         let on = self.ctx.config.autohide();
+        self.autohide.display = self.ctx.config.bar.display;
         if self.ctx.config.bar.autohide && !on {
             tracing::warn!("ocultar automaticamente ignorado: indisponível com a ilha externa");
         }

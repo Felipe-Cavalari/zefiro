@@ -787,11 +787,6 @@ impl Loop {
                         self.run_effects(fx)?;
                         let theme_changed = new.theme != self.ctx.config.theme;
                         let external = (self.ctx.config.island.external(), new.island.external());
-                        // Só no principal ↔ todos: as barras são recriadas pelo mesmo caminho da troca de monitores.
-                        if new.bar.display != self.ctx.config.bar.display {
-                            window::set_timer(TIMER_DISPLAY, 1);
-                        }
-                        let autohide_changed = new.autohide() != self.ctx.config.autohide();
                         self.ctx.theme.acrylic = new.acrylic;
                         self.ctx.config = new;
                         // Trocar `[island] engine` liga uma ilha e desliga a outra sem reiniciar a barra.
@@ -809,9 +804,7 @@ impl Loop {
                         crate::island::sync(&self.ctx);
                         self.refresh_services();
                         self.schedule_clock();
-                        if autohide_changed {
-                            self.autohide_sync()?;
-                        }
+                        self.clean_bar_sync()?;
                     }
                     Ok(_) => {}
                     Err(e) => tracing::warn!(line = ?e.line, "config.toml inválido: {}; mantendo a configuração anterior", e.message),
