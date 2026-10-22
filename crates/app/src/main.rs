@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod app;
+mod autohide_loop;
 mod bar_view;
 mod chat_loop;
 mod config_worker;

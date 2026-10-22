@@ -93,6 +93,8 @@ pub const TIMER_FULLSCREEN: usize = 12;
 pub const TIMER_HUD: usize = 13;
 /// Chat sem uso: encerra o processo do `claude` (10 min).
 pub const TIMER_CHAT_IDLE: usize = 14;
+/// Ocultar automaticamente: fim da espera no topo (descer) ou fora da barra (subir).
+pub const TIMER_AUTOHIDE: usize = 16;
 const CYCLE_HALF_MS: u32 = 450;
 
 const VK_ESCAPE: u32 = 0x1B;
@@ -130,6 +132,7 @@ pub struct Loop {
     pub(crate) chat: crate::chat_loop::ChatRuntime,
     pub(crate) power: crate::power_loop::PowerRuntime,
     pub(crate) system: crate::system_loop::SystemRuntime,
+    pub(crate) autohide: crate::autohide_loop::AutoHideRuntime,
     /// Ciclos de medição: (total, feitos).
     cycles: Option<(u32, u32)>,
 }
@@ -151,7 +154,7 @@ impl Loop {
             panels.push(PanelView::create(&ctx, b.monitor())?);
         }
         let today = now_local().date;
-        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), debug: Default::default(), update: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), terminal: Default::default(), chat: Default::default(), power: Default::default(), system: Default::default(), cycles: None })
+        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), debug: Default::default(), update: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), terminal: Default::default(), chat: Default::default(), power: Default::default(), system: Default::default(), autohide: Default::default(), cycles: None })
     }
 
     pub(crate) fn bar_index(&self, hwnd: isize) -> Option<usize> { self.bars.iter().position(|b| b.hwnd().0 as isize == hwnd) }
@@ -754,6 +757,7 @@ impl Loop {
                         if new.bar.display != self.ctx.config.bar.display {
                             window::set_timer(TIMER_DISPLAY, 1);
                         }
+                        let autohide_changed = new.autohide() != self.ctx.config.autohide();
                         self.ctx.theme.acrylic = new.acrylic;
                         self.ctx.config = new;
                         // Trocar `[island] engine` liga uma ilha e desliga a outra sem reiniciar a barra.
@@ -771,6 +775,9 @@ impl Loop {
                         crate::island::sync(&self.ctx);
                         self.refresh_services();
                         self.schedule_clock();
+                        if autohide_changed {
+                            self.autohide_sync()?;
+                        }
                     }
                     Ok(_) => {}
                     Err(e) => tracing::warn!(line = ?e.line, "config.toml inválido: {}; mantendo a configuração anterior", e.message),
@@ -819,12 +826,19 @@ pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
     }
     l.refresh_services();
     l.devices_start();
+    if let Err(e) = l.autohide_sync() {
+        tracing::warn!(error = %e, "não consegui preparar o ocultar automaticamente");
+    }
     'pump: while window::pump() {
         for e in window::take_events() {
             match l.handle(e) {
                 Ok(true) => {}
                 Ok(false) => break 'pump,
                 Err(err) => tracing::error!(error = %err, ?e, "erro tratando evento"),
+            }
+            // Cursor, painéis e tela cheia mudam por muitos caminhos: a regra roda depois de cada evento.
+            if let Err(err) = l.autohide_update() {
+                tracing::error!(error = %err, "erro no ocultar automaticamente");
             }
         }
     }

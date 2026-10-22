@@ -5,7 +5,7 @@ use zefiro_platform_windows::window::{self, WinEvent};
 use zefiro_platform_windows::{island_zorder, monitors, system};
 
 use crate::bar_view::BarView;
-use crate::event_loop::{Loop, TIMER_DISPLAY, TIMER_FULLSCREEN};
+use crate::event_loop::{Loop, TIMER_AUTOHIDE, TIMER_DISPLAY, TIMER_FULLSCREEN};
 use crate::panel_view::PanelView;
 
 const ABN_POSCHANGED: u32 = 1;
@@ -48,7 +48,9 @@ pub fn handle(l: &mut Loop, e: WinEvent) -> Result<bool> {
             l.devices_displays_changed();
             // Jogo em tela cheia exclusiva troca a resolução: as barras novas nascem visíveis por cima dele.
             reconcile_fullscreen(l)?;
+            l.autohide_sync()?;
         }
+        WinEvent::Timer { id: TIMER_AUTOHIDE } | WinEvent::AutoHideCursor => {} // a regra roda depois de cada evento (event_loop::run)
         WinEvent::SettingChanged => {
             l.ctx.theme.animations = system::animations_enabled();
             // Tema claro/escuro da barra de tarefas: o ícone troca de cor.
