@@ -584,6 +584,7 @@ impl Loop {
                     self.devices_move(Point { x: x - ox, y: y - oy })?;
                     self.terminal_move(Point { x: x - ox, y: y - oy })?;
                     self.chat_move(Point { x: x - ox, y: y - oy })?;
+                    self.vscode_move(Point { x: x - ox, y: y - oy })?;
                     // Menu do Z: o item sob o mouse ganha o destaque (só redesenha quando muda).
                     let scale = self.bars[i].scale();
                     let p = Point { x: x - ox, y: y - oy };
