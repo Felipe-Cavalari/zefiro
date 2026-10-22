@@ -56,7 +56,8 @@ coisas não cabem no mesmo TOML. Ficou `[bar] display = "todos" | "principal"`.
   temas; a chave do mosaico saiu (o `[wm]` continua valendo para quem edita o arquivo).
 - Configurações é um painel próprio (`PanelKind::Settings`, pseudo-chip `__settings`, preso ao chip do Z)
   com itens que valem na hora: iniciar com o Windows, HUD, reiniciar a ilha, exportar diagnóstico e a
-  versão no rodapé.
+  versão no rodapé. A primeira linha, "‹ Configurações", volta ao menu do Z (o Esc também), como o
+  "‹ Tema" da tela de temas.
 - A bandeja: o clique esquerdo continua trazendo as barras escondidas por tela cheia; "Mostrar a barra"
   também faz a do principal descer (`AutoHide::reveal`). O menu da bandeja ficou como estava, porque com
   a barra escondida ele é o caminho que sobra.
