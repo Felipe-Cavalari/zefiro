@@ -89,14 +89,18 @@ pub fn default_log_dir() -> PathBuf {
     log_dir_from(std::env::var_os("LOCALAPPDATA"), std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"))
 }
 
-/// Arquivo diário `zefiro.AAAA-MM-DD.log`, mantendo 7 arquivos.
+/// Quantos arquivos diários de log ficam no disco: 3 semanas, para caber a janela de 2 semanas sem
+/// crash do `scripts/stability.ps1`. Os `crash-*.txt` não entram nessa conta.
+pub const LOG_FILES_KEPT: usize = 21;
+
+/// Arquivo diário `zefiro.AAAA-MM-DD.log`, mantendo `LOG_FILES_KEPT` arquivos.
 pub fn init_logging(dir: &Path, filter: &str) -> std::io::Result<LogGuard> {
     std::fs::create_dir_all(dir)?;
     let appender = tracing_appender::rolling::Builder::new()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
         .filename_prefix("zefiro")
         .filename_suffix("log")
-        .max_log_files(7)
+        .max_log_files(LOG_FILES_KEPT)
         .build(dir)
         .map_err(std::io::Error::other)?;
     let (writer, guard) = tracing_appender::non_blocking(appender);
@@ -148,6 +152,12 @@ mod tests {
         assert_eq!((list[1].error, list[1].message.as_str()), (true, "falhou"));
         assert!(list[1].target.contains("observability"), "{}", list[1].target);
         assert!(list[1].at_unix_s > 1_700_000_000);
+    }
+
+    #[test]
+    fn logs_cover_the_two_week_stability_window() {
+        // As 2 semanas sem crash do fim da Fase 1 são conferidas pelo `scripts/stability.ps1` nos logs.
+        const { assert!(LOG_FILES_KEPT >= 21) };
     }
 
     #[test]

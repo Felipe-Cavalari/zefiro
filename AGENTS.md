@@ -95,6 +95,7 @@ elease` só checa com `ZEFIRO_UPDATE_CHECK=1`.
 - `./scripts/perf.ps1 -Process zefiro …`: RAM e CPU. Ele soma os processos filhos, e a ilha é filha do zefiro, então para medir só a barra use `[island] enabled = false`.
 - `ZEFIRO_CYCLES=50`: abre e fecha o calendário 50 vezes e registra no log o tempo do clique até o quadro.
 - `./scripts/frames.ps1`: quadros perdidos a partir de um CSV do PresentMon, que precisa de um PowerShell elevado.
+- `./scripts/stability.ps1`: dia da contagem das 2 semanas sem crash (início no `-Since`, padrão 2026-10-22), com os panics (`crash-*.txt`), os crashes e travamentos do Windows (eventos 1000 e 1002 do `zefiro.exe` e do `zefiro-island.exe`) e os inícios da barra. Os logs ficam 21 dias (`LOG_FILES_KEPT`).
 
 ## Coisas não óbvias (detalhes nos ADRs)
 
