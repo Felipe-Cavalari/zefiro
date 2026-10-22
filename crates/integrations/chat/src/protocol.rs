@@ -25,7 +25,19 @@ pub enum Event {
 
 /// Mensagem do usuário, numa linha.
 pub fn user_line(text: &str) -> String {
-    json!({ "type": "user", "message": { "role": "user", "content": text } }).to_string()
+    user_message(text, &[])
+}
+
+/// Mensagem do usuário com imagens PNG (em base64) antes do texto. Sem texto, só as imagens.
+pub fn user_message(text: &str, images: &[String]) -> String {
+    if images.is_empty() {
+        return json!({ "type": "user", "message": { "role": "user", "content": text } }).to_string();
+    }
+    let mut content: Vec<Value> = images.iter().map(|data| json!({ "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": data } })).collect();
+    if !text.trim().is_empty() {
+        content.push(json!({ "type": "text", "text": text }));
+    }
+    json!({ "type": "user", "message": { "role": "user", "content": content } }).to_string()
 }
 
 /// Pede para parar a resposta em andamento; o processo continua vivo para o próximo turno.
@@ -162,6 +174,17 @@ mod tests {
         assert_eq!(v["message"]["content"], "linha 1\nlinha \"2\" ç");
         let v: Value = serde_json::from_str(&interrupt_line("z1")).unwrap();
         assert_eq!((v["type"].as_str(), v["request_id"].as_str(), v["request"]["subtype"].as_str()), (Some("control_request"), Some("z1"), Some("interrupt")));
+    }
+
+    #[test]
+    fn images_go_before_the_text_as_base64_blocks() {
+        let v: Value = serde_json::from_str(&user_message("O que é isto?", &["QUJD".into()])).unwrap();
+        let content = &v["message"]["content"];
+        assert_eq!(content[0], json!({ "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "QUJD" } }));
+        assert_eq!(content[1], json!({ "type": "text", "text": "O que é isto?" }));
+        let only: Value = serde_json::from_str(&user_message("  ", &["QUJD".into()])).unwrap();
+        assert_eq!(only["message"]["content"].as_array().unwrap().len(), 1, "sem texto, só a imagem");
+        assert_eq!(user_message("oi", &[]), user_line("oi"));
     }
 
     #[test]

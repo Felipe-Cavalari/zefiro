@@ -76,3 +76,12 @@ campo é desenhado pelo painel. A origem é `[chat] origin` (`auto` = Windows; s
 - O automático tenta primeiro o que `[chat.<agente>] prefer` diz (`windows`, o padrão, ou `wsl`) e
   depois o outro; a chave fica na página de origem ("No automático, primeiro: Windows | WSL").
   Mudá-la com a origem no automático pode mudar o processo de lugar, então começa outra conversa.
+- **Imagens (Ctrl+V):** sem texto na área de transferência, o Ctrl+V cola uma imagem (formato
+  "PNG", arquivo de imagem copiado no Explorer ou `CF_DIB`, que vira `.bmp` com o cabeçalho de 14
+  bytes). Com texto, o texto ganha: o Excel e o Word copiam os dois. Numa thread, a imagem vira PNG
+  com o lado maior em até 1568 px (`imaging::to_png`), vai para `chat\imagens\<id>.png` e a
+  pergunta guarda só o id. Até 4 por pergunta; só imagem, sem texto, vale. O Claude recebe blocos
+  `image` em base64 na mensagem do stream-json; o Codex, `{"type":"image","url":"data:image/png;base64,…"}`
+  no `turn/start` (vale no Windows e no WSL, sem traduzir caminhos). Sonda `chat_image_probe`: o
+  Claude e o Codex (Windows e WSL) leram o número das imagens de teste; um BMP de 11 MB virou um PNG
+  de 16 KB em ~50 ms. Apagar a conversa apaga as imagens dela.

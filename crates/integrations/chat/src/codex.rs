@@ -31,9 +31,14 @@ pub fn thread_resume(id: u64, thread: &str) -> String {
     request(id, "thread/resume", json!({ "threadId": thread, "sandbox": "read-only", "approvalPolicy": "never", "developerInstructions": SYSTEM_PROMPT }))
 }
 
-/// Uma pergunta. `model` vazio deixa o Codex decidir.
-pub fn turn_start(id: u64, thread: &str, text: &str, model: &str) -> String {
-    let mut params = json!({ "threadId": thread, "input": [{ "type": "text", "text": text, "text_elements": [] }] });
+/// Uma pergunta, com as imagens PNG (base64) antes do texto como `data:` URLs (valem no Windows e
+/// no WSL, sem traduzir caminhos). `model` vazio deixa o Codex decidir.
+pub fn turn_start(id: u64, thread: &str, text: &str, images: &[String], model: &str) -> String {
+    let mut input: Vec<Value> = images.iter().map(|data| json!({ "type": "image", "url": format!("data:image/png;base64,{data}") })).collect();
+    if !text.trim().is_empty() || input.is_empty() {
+        input.push(json!({ "type": "text", "text": text, "text_elements": [] }));
+    }
+    let mut params = json!({ "threadId": thread, "input": input });
     if !model.is_empty() {
         params["model"] = json!(model);
     }
@@ -138,12 +143,16 @@ mod tests {
         assert_eq!((s["params"]["sandbox"].as_str(), s["params"]["approvalPolicy"].as_str()), (Some("read-only"), Some("never")));
         assert_eq!(s["params"]["developerInstructions"], SYSTEM_PROMPT);
         assert_eq!(v(&thread_resume(4, "t1"))["params"]["threadId"], "t1");
-        let t = v(&turn_start(5, "t1", "oi\n\"x\"", "gpt-5.6-luna"));
+        let t = v(&turn_start(5, "t1", "oi\n\"x\"", &[], "gpt-5.6-luna"));
         assert_eq!(t["params"]["input"][0], json!({ "type": "text", "text": "oi\n\"x\"", "text_elements": [] }));
         assert_eq!(t["params"]["model"], "gpt-5.6-luna");
-        assert!(v(&turn_start(5, "t1", "oi", ""))["params"].get("model").is_none());
+        assert!(v(&turn_start(5, "t1", "oi", &[], ""))["params"].get("model").is_none());
+        let img = v(&turn_start(6, "t1", "e isto?", &["QUJD".into()], ""));
+        assert_eq!(img["params"]["input"][0], json!({ "type": "image", "url": "data:image/png;base64,QUJD" }));
+        assert_eq!(img["params"]["input"][1]["text"], "e isto?");
+        assert_eq!(v(&turn_start(6, "t1", "", &["QUJD".into()], ""))["params"]["input"].as_array().unwrap().len(), 1, "sem texto, só a imagem");
         assert_eq!(v(&turn_interrupt(6, "t1", "u1"))["params"], json!({ "threadId": "t1", "turnId": "u1" }));
-        assert!(!turn_start(1, "t", "a\nb", "").contains('\n'));
+        assert!(!turn_start(1, "t", "a\nb", &[], "").contains('\n'));
     }
 
     #[test]

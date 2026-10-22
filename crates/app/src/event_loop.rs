@@ -66,6 +66,8 @@ pub const USER_UPDATE: u32 = 23;
 pub const USER_TERMINAL: u32 = 24;
 /// O processo do chat mandou sinais (texto chegando, fim do turno, erro).
 pub const USER_CHAT: u32 = 25;
+/// Uma imagem colada no chat foi convertida (ou miniaturas de imagens foram lidas).
+pub const USER_CHAT_IMAGE: u32 = 26;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
@@ -691,6 +693,7 @@ impl Loop {
             WinEvent::User { code: USER_VSCODE } => self.vscode_loaded()?,
             WinEvent::User { code: USER_TERMINAL } => self.terminal_loaded()?,
             WinEvent::User { code: USER_CHAT } => self.chat_signals()?,
+            WinEvent::User { code: USER_CHAT_IMAGE } => self.chat_images()?,
             WinEvent::Timer { id: TIMER_CHAT_IDLE } => self.chat_idle(),
             WinEvent::Tray { mouse } => self.tray_event(mouse)?,
             WinEvent::Character { code, .. } => {

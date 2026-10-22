@@ -34,6 +34,9 @@ pub struct Message {
     /// Aviso abaixo da resposta ("Resposta interrompida.", o erro).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Imagens coladas na pergunta (ids dos PNGs na pasta das imagens do chat).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<String>,
 }
 
 /// Limite do campo (caracteres).
@@ -75,8 +78,9 @@ impl Conversation {
 
     /// Título na lista de conversas: a primeira linha da primeira pergunta.
     pub fn title(&self) -> String {
-        let first = self.messages.iter().find(|m| m.role == Role::User).map_or("", |m| m.text.as_str());
-        let line = first.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("Conversa sem perguntas");
+        let first = self.messages.iter().find(|m| m.role == Role::User);
+        let fallback = if first.is_some_and(|m| !m.images.is_empty()) { "Imagem" } else { "Conversa sem perguntas" };
+        let line = first.map_or("", |m| m.text.as_str()).lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or(fallback);
         let mut t: String = line.chars().take(80).collect();
         if line.chars().count() > 80 {
             t.push('…');
@@ -95,22 +99,32 @@ impl Conversation {
     /// Manda uma pergunta: ela e uma resposta vazia esperando. `false` com resposta em andamento ou
     /// texto em branco.
     pub fn ask(&mut self, text: &str) -> bool {
+        self.ask_with(text, Vec::new())
+    }
+
+    /// Pergunta com imagens; só imagens, sem texto, também vale.
+    pub fn ask_with(&mut self, text: &str, images: Vec<String>) -> bool {
         let text = text.trim_end();
-        if self.busy() || text.trim().is_empty() {
+        if self.busy() || (text.trim().is_empty() && images.is_empty()) {
             return false;
         }
         self.stopping = false;
-        self.messages.push(Message { role: Role::User, text: text.chars().take(MAX_PROMPT).collect(), state: State::Done, note: None });
-        self.messages.push(Message { role: Role::Claude, text: String::new(), state: State::Waiting, note: None });
+        self.messages.push(Message { role: Role::User, text: text.chars().take(MAX_PROMPT).collect(), state: State::Done, note: None, images });
+        self.messages.push(Message { role: Role::Claude, text: String::new(), state: State::Waiting, note: None, images: Vec::new() });
         true
     }
 
     /// A pergunta da resposta que ainda nem começou (para mandar de novo noutra partida).
-    pub fn unanswered(&self) -> Option<&str> {
+    pub fn unanswered(&self) -> Option<&Message> {
         match self.messages.as_slice() {
-            [.., question, reply] if question.role == Role::User && reply.state == State::Waiting && reply.text.is_empty() => Some(&question.text),
+            [.., question, reply] if question.role == Role::User && reply.state == State::Waiting && reply.text.is_empty() => Some(question),
             _ => None,
         }
+    }
+
+    /// Todas as imagens da conversa (para apagar junto).
+    pub fn images(&self) -> impl Iterator<Item = &str> {
+        self.messages.iter().flat_map(|m| m.images.iter().map(String::as_str))
     }
 
     /// Um evento do processo. `true` se algo na tela mudou. Os erros do fim do turno vão por
@@ -221,7 +235,23 @@ mod tests {
         assert_eq!((c.messages[0].role, c.messages[0].text.as_str()), (Role::User, "Qual a capital do Peru?"));
         assert_eq!((c.messages[1].role, c.messages[1].state), (Role::Claude, State::Waiting));
         assert!(c.busy());
-        assert_eq!(c.unanswered(), Some("Qual a capital do Peru?"));
+        assert_eq!(c.unanswered().map(|m| m.text.as_str()), Some("Qual a capital do Peru?"));
+    }
+
+    #[test]
+    fn questions_can_carry_images_or_be_only_images() {
+        let mut c = Conversation::new("s".into(), Agent::Codex);
+        assert!(!c.ask_with("  ", Vec::new()));
+        assert!(c.ask_with("", vec!["img-1".into()]));
+        assert_eq!(c.messages[0].images, ["img-1"]);
+        assert_eq!(c.unanswered().map(|m| m.images.clone()), Some(vec!["img-1".to_string()]));
+        assert_eq!(c.title(), "Imagem");
+        c.apply(&Event::Finished { text: Some("ok".into()), error: None });
+        assert!(c.ask_with("e esta?", vec!["img-2".into()]));
+        assert_eq!(c.images().collect::<Vec<_>>(), ["img-1", "img-2"]);
+        let back = Conversation::from_json(&c.to_json()).unwrap();
+        assert_eq!(back.messages[2].images, ["img-2"]);
+        assert!(!c.to_json().contains("\"images\": []"), "sem a chave quando não há imagem");
     }
 
     #[test]

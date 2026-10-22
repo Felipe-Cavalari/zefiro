@@ -2,6 +2,8 @@
 //! `WM_CHAR`), a rolagem, os seletores de agente, origem e modelo, as conversas antigas e os sinais
 //! do processo (spec 2026-10-21-chat-claude, ADR-0020). O texto da conversa nunca vai para o log.
 
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use windows::core::Result;
 use zefiro_bar::chat::{ChatLayout, ChatView, Edit, Field, Hit, HistoryRow, Key, Line, MessageView, Page, Wrapped, chat_panel, field_text_width, history_max_scroll, plain_text, text_style, text_width, wrap, wrap_text};
@@ -10,19 +12,34 @@ use zefiro_core::config::set_value;
 use zefiro_integration_chat::agent::{Agent, ModelOption, claude_models, effective_model, model_label};
 use zefiro_integration_chat::conversation::{Conversation, Role};
 use zefiro_integration_chat::history::{self, Summary};
+use zefiro_integration_chat::image::{MAX_IMAGES, MAX_SIDE, base64};
 use zefiro_integration_chat::origin::{Choice, Prefer, parse_choice};
 use zefiro_integration_chat::protocol::{Event, Failure, classify};
 use zefiro_platform::geometry::Point;
-use zefiro_platform_windows::chat::{ChatService, Signal, Start, conversations_dir, new_id, windows_dir};
-use zefiro_platform_windows::{system_events, window};
+use zefiro_platform::image::Image;
+use zefiro_platform_windows::chat::{ChatService, Signal, Start, conversations_dir, images_dir, new_id, windows_dir};
+use zefiro_platform_windows::{imaging, system_events, window};
 use zefiro_ui::paint::DisplayList;
 
-use crate::event_loop::{Loop, TIMER_CHAT_IDLE, USER_CHAT};
+use crate::event_loop::{Loop, TIMER_CHAT_IDLE, USER_CHAT, USER_CHAT_IMAGE};
 
 /// Sem uso por este tempo, o processo sai (a sessão continua gravada).
 const IDLE_MS: u32 = 10 * 60 * 1000;
 /// Linhas por passo da roda.
 const WHEEL_LINES: f32 = 3.0;
+/// Lado das miniaturas decodificadas (px; cabem em 72 DIP a 175 %).
+const THUMB_PX: u32 = 128;
+
+/// Imagem colada esperando o envio. `thumb` vazio enquanto converte.
+struct Attachment { id: String, thumb: Option<Image> }
+
+/// O que as threads de imagem devolvem.
+enum ImageDone {
+    /// Imagem colada convertida e gravada (ou o erro).
+    Pasted { id: String, thumb: std::result::Result<Image, String> },
+    /// Miniatura de uma imagem de conversa (`None` se o arquivo sumiu).
+    Thumb { id: String, image: Option<Image> },
+}
 
 /// Linhas quebradas de uma mensagem, refeitas só quando o texto ou a escala mudam.
 struct CachedWrap { len: usize, scale: f32, wrapped: Wrapped }
@@ -57,6 +74,12 @@ pub struct ChatRuntime {
     layout: Option<ChatLayout>,
     hover: Option<Hit>,
     copied: Option<usize>,
+    /// Imagens coladas no campo.
+    attachments: Vec<Attachment>,
+    /// Miniaturas das imagens das perguntas, por id, e as que estão sendo lidas.
+    thumbs: HashMap<String, Image>,
+    loading: HashSet<String>,
+    images_done: Arc<Mutex<Vec<ImageDone>>>,
     /// "iniciando…" até o processo subir; "indisponível" se não subiu.
     status: Option<String>,
     /// Origem real do processo (no automático, aparece no seletor).
@@ -258,6 +281,8 @@ impl Loop {
         let origin_options = self.chat_origin_options(agent);
         let prefer = self.chat_prefer(agent);
         let history_rows = self.chat_history_rows();
+        let wanted: Vec<String> = self.chat.conversation.as_ref().map(|c| c.images().map(str::to_string).collect()).unwrap_or_default();
+        self.chat_load_thumbs(wanted);
         let measure = &self.ctx.text;
         let c = &mut self.chat;
         let Some(conv) = c.conversation.as_ref() else { return DisplayList::default() };
@@ -298,9 +323,11 @@ impl Loop {
             },
             ChatPage::History => Page::History { rows: &history_rows, scroll: c.history_scroll },
         };
-        let views: Vec<MessageView> = conv.messages.iter().zip(&c.wraps).map(|(m, w)| MessageView { role: m.role, state: m.state, wrapped: &w.wrapped, note: m.note.as_deref() }).collect();
+        let pictures: Vec<Vec<Option<Image>>> = conv.messages.iter().map(|m| m.images.iter().map(|id| c.thumbs.get(id).cloned()).collect()).collect();
+        let attachments: Vec<Option<Image>> = c.attachments.iter().map(|a| a.thumb.clone()).collect();
+        let views: Vec<MessageView> = conv.messages.iter().zip(&c.wraps).zip(&pictures).map(|((m, w), p)| MessageView { role: m.role, state: m.state, wrapped: &w.wrapped, note: m.note.as_deref(), images: p }).collect();
         let tokens = &self.ctx.theme.tokens;
-        let mut view = ChatView { messages: &views, field: &c.field, field_lines: &c.field_lines, agent, origin: &origin_label, model: &model_text, status: c.status.as_deref(), page, scroll: c.scroll, hover: c.hover, copied: c.copied };
+        let mut view = ChatView { messages: &views, field: &c.field, field_lines: &c.field_lines, attachments: &attachments, agent, origin: &origin_label, model: &model_text, status: c.status.as_deref(), page, scroll: c.scroll, hover: c.hover, copied: c.copied };
         let mut layout = chat_panel(&view, scale, tokens, measure);
         // Rolado para cima enquanto a resposta cresce embaixo: o que está na tela fica parado.
         if c.page == ChatPage::Chat {
@@ -325,30 +352,54 @@ impl Loop {
         }
     }
 
+    /// As imagens (PNG em base64) de uma pergunta, lidas da pasta das imagens.
+    fn chat_image_data(ids: &[String]) -> Vec<String> {
+        ids.iter()
+            .filter_map(|id| history::image_file(&images_dir(), id))
+            .filter_map(|path| match std::fs::read(&path) {
+                Ok(bytes) => Some(base64(&bytes)),
+                Err(e) => {
+                    tracing::warn!("chat: não consegui ler uma imagem colada: {e}");
+                    None
+                }
+            })
+            .collect()
+    }
+
     fn chat_send(&mut self) -> Result<()> {
+        if self.chat.attachments.iter().any(|a| a.thumb.is_none()) {
+            return Ok(());
+        }
         let text = self.chat.field.text.clone();
+        let ids: Vec<String> = self.chat.attachments.iter().map(|a| a.id.clone()).collect();
         let c = self.chat_conversation();
-        if !c.ask(&text) {
+        if !c.ask_with(&text, ids.clone()) {
             return Ok(());
         }
         c.updated = now_unix();
         let agent = c.agent;
         let question = c.messages[c.messages.len() - 2].text.clone();
         let chat = &mut self.chat;
+        for a in chat.attachments.drain(..) {
+            if let Some(thumb) = a.thumb {
+                chat.thumbs.insert(a.id, thumb);
+            }
+        }
         chat.field.clear();
         chat.scroll = 0.0;
         chat.copied = None;
         chat.retried = false;
         chat.first_text = false;
         chat.asked_at = Some(Instant::now());
-        tracing::info!(agente = agent.label(), caracteres = question.chars().count(), "chat: pergunta enviada");
+        tracing::info!(agente = agent.label(), caracteres = question.chars().count(), imagens = ids.len(), "chat: pergunta enviada");
         self.chat_start();
         let model = self.chat_model(agent);
         if let Some(c) = &mut self.chat.conversation {
             c.model.clone_from(&self.ctx.config.chat.of(agent == Agent::Codex).model);
         }
+        let images = Self::chat_image_data(&ids);
         if let Some(s) = &self.chat.service {
-            s.send(question, model);
+            s.send(question, images, model);
         }
         self.chat_save();
         self.chat_update_badge()?;
@@ -493,7 +544,7 @@ impl Loop {
 
     fn chat_delete_conversation(&mut self, index: usize) -> Result<()> {
         let Some(summary) = self.chat.history.get(index).cloned() else { return Ok(()) };
-        if let Err(e) = history::delete(&conversations_dir(), &summary.id) {
+        if let Err(e) = history::delete(&conversations_dir(), &images_dir(), &summary.id) {
             tracing::warn!("chat: não consegui apagar a conversa: {e}");
         }
         if self.chat.conversation.as_ref().is_some_and(|c| c.id == summary.id) {
@@ -583,6 +634,15 @@ impl Loop {
             return Ok(true);
         }
         let paste = if code == 22 { system_events::clipboard_text_full() } else { None };
+        // Ctrl+V sem texto: uma imagem (print, imagem copiada, arquivo do Explorer). Com texto, o
+        // texto ganha (o Excel e o Word copiam os dois).
+        if code == 22
+            && paste.is_none()
+            && let Some(bytes) = system_events::clipboard_image()
+        {
+            self.chat_attach(bytes)?;
+            return Ok(true);
+        }
         match self.chat.field.char(code, paste.as_deref()) {
             Edit::Changed => self.redraw_open_panel()?,
             Edit::Copy(text) => self.chat_copy(&text),
@@ -691,6 +751,7 @@ impl Loop {
                     self.redraw_open_panel()?;
                 }
             }
+            Some(Hit::Unattach(i)) => self.chat_unattach(i)?,
             Some(Hit::Field) | None => {}
         }
         Ok(true)
@@ -711,7 +772,7 @@ impl Loop {
             return false;
         }
         let Some(c) = self.chat.conversation.as_mut() else { return false };
-        let Some(question) = c.unanswered().map(str::to_string) else { return false };
+        let Some((question, ids)) = c.unanswered().map(|m| (m.text.clone(), m.images.clone())) else { return false };
         match failure {
             Failure::SessionMissing => {
                 c.session = if c.agent == Agent::Claude { new_id() } else { String::new() };
@@ -726,10 +787,104 @@ impl Loop {
         self.chat_stop_process();
         self.chat_start();
         let model = self.chat_model(agent);
+        let images = Self::chat_image_data(&ids);
         if let Some(s) = &self.chat.service {
-            s.send(question, model);
+            s.send(question, images, model);
         }
         true
+    }
+
+    /// Ctrl+V com imagem (e sem texto) na área de transferência: converte numa thread para PNG
+    /// reduzido, grava na pasta das imagens e faz a miniatura.
+    fn chat_attach(&mut self, bytes: Vec<u8>) -> Result<()> {
+        if self.chat.attachments.len() >= MAX_IMAGES {
+            tracing::info!("chat: já há {MAX_IMAGES} imagens na pergunta; a nova foi ignorada");
+            return Ok(());
+        }
+        let id = new_id();
+        self.chat.attachments.push(Attachment { id: id.clone(), thumb: None });
+        let done = self.chat.images_done.clone();
+        let spawned = std::thread::Builder::new().name("zefiro-chat-image".into()).spawn(move || {
+            let result = imaging::to_png(&bytes, MAX_SIDE).map_err(|e| e.to_string()).and_then(|png| {
+                let path = history::image_file(&images_dir(), &id).ok_or("id inválido")?;
+                std::fs::create_dir_all(images_dir()).and_then(|_| std::fs::write(&path, &png)).map_err(|e| e.to_string())?;
+                imaging::decode_bytes(&png, THUMB_PX).ok_or_else(|| "miniatura".to_string())
+            });
+            if let Ok(mut d) = done.lock() {
+                d.push(ImageDone::Pasted { id, thumb: result });
+            }
+            window::post_user(USER_CHAT_IMAGE);
+        });
+        if let Err(e) = spawned {
+            tracing::warn!("chat: não consegui converter a imagem: {e}");
+            self.chat.attachments.pop();
+        }
+        self.redraw_open_panel()
+    }
+
+    /// Tira uma imagem colada antes de enviar (e o arquivo dela).
+    fn chat_unattach(&mut self, index: usize) -> Result<()> {
+        if index < self.chat.attachments.len() {
+            let a = self.chat.attachments.remove(index);
+            if let Some(path) = history::image_file(&images_dir(), &a.id) {
+                let _ = std::fs::remove_file(path);
+            }
+            self.chat.hover = None;
+            self.redraw_open_panel()?;
+        }
+        Ok(())
+    }
+
+    /// Lê numa thread as miniaturas das perguntas que ainda não estão na memória.
+    fn chat_load_thumbs(&mut self, ids: Vec<String>) {
+        let missing: Vec<String> = ids.into_iter().filter(|id| !self.chat.thumbs.contains_key(id) && !self.chat.loading.contains(id)).collect();
+        if missing.is_empty() {
+            return;
+        }
+        self.chat.loading.extend(missing.iter().cloned());
+        let done = self.chat.images_done.clone();
+        let spawned = std::thread::Builder::new().name("zefiro-chat-thumbs".into()).spawn(move || {
+            for id in missing {
+                let image = history::image_file(&images_dir(), &id).and_then(|p| std::fs::read(p).ok()).and_then(|b| imaging::decode_bytes(&b, THUMB_PX));
+                if let Ok(mut d) = done.lock() {
+                    d.push(ImageDone::Thumb { id, image });
+                }
+            }
+            window::post_user(USER_CHAT_IMAGE);
+        });
+        if let Err(e) = spawned {
+            tracing::warn!("chat: não consegui ler as miniaturas: {e}");
+        }
+    }
+
+    /// As threads de imagem terminaram (`USER_CHAT_IMAGE`).
+    pub fn chat_images(&mut self) -> Result<()> {
+        let done = self.chat.images_done.lock().map(|mut d| std::mem::take(&mut *d)).unwrap_or_default();
+        for d in done {
+            match d {
+                ImageDone::Pasted { id, thumb } => match thumb {
+                    Ok(thumb) => {
+                        if let Some(a) = self.chat.attachments.iter_mut().find(|a| a.id == id) {
+                            a.thumb = Some(thumb);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("chat: não consegui converter a imagem colada: {e}");
+                        self.chat.attachments.retain(|a| a.id != id);
+                    }
+                },
+                ImageDone::Thumb { id, image } => {
+                    self.chat.loading.remove(&id);
+                    if let Some(image) = image {
+                        self.chat.thumbs.insert(id, image);
+                    }
+                }
+            }
+        }
+        if self.chat_open() {
+            self.redraw_open_panel()?;
+        }
+        Ok(())
     }
 
     /// O turno acabou (bem ou mal).

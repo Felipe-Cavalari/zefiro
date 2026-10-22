@@ -56,7 +56,7 @@ fn wait_turn(service: &ChatService, c: &mut Conversation, limit: Duration, stop_
 
 fn ask(service: &ChatService, c: &mut Conversation, model: &str, text: &str, stop_after: Option<Duration>) -> Result<(), String> {
     c.ask(text);
-    service.send(text.to_string(), model.to_string());
+    service.send(text.to_string(), Vec::new(), model.to_string());
     let took = wait_turn(service, c, Duration::from_secs(120), stop_after)?;
     let reply = c.messages.last().unwrap();
     println!("  turno em {:.1} s: {:?}, {} caracteres", took.as_secs_f32(), reply.state, reply.text.chars().count());

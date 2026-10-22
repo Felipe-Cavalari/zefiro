@@ -7,5 +7,6 @@ pub mod codex;
 pub mod command;
 pub mod conversation;
 pub mod history;
+pub mod image;
 pub mod origin;
 pub mod protocol;

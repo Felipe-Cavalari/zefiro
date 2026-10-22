@@ -15,7 +15,7 @@ use zefiro_integration_chat::agent::Agent;
 use zefiro_integration_chat::codex::{self, Incoming};
 use zefiro_integration_chat::command::{Session, UserDirs, claude_args, codex_args, windows_candidates, wsl_args, wsl_probe};
 use zefiro_integration_chat::origin::{Choice, Origin, Prefer, choices, pick_error_text, pick_with};
-use zefiro_integration_chat::protocol::{Event, interrupt_line, parse_line, user_line};
+use zefiro_integration_chat::protocol::{Event, interrupt_line, parse_line, user_message};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// Fim do stderr guardado para explicar uma saída sem resposta.
@@ -55,7 +55,7 @@ pub struct Start {
 
 enum Request {
     Start(Start),
-    Send { text: String, model: String },
+    Send { text: String, images: Vec<String>, model: String },
     Interrupt,
     Stop,
     /// Uma linha do `codex app-server`, do processo `generation`.
@@ -104,9 +104,10 @@ impl ChatService {
         let _ = self.tx.send(Request::Start(start));
     }
 
-    /// Uma pergunta. `model`: o do Codex neste turno (o Claude recebe o modelo na partida).
-    pub fn send(&self, text: String, model: String) {
-        let _ = self.tx.send(Request::Send { text, model });
+    /// Uma pergunta, com as imagens PNG em base64. `model`: o do Codex neste turno (o Claude recebe
+    /// o modelo na partida).
+    pub fn send(&self, text: String, images: Vec<String>, model: String) {
+        let _ = self.tx.send(Request::Send { text, images, model });
     }
 
     /// Para a resposta em andamento; o processo continua.
@@ -157,8 +158,11 @@ struct CodexState {
     /// O padrão do `model/list`: vale quando a interface ainda não sabia os modelos (o do
     /// `config.toml` do Codex pode não existir nesta versão).
     default_model: Option<String>,
-    queued: Vec<(String, String)>,
+    queued: Vec<Question>,
 }
+
+/// Pergunta esperando o `thread` do Codex.
+struct Question { text: String, images: Vec<String>, model: String }
 
 impl CodexState {
     fn id(&mut self) -> u64 {
@@ -166,10 +170,10 @@ impl CodexState {
         self.next
     }
 
-    fn turn(&mut self, thread: &str, text: &str, model: &str) -> String {
-        let model = if model.is_empty() { self.default_model.clone().unwrap_or_default() } else { model.to_string() };
+    fn turn(&mut self, thread: &str, q: &Question) -> String {
+        let model = if q.model.is_empty() { self.default_model.clone().unwrap_or_default() } else { q.model.clone() };
         let id = self.id();
-        codex::turn_start(id, thread, text, &model)
+        codex::turn_start(id, thread, &q.text, &q.images, &model)
     }
 }
 
@@ -216,19 +220,20 @@ fn run(rx: Receiver<Request>, back: Sender<Request>, inbox: Arc<Inbox>) {
                     }
                 }
             }
-            Request::Send { text, model } => {
+            Request::Send { text, images, model } => {
                 let Some(r) = &mut running else { continue };
+                let q = Question { text, images, model };
                 match &mut r.backend {
-                    Backend::Claude => r.write(&user_line(&text)),
+                    Backend::Claude => r.write(&user_message(&q.text, &q.images)),
                     Backend::Codex(c) => {
                         let line = match (c.thread.clone(), c.opening) {
-                            (Some(thread), _) => Some(c.turn(&thread, &text, &model)),
+                            (Some(thread), _) => Some(c.turn(&thread, &q)),
                             (None, Some(_)) => {
-                                c.queued.push((text, model));
+                                c.queued.push(q);
                                 None
                             }
                             (None, None) => {
-                                c.queued.push((text, model));
+                                c.queued.push(q);
                                 let id = c.id();
                                 c.opening = Some(id);
                                 Some(codex::thread_start(id))
@@ -287,8 +292,8 @@ fn codex_incoming(r: &mut Running, incoming: Incoming, inbox: &Inbox) {
             match codex::thread_id(&result) {
                 Some(thread) => {
                     inbox.push(generation, Signal::Event(Event::Started { session: thread.clone() }));
-                    for (text, model) in std::mem::take(&mut c.queued) {
-                        lines.push(c.turn(&thread, &text, &model));
+                    for q in std::mem::take(&mut c.queued) {
+                        lines.push(c.turn(&thread, &q));
                     }
                     c.thread = Some(thread);
                 }
@@ -481,4 +486,9 @@ pub fn windows_dir() -> PathBuf {
 /// Pasta das conversas: `%LOCALAPPDATA%\zefiro\chat\conversas`.
 pub fn conversations_dir() -> PathBuf {
     windows_dir().join("conversas")
+}
+
+/// Pasta das imagens coladas: `%LOCALAPPDATA%\zefiro\chat\imagens`.
+pub fn images_dir() -> PathBuf {
+    windows_dir().join("imagens")
 }

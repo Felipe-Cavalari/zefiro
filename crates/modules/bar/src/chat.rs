@@ -6,6 +6,7 @@ use zefiro_integration_chat::conversation::{MAX_PROMPT, Role, State};
 use zefiro_integration_chat::origin::Prefer;
 use zefiro_platform::color::Rgba;
 use zefiro_platform::geometry::{Point, Rect, Size};
+use zefiro_platform::image::Image;
 use zefiro_platform::text::{Align, Family, FontWeight, TextMeasurer, TextStyle};
 use zefiro_resources::tokens::Tokens;
 use zefiro_ui::paint::{DisplayList, DrawOp};
@@ -353,6 +354,11 @@ const GLYPH_HISTORY: &str = "\u{E81C}";
 const GLYPH_CHEVRON: &str = "\u{E70D}";
 const GLYPH_BACK: &str = "\u{E72B}";
 const GLYPH_DELETE: &str = "\u{E74D}";
+const GLYPH_REMOVE: &str = "\u{E711}";
+/// Miniaturas no campo (quadradas) e altura das imagens no balão da pergunta.
+const ATTACH: f32 = 56.0;
+const PICTURE_H: f32 = 72.0;
+const PICTURE_GAP: f32 = 6.0;
 
 pub fn text_style(scale: f32) -> TextStyle {
     TextStyle { size: TEXT * scale, weight: FontWeight::Regular, family: Family::Text }
@@ -377,8 +383,24 @@ pub fn history_max_scroll(count: usize) -> usize {
     count.saturating_sub(HISTORY_VISIBLE)
 }
 
-/// Uma mensagem como o painel desenha.
-pub struct MessageView<'a> { pub role: Role, pub state: State, pub wrapped: &'a Wrapped, pub note: Option<&'a str> }
+/// Uma mensagem como o painel desenha. `images`: as da pergunta (`None` = ainda carregando).
+pub struct MessageView<'a> { pub role: Role, pub state: State, pub wrapped: &'a Wrapped, pub note: Option<&'a str>, pub images: &'a [Option<Image>] }
+
+/// `rect` reduzido para caber em `cell` mantendo a proporção da imagem, centrado.
+fn fit(image: &Image, cell: Rect) -> Rect {
+    let s = (cell.w / image.width() as f32).min(cell.h / image.height() as f32);
+    let (w, h) = (image.width() as f32 * s, image.height() as f32 * s);
+    Rect::new(cell.x + (cell.w - w) / 2.0, cell.y + (cell.h - h) / 2.0, w, h)
+}
+
+/// Largura de cada imagem no balão (altura fixa, proporção mantida, entre 40 e 160 DIP).
+fn picture_widths(images: &[Option<Image>], scale: f32) -> Vec<f32> {
+    images.iter().map(|i| i.as_ref().map_or(PICTURE_H, |i| (PICTURE_H * i.width() as f32 / i.height() as f32).clamp(40.0, 160.0)) * scale).collect()
+}
+
+fn has_text(m: &MessageView) -> bool {
+    !m.wrapped.lines.iter().all(|l| l.is_empty())
+}
 
 /// Uma linha das conversas antigas: o título e "Codex · Ubuntu · 21/10 20:37".
 #[derive(Debug, Clone, PartialEq)]
@@ -394,13 +416,15 @@ pub enum Page<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Hit { Send, Stop, NewChat, History, Back, Agent(Agent), Origins, Models, Pick(usize), Prefer(Prefer), Open(usize), Delete(usize), Copy(usize), Field }
+pub enum Hit { Send, Stop, NewChat, History, Back, Agent(Agent), Origins, Models, Pick(usize), Prefer(Prefer), Open(usize), Delete(usize), Copy(usize), Unattach(usize), Field }
 
 pub struct ChatView<'a> {
     pub messages: &'a [MessageView<'a>],
     pub field: &'a Field,
     /// Linhas do campo, quebradas em [`field_text_width`].
     pub field_lines: &'a [Line],
+    /// Imagens coladas esperando o envio (`None` = convertendo).
+    pub attachments: &'a [Option<Image>],
     pub agent: Agent,
     /// Seletores: a origem ("Automático", "Windows", a distro) e o modelo.
     pub origin: &'a str,
@@ -435,8 +459,11 @@ fn message_h(m: &MessageView, scale: f32, note_lines: usize) -> f32 {
     if bubbleless(m) {
         return (note_lines as f32 * 16.0 + 4.0) * scale;
     }
-    let lines = if m.state.busy() && m.wrapped.lines.iter().all(|l| l.is_empty()) { 1 } else { m.wrapped.lines.len().max(1) };
+    let lines = if m.state.busy() && !has_text(m) { 1 } else if !has_text(m) && !m.images.is_empty() { 0 } else { m.wrapped.lines.len().max(1) };
     let mut h = lines as f32 * LINE + 2.0 * PAD_Y;
+    if !m.images.is_empty() {
+        h += PICTURE_H + if lines > 0 { PICTURE_GAP } else { 0.0 };
+    }
     if m.role == Role::Claude {
         h += note_lines as f32 * 16.0;
         if !m.state.busy() {
@@ -668,11 +695,24 @@ fn chat_page(view: &ChatView, mut ops: Vec<DrawOp>, mut hits: Vec<(Rect, Hit)>, 
     let shown = lines.len().clamp(1, FIELD_LINES);
     let at = caret_line(lines, view.field.caret);
     let first = (at + 1).saturating_sub(FIELD_LINES).min(lines.len().saturating_sub(shown));
-    let field = Rect::new(px(10.0), area.bottom() + px(10.0), w - px(20.0), shown as f32 * line + px(2.0 * 9.0));
+    let attach_h = if view.attachments.is_empty() { 0.0 } else { px(ATTACH + 8.0) };
+    let field = Rect::new(px(10.0), area.bottom() + px(10.0), w - px(20.0), shown as f32 * line + px(2.0 * 9.0) + attach_h);
     ops.push(DrawOp::RoundRect { rect: field, radius: px(14.0), color: tokens.raised });
     hits.push((field, Hit::Field));
+    for (i, image) in view.attachments.iter().enumerate() {
+        let cell = Rect::new(field.x + px(10.0) + i as f32 * px(ATTACH + 8.0), field.y + px(9.0), px(ATTACH), px(ATTACH));
+        ops.push(DrawOp::RoundRect { rect: cell, radius: px(8.0), color: tokens.raised_strong });
+        if let Some(image) = image {
+            ops.push(DrawOp::Image { rect: fit(image, cell), image: image.clone(), radius: px(6.0), opacity: 1.0 });
+        }
+        let x = Rect::new(cell.right() - px(18.0), cell.y - px(4.0), px(22.0), px(22.0));
+        let hovered = view.hover == Some(Hit::Unattach(i));
+        ops.push(DrawOp::Circle { center: Point { x: x.x + x.w / 2.0, y: x.y + x.h / 2.0 }, radius: px(9.0), color: if hovered { tokens.accent } else { tokens.raised_strong } });
+        ops.push(DrawOp::Text { rect: x, text: GLYPH_REMOVE.into(), style: icons(8.0), color: if hovered { on_accent(tokens) } else { tokens.text }, align: Align::Center });
+        hits.insert(0, (x, Hit::Unattach(i)));
+    }
     let tx = field.x + px(12.0);
-    let ty = field.y + px(9.0);
+    let ty = field.y + px(9.0) + attach_h;
     let tw = field_text_width(scale);
     let busy = view.messages.last().is_some_and(|m| m.role == Role::Claude && m.state.busy());
     if view.field.text.is_empty() {
@@ -695,7 +735,8 @@ fn chat_page(view: &ChatView, mut ops: Vec<DrawOp>, mut hits: Vec<(Rect, Hit)>, 
         ops.push(DrawOp::RoundRect { rect: Rect::new(cx, cy + px(2.0), px(1.5), line - px(4.0)), radius: px(0.75), color: tokens.accent });
     }
     let button = Rect::new(field.right() - px(6.0 + 30.0), field.bottom() - px(6.0 + 30.0), px(30.0), px(30.0));
-    let (glyph, hit, lit) = if busy { (GLYPH_STOP, Hit::Stop, true) } else { (GLYPH_SEND, Hit::Send, !view.field.is_blank()) };
+    let attachments_ready = view.attachments.iter().all(Option::is_some);
+    let (glyph, hit, lit) = if busy { (GLYPH_STOP, Hit::Stop, true) } else { (GLYPH_SEND, Hit::Send, attachments_ready && (!view.field.is_blank() || !view.attachments.is_empty())) };
     let hovered = view.hover == Some(hit);
     let fill = if lit { if hovered { tokens.accent } else { tokens.accent.with_alpha(tokens.accent.a * 0.85) } } else { tokens.raised_strong };
     ops.push(DrawOp::RoundRect { rect: button, radius: button.h / 2.0, color: fill });
@@ -725,11 +766,14 @@ fn draw_message(ops: &mut Vec<DrawOp>, hits: &mut Vec<(Rect, Hit)>, view: &ChatV
         }
         return;
     }
-    let waiting = msg.state.busy() && msg.wrapped.lines.iter().all(|l| l.is_empty());
-    let lines = if waiting { 1 } else { msg.wrapped.lines.len().max(1) };
+    let waiting = msg.state.busy() && !has_text(msg);
+    let lines = if waiting { 1 } else if !has_text(msg) && !msg.images.is_empty() { 0 } else { msg.wrapped.lines.len().max(1) };
+    let pictures = picture_widths(msg.images, scale);
+    let pictures_w = pictures.iter().sum::<f32>() + px(PICTURE_GAP) * pictures.len().saturating_sub(1) as f32;
+    let pictures_h = if msg.images.is_empty() { 0.0 } else { px(PICTURE_H) + if lines > 0 { px(PICTURE_GAP) } else { 0.0 } };
     let text_w = if msg.role == Role::User { msg.wrapped.widths.iter().copied().fold(0.0, f32::max).ceil() } else { text_width(Role::Claude, scale) };
-    let bubble_w = (text_w + px(2.0 * PAD_X)).min(w - px(24.0));
-    let bubble_h = lines as f32 * line + px(2.0 * PAD_Y);
+    let bubble_w = (text_w.max(pictures_w) + px(2.0 * PAD_X)).min(w - px(24.0));
+    let bubble_h = lines as f32 * line + px(2.0 * PAD_Y) + pictures_h;
     let x = if msg.role == Role::User { w - px(12.0) - bubble_w } else { px(12.0) };
     let bubble = Rect::new(x, y, bubble_w, bubble_h);
     let (fill, color) = match msg.role {
@@ -738,6 +782,16 @@ fn draw_message(ops: &mut Vec<DrawOp>, hits: &mut Vec<(Rect, Hit)>, view: &ChatV
     };
     ops.push(DrawOp::RoundRect { rect: bubble, radius: px(12.0), color: fill });
     let tx = bubble.x + px(PAD_X);
+    let mut px_x = tx;
+    for (image, pw) in msg.images.iter().zip(&pictures) {
+        let cell = Rect::new(px_x, bubble.y + px(PAD_Y), *pw, px(PICTURE_H));
+        match image {
+            Some(i) => ops.push(DrawOp::Image { rect: fit(i, cell), image: i.clone(), radius: px(8.0), opacity: 1.0 }),
+            None => ops.push(DrawOp::RoundRect { rect: cell, radius: px(8.0), color: tokens.raised_strong }),
+        }
+        px_x += pw + px(PICTURE_GAP);
+    }
+    let bubble = Rect::new(bubble.x, bubble.y + pictures_h, bubble.w, bubble.h - pictures_h);
     if waiting {
         let label = if msg.state == State::Thinking { "Pensando…" } else { "…" };
         ops.push(DrawOp::Text { rect: Rect::new(tx, bubble.y + px(PAD_Y), bubble.w - px(2.0 * PAD_X), line), text: label.into(), style: body, color: tokens.text_tertiary, align: Align::Leading });
@@ -961,7 +1015,64 @@ mod tests {
     }
 
     fn view<'a>(messages: &'a [MessageView<'a>], field: &'a Field, lines: &'a [Line], page: Page<'a>) -> ChatView<'a> {
-        ChatView { messages, field, field_lines: lines, agent: Agent::Claude, origin: "Windows", model: "Sonnet", status: Some("iniciando…"), page, scroll: 0.0, hover: None, copied: None }
+        ChatView { messages, field, field_lines: lines, attachments: &[], agent: Agent::Claude, origin: "Windows", model: "Sonnet", status: Some("iniciando…"), page, scroll: 0.0, hover: None, copied: None }
+    }
+
+    fn img(w: u32, h: u32) -> Image {
+        Image::new(w, h, vec![255; (w * h * 4) as usize]).unwrap()
+    }
+
+    fn images(l: &ChatLayout) -> Vec<Rect> {
+        l.list.ops.iter().filter_map(|o| if let DrawOp::Image { rect, .. } = o { Some(*rect) } else { None }).collect()
+    }
+
+    #[test]
+    fn attachments_sit_in_the_field_and_can_be_removed() {
+        let f = Field::default();
+        let lines = wrap("", field_text_width(1.0), &text_style(1.0), &FixedWidthMeasurer);
+        let plain = chat_panel(&view(&[], &f, &lines, Page::Chat), 1.0, &tokens(), &FixedWidthMeasurer);
+        let atts = [Some(img(200, 100)), None];
+        let mut v = view(&[], &f, &lines, Page::Chat);
+        v.attachments = &atts;
+        let l = chat_panel(&v, 1.0, &tokens(), &FixedWidthMeasurer);
+        assert!(l.list.size.h > plain.list.size.h, "as miniaturas fazem o campo crescer");
+        let shown = images(&l);
+        assert_eq!(shown.len(), 1, "a que ainda está convertendo não tem imagem");
+        assert!((shown[0].w / shown[0].h - 2.0).abs() < 0.05, "mantém a proporção");
+        assert!(has(&l, Hit::Unattach(0)) && has(&l, Hit::Unattach(1)));
+        let field = l.hits.iter().find(|(_, h)| *h == Hit::Field).unwrap().0;
+        assert!(field.contains(Point { x: shown[0].x + 1.0, y: shown[0].y + 1.0 }), "dentro do campo");
+        let x = l.hits.iter().find(|(_, h)| *h == Hit::Unattach(0)).unwrap().0;
+        assert_eq!(l.hit(Point { x: x.x + x.w / 2.0, y: x.y + x.h / 2.0 }), Some(Hit::Unattach(0)), "o × ganha do campo");
+        assert!(!has(&l, Hit::Stop));
+        let send_lit = |l: &ChatLayout| {
+            let r = l.hits.iter().find(|(_, h)| *h == Hit::Send).unwrap().0;
+            l.list.ops.iter().any(|o| matches!(o, DrawOp::RoundRect { rect, color, .. } if *rect == r && *color != tokens().raised_strong))
+        };
+        assert!(!send_lit(&l), "imagem ainda convertendo: não envia");
+        let ready = [Some(img(50, 50))];
+        v.attachments = &ready;
+        assert!(send_lit(&chat_panel(&v, 1.0, &tokens(), &FixedWidthMeasurer)), "só a imagem já basta para enviar");
+    }
+
+    #[test]
+    fn question_images_show_in_the_bubble() {
+        let text_only = wrapped("Que número é este?");
+        let blank = Wrapped { lines: vec![String::new()], widths: vec![0.0] };
+        let pics = [Some(img(160, 90))];
+        let with_text = [MessageView { role: Role::User, state: State::Done, wrapped: &text_only, note: None, images: &pics }];
+        let only_image = [MessageView { role: Role::User, state: State::Done, wrapped: &blank, note: None, images: &pics }];
+        let no_image = [MessageView { role: Role::User, state: State::Done, wrapped: &text_only, note: None, images: &[] }];
+        let a = panel(&with_text, &Field::default(), 0.0);
+        let b = panel(&only_image, &Field::default(), 0.0);
+        let c = panel(&no_image, &Field::default(), 0.0);
+        assert_eq!(images(&a).len(), 1);
+        assert!(texts(&a.list).contains(&"Que número é este?".to_string()));
+        assert!(a.list.size.h > c.list.size.h, "a imagem ocupa espaço no balão");
+        assert!(b.list.size.h < a.list.size.h, "só imagem: sem a linha de texto");
+        let bubble = a.list.ops.iter().find_map(|o| if let DrawOp::RoundRect { rect, color, .. } = o { (*color == tokens().accent_soft).then_some(*rect) } else { None }).unwrap();
+        let pic = images(&a)[0];
+        assert!(bubble.contains(Point { x: pic.x + 1.0, y: pic.y + 1.0 }) && pic.right() <= bubble.right(), "a imagem fica dentro do balão");
     }
 
     fn panel(messages: &[MessageView], field: &Field, scroll: f32) -> ChatLayout {
@@ -1062,7 +1173,7 @@ mod tests {
     fn conversation_with_waiting_reply_shows_stop_and_thinking() {
         let q = wrapped("Qual a capital do Peru?");
         let a = Wrapped::default();
-        let msgs = [MessageView { role: Role::User, state: State::Done, wrapped: &q, note: None }, MessageView { role: Role::Claude, state: State::Thinking, wrapped: &a, note: None }];
+        let msgs = [MessageView { role: Role::User, state: State::Done, wrapped: &q, note: None, images: &[] }, MessageView { role: Role::Claude, state: State::Thinking, wrapped: &a, note: None, images: &[] }];
         let l = panel(&msgs, &Field::default(), 0.0);
         let t = texts(&l.list);
         assert!(t.contains(&"Qual a capital do Peru?".to_string()) && t.contains(&"Pensando…".to_string()));
@@ -1073,7 +1184,7 @@ mod tests {
     #[test]
     fn failed_reply_without_text_is_just_the_note() {
         let a = Wrapped { lines: vec![String::new()], widths: vec![0.0] };
-        let msgs = [MessageView { role: Role::Claude, state: State::Failed, wrapped: &a, note: Some("Entre no Claude Code.") }];
+        let msgs = [MessageView { role: Role::Claude, state: State::Failed, wrapped: &a, note: Some("Entre no Claude Code."), images: &[] }];
         let l = panel(&msgs, &Field::default(), 0.0);
         assert!(texts(&l.list).contains(&"Entre no Claude Code.".to_string()));
         assert!(!l.hits.iter().any(|(_, h)| matches!(h, Hit::Copy(_))));
@@ -1091,7 +1202,7 @@ mod tests {
     #[test]
     fn finished_reply_has_copy_and_note() {
         let a = wrapped("Lima.");
-        let msgs = [MessageView { role: Role::Claude, state: State::Stopped, wrapped: &a, note: Some("Resposta interrompida.") }];
+        let msgs = [MessageView { role: Role::Claude, state: State::Stopped, wrapped: &a, note: Some("Resposta interrompida."), images: &[] }];
         let l = panel(&msgs, &Field::default(), 0.0);
         assert!(texts(&l.list).contains(&"Resposta interrompida.".to_string()));
         assert!(l.hits.iter().any(|(_, h)| *h == Hit::Copy(0)));
@@ -1101,7 +1212,7 @@ mod tests {
     fn long_conversation_scrolls_and_culls() {
         let text = (0..60).map(|i| format!("linha {i}")).collect::<Vec<_>>().join("\n");
         let a = wrapped(&text);
-        let msgs = [MessageView { role: Role::Claude, state: State::Done, wrapped: &a, note: None }];
+        let msgs = [MessageView { role: Role::Claude, state: State::Done, wrapped: &a, note: None, images: &[] }];
         let bottom = panel(&msgs, &Field::default(), 0.0);
         assert!(bottom.max_scroll > 0.0);
         assert!(bottom.list.size.h < AREA_Y + MAX_AREA + 120.0, "a área não passa do máximo");

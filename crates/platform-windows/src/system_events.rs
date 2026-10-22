@@ -3,8 +3,8 @@
 //! avisos assíncronos: nada entra na cadeia de entrada do teclado como um hook faria.
 
 use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND, LPARAM};
-use windows::Win32::System::DataExchange::{AddClipboardFormatListener, CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, RemoveClipboardFormatListener, SetClipboardData};
-use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
+use windows::Win32::System::DataExchange::{AddClipboardFormatListener, CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW, RemoveClipboardFormatListener, SetClipboardData};
+use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock};
 use windows::Win32::System::Ole::CF_UNICODETEXT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CAPITAL, VK_CONTROL, VK_NUMLOCK, VK_SHIFT};
 use windows::Win32::UI::Input::{GetRawInputData, HRAWINPUT, RAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RID_INPUT, RIDEV_INPUTSINK, RIDEV_REMOVE, RIM_TYPEKEYBOARD, RegisterRawInputDevices};
@@ -74,6 +74,77 @@ fn open_clipboard(owner: Option<HWND>) -> bool {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     false
+}
+
+/// Maior imagem colada aceita (bytes).
+const MAX_IMAGE_BYTES: usize = 32 * 1024 * 1024;
+
+/// Bytes de um formato da área de transferência (já aberta).
+fn clipboard_bytes(format: u32) -> Option<Vec<u8>> {
+    // SAFETY: a área está aberta pelo chamador; o bloco é lido entre GlobalLock e GlobalUnlock,
+    // dentro do tamanho que o GlobalSize informa.
+    unsafe {
+        let h = GetClipboardData(format).ok()?;
+        let global = HGLOBAL(h.0);
+        let size = GlobalSize(global);
+        if size == 0 || size > MAX_IMAGE_BYTES {
+            return None;
+        }
+        let ptr = GlobalLock(global) as *const u8;
+        if ptr.is_null() {
+            return None;
+        }
+        let bytes = std::slice::from_raw_parts(ptr, size).to_vec();
+        let _ = GlobalUnlock(global);
+        Some(bytes)
+    }
+}
+
+/// O primeiro arquivo de imagem copiado no Explorer (`CF_HDROP`), lido do disco.
+fn clipboard_image_file() -> Option<Vec<u8>> {
+    use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
+    const CF_HDROP: u32 = 15;
+    // SAFETY: a área está aberta pelo chamador; o HDROP é dela e só é consultado aqui.
+    let path = unsafe {
+        let h = GetClipboardData(CF_HDROP).ok()?;
+        let drop = HDROP(h.0);
+        let mut buf = [0u16; 1024];
+        let n = DragQueryFileW(drop, 0, Some(&mut buf));
+        String::from_utf16_lossy(&buf[..n as usize])
+    };
+    if !zefiro_integration_chat::image::is_image_file(&path) {
+        return None;
+    }
+    let meta = std::fs::metadata(&path).ok()?;
+    if meta.len() as usize > MAX_IMAGE_BYTES {
+        return None;
+    }
+    std::fs::read(&path).ok()
+}
+
+/// Imagem na área de transferência, como arquivo (PNG, JPG… ou BMP): o formato "PNG" (prints e
+/// navegadores), um arquivo de imagem copiado no Explorer ou o `CF_DIB`. `None` sem imagem.
+pub fn clipboard_image() -> Option<Vec<u8>> {
+    const CF_DIB: u32 = 8;
+    if !open_clipboard(None) {
+        return None;
+    }
+    // SAFETY: registra (ou acha) o nome de formato "PNG"; sem ponteiros guardados.
+    let png = unsafe { RegisterClipboardFormatW(windows::core::w!("PNG")) };
+    // SAFETY: consultas de formato com a área aberta.
+    let has = |f: u32| unsafe { IsClipboardFormatAvailable(f) }.is_ok();
+    let bytes = if png != 0 && has(png) {
+        clipboard_bytes(png)
+    } else if has(15) {
+        clipboard_image_file()
+    } else if has(CF_DIB) {
+        clipboard_bytes(CF_DIB).and_then(|dib| zefiro_integration_chat::image::dib_to_bmp(&dib))
+    } else {
+        None
+    };
+    // SAFETY: par do OpenClipboard acima.
+    let _ = unsafe { CloseClipboard() };
+    bytes
 }
 
 /// Texto da área de transferência, cru, até `max_units` unidades UTF-16.

@@ -35,12 +35,25 @@ pub fn load(dir: &Path, id: &str) -> Option<Conversation> {
     Conversation::from_json(&text).filter(|c| c.id == id)
 }
 
-/// Apaga a cópia do Zefiro (a sessão do `claude`/`codex` fica onde está).
-pub fn delete(dir: &Path, id: &str) -> std::io::Result<()> {
+/// Apaga a cópia do Zefiro e as imagens dela em `images` (a sessão do `claude`/`codex` fica onde
+/// está).
+pub fn delete(dir: &Path, images: &Path, id: &str) -> std::io::Result<()> {
+    if let Some(c) = load(dir, id) {
+        for img in c.images() {
+            if let Some(path) = image_file(images, img) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
     match file(dir, id).map(std::fs::remove_file) {
         Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
         _ => Ok(()),
     }
+}
+
+/// O PNG de uma imagem colada.
+pub fn image_file(images: &Path, id: &str) -> Option<PathBuf> {
+    safe(id).then(|| images.join(format!("{id}.png")))
 }
 
 /// As conversas com alguma pergunta, da mais recente para a mais antiga.
@@ -98,8 +111,16 @@ mod tests {
         assert_eq!((l[1].title.as_str(), l[1].agent, l[1].origin.as_str()), ("Primeira pergunta", Agent::Claude, "Windows"));
         assert_eq!(load(&d, "a-1").unwrap().messages.len(), 2);
         assert_eq!(latest(&d).unwrap().id, "b-2");
-        delete(&d, "b-2").unwrap();
-        delete(&d, "nao-existe").unwrap();
+        let imgs = dir.path().join("imagens");
+        std::fs::create_dir_all(&imgs).unwrap();
+        let mut with_image = conv("d-4", Agent::Claude, "", 5);
+        with_image.ask_with("veja", vec!["img-1".into()]);
+        save(&d, &with_image).unwrap();
+        std::fs::write(image_file(&imgs, "img-1").unwrap(), b"png").unwrap();
+        delete(&d, &imgs, "d-4").unwrap();
+        assert!(!imgs.join("img-1.png").exists(), "as imagens vão junto");
+        delete(&d, &imgs, "b-2").unwrap();
+        delete(&d, &imgs, "nao-existe").unwrap();
         assert_eq!(list(&d).len(), 1);
     }
 
