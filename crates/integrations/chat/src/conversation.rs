@@ -34,7 +34,8 @@ pub struct Message {
     /// Aviso abaixo da resposta ("Resposta interrompida.", o erro).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
-    /// Imagens coladas na pergunta (ids dos PNGs na pasta das imagens do chat).
+    /// Imagens coladas na pergunta ou geradas na resposta (ids dos PNGs na pasta das imagens do
+    /// chat).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<String>,
 }
@@ -66,6 +67,12 @@ pub struct Conversation {
     pub messages: Vec<Message>,
     #[serde(skip)]
     stopping: bool,
+    /// Codex: a mensagem do agente que está chegando (um turno pode ter várias).
+    #[serde(skip)]
+    item: Option<String>,
+    /// Imagens sendo geradas neste turno.
+    #[serde(skip)]
+    generating: usize,
 }
 
 impl Conversation {
@@ -109,6 +116,8 @@ impl Conversation {
             return false;
         }
         self.stopping = false;
+        self.item = None;
+        self.generating = 0;
         self.messages.push(Message { role: Role::User, text: text.chars().take(MAX_PROMPT).collect(), state: State::Done, note: None, images });
         self.messages.push(Message { role: Role::Claude, text: String::new(), state: State::Waiting, note: None, images: Vec::new() });
         true
@@ -119,6 +128,36 @@ impl Conversation {
         match self.messages.as_slice() {
             [.., question, reply] if question.role == Role::User && reply.state == State::Waiting && reply.text.is_empty() => Some(question),
             _ => None,
+        }
+    }
+
+    /// Há imagem sendo gerada na resposta em andamento.
+    pub fn generating(&self) -> bool {
+        self.generating > 0 && self.busy()
+    }
+
+    /// Imagem gerada (já gravada com este id) entra na resposta em andamento. `false` sem resposta.
+    pub fn add_reply_image(&mut self, id: String) -> bool {
+        let Some(m) = self.reply_mut() else { return false };
+        m.images.push(id);
+        if m.state == State::Waiting || m.state == State::Thinking {
+            m.state = State::Streaming;
+        }
+        self.generating = self.generating.saturating_sub(1);
+        true
+    }
+
+    /// Outra mensagem do agente no mesmo turno: uma linha em branco antes dela.
+    fn next_item(&mut self, item: Option<&String>) {
+        let Some(item) = item else { return };
+        if self.item.as_ref() == Some(item) {
+            return;
+        }
+        self.item = Some(item.clone());
+        if let Some(m) = self.reply_mut()
+            && !m.text.is_empty()
+        {
+            m.text.push_str("\n\n");
         }
     }
 
@@ -145,30 +184,56 @@ impl Conversation {
                 }
                 _ => false,
             },
-            Event::Delta(text) => match self.reply_mut() {
-                Some(m) => {
+            Event::Delta { text, item } => {
+                if self.reply_mut().is_none() {
+                    return false;
+                }
+                self.next_item(item.as_ref());
+                let Some(m) = self.reply_mut() else { return false };
+                m.text.push_str(text);
+                m.state = State::Streaming;
+                true
+            }
+            // Mensagem inteira de um item que não mandou pedaços (no Codex, outra mensagem do turno).
+            Event::Assistant { text, item: Some(item) } if self.reply_mut().is_some() && self.item.as_ref() != Some(item) => {
+                self.next_item(Some(item));
+                if let Some(m) = self.reply_mut() {
                     m.text.push_str(text);
                     m.state = State::Streaming;
-                    true
                 }
-                None => false,
-            },
-            Event::Assistant(text) | Event::Finished { text: Some(text), error: None } if self.reply_mut().is_some_and(|m| m.text.is_empty()) => {
+                true
+            }
+            Event::Assistant { text, .. } | Event::Finished { text: Some(text), error: None } if self.reply_mut().is_some_and(|m| m.text.is_empty()) => {
                 let finished = matches!(event, Event::Finished { .. });
                 if let Some(m) = self.reply_mut() {
                     m.text.clone_from(text);
                     m.state = if finished { State::Done } else { State::Streaming };
                 }
+                if finished {
+                    self.generating = 0;
+                }
                 true
             }
-            Event::Finished { error: None, .. } => match self.reply_mut() {
-                Some(m) => {
-                    m.state = State::Done;
-                    true
+            Event::Finished { error: None, .. } => {
+                self.generating = 0;
+                match self.reply_mut() {
+                    Some(m) => {
+                        m.state = State::Done;
+                        true
+                    }
+                    None => false,
                 }
-                None => false,
-            },
-            Event::Assistant(_) | Event::Finished { .. } | Event::Turn(_) | Event::Models(_) | Event::Other => false,
+            }
+            Event::ImageStarted if self.busy() => {
+                self.generating += 1;
+                true
+            }
+            Event::ImageFailed if self.generating > 0 => {
+                self.generating -= 1;
+                true
+            }
+            // A imagem gerada entra pela [`Conversation::add_reply_image`], depois de gravada.
+            Event::Assistant { .. } | Event::Finished { .. } | Event::ImageStarted | Event::ImageFailed | Event::Image { .. } | Event::Turn(_) | Event::Models(_) | Event::Other => false,
         }
     }
 
@@ -180,6 +245,7 @@ impl Conversation {
     /// O turno acabou com erro (ou o processo caiu no meio).
     pub fn fail(&mut self, failure: &Failure) {
         let stopping = std::mem::take(&mut self.stopping);
+        self.generating = 0;
         if let Some(m) = self.reply_mut() {
             if stopping || *failure == Failure::Interrupted {
                 m.state = State::Stopped;
@@ -221,6 +287,18 @@ impl Conversation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn delta(text: &str) -> Event {
+        Event::Delta { text: text.into(), item: None }
+    }
+
+    fn assistant(text: &str) -> Event {
+        Event::Assistant { text: text.into(), item: None }
+    }
+
+    fn item_delta(item: &str, text: &str) -> Event {
+        Event::Delta { text: text.into(), item: Some(item.into()) }
+    }
 
     fn asked() -> Conversation {
         let mut c = Conversation::new("s1".into(), Agent::Claude);
@@ -270,21 +348,63 @@ mod tests {
         assert!(c.created);
         assert!(c.apply(&Event::Thinking));
         assert_eq!(c.messages[1].state, State::Thinking);
-        assert!(c.apply(&Event::Delta("Li".into())));
-        assert!(c.apply(&Event::Delta("ma".into())));
+        assert!(c.apply(&delta("Li")));
+        assert!(c.apply(&delta("ma")));
         assert_eq!(c.unanswered(), None, "já começou");
         assert!(!c.apply(&Event::Thinking), "pensando depois do texto não muda nada");
-        assert!(!c.apply(&Event::Assistant("Lima".into())), "o texto completo repete os pedaços");
+        assert!(!c.apply(&assistant("Lima")), "o texto completo repete os pedaços");
         assert!(c.apply(&Event::Finished { text: Some("Lima".into()), error: None }));
         assert_eq!((c.messages[1].text.as_str(), c.messages[1].state), ("Lima", State::Done));
         assert!(!c.busy());
-        assert!(!c.apply(&Event::Delta("x".into())), "nada chega fora de um turno");
+        assert!(!c.apply(&delta("x")), "nada chega fora de um turno");
+    }
+
+    #[test]
+    fn codex_messages_in_one_turn_get_a_blank_line_between_them() {
+        let mut c = asked();
+        assert!(c.apply(&item_delta("m1", "Vou gerar a ")));
+        assert!(c.apply(&item_delta("m1", "imagem.")));
+        assert!(!c.apply(&Event::Assistant { text: "Vou gerar a imagem.".into(), item: Some("m1".into()) }), "o texto completo repete os pedaços");
+        assert!(c.apply(&item_delta("m2", "Pronto!")));
+        assert_eq!(c.messages[1].text, "Vou gerar a imagem.\n\nPronto!");
+        // Uma mensagem que chega inteira, sem pedaços, também vai separada.
+        assert!(c.apply(&Event::Assistant { text: "Mais uma.".into(), item: Some("m3".into()) }));
+        assert_eq!(c.messages[1].text, "Vou gerar a imagem.\n\nPronto!\n\nMais uma.");
+        c.apply(&Event::Finished { text: None, error: None });
+        assert!(c.ask("outra"));
+        assert!(c.apply(&item_delta("m3", "Oi")), "o item da resposta anterior não conta");
+        assert_eq!(c.messages[3].text, "Oi");
+    }
+
+    #[test]
+    fn generated_images_join_the_reply() {
+        let mut c = Conversation::new("s".into(), Agent::Codex);
+        c.ask("um bonsai");
+        assert!(!c.generating());
+        assert!(c.apply(&Event::ImageStarted));
+        assert!(c.generating());
+        assert!(c.add_reply_image("gen-1".into()));
+        assert!(!c.generating(), "a imagem chegou");
+        c.apply(&item_delta("m1", "Pronto!"));
+        c.apply(&Event::Finished { text: None, error: None });
+        assert_eq!(c.messages[1].images, ["gen-1"]);
+        assert_eq!(c.images().collect::<Vec<_>>(), ["gen-1"], "apagar a conversa apaga a imagem");
+        assert!(!c.add_reply_image("gen-2".into()), "fora de um turno não há resposta");
+        let back = Conversation::from_json(&c.to_json()).unwrap();
+        assert_eq!(back.messages[1].images, ["gen-1"], "volta ao reabrir");
+        c.ask("outra");
+        c.apply(&Event::ImageStarted);
+        assert!(c.apply(&Event::ImageFailed));
+        assert!(!c.generating());
+        c.apply(&Event::ImageStarted);
+        c.apply(&Event::Finished { text: None, error: None });
+        assert!(!c.generating(), "o fim do turno encerra a espera");
     }
 
     #[test]
     fn reply_without_partials_comes_from_assistant_or_result() {
         let mut c = asked();
-        assert!(c.apply(&Event::Assistant("Lima".into())));
+        assert!(c.apply(&assistant("Lima")));
         assert_eq!(c.messages[1].state, State::Streaming);
         assert!(c.apply(&Event::Finished { text: None, error: None }));
         assert_eq!((c.messages[1].text.as_str(), c.messages[1].state), ("Lima", State::Done));
@@ -296,7 +416,7 @@ mod tests {
     #[test]
     fn stop_keeps_the_text_and_notes_it() {
         let mut c = asked();
-        c.apply(&Event::Delta("Li".into()));
+        c.apply(&delta("Li"));
         c.stop_requested();
         c.fail(&Failure::Other("error_during_execution".into()));
         assert_eq!((c.messages[1].text.as_str(), c.messages[1].state), ("Li", State::Stopped));
@@ -316,7 +436,7 @@ mod tests {
     #[test]
     fn last_reply_skips_empty_ones() {
         let mut c = asked();
-        c.apply(&Event::Delta("Lima".into()));
+        c.apply(&delta("Lima"));
         c.apply(&Event::Finished { text: None, error: None });
         c.ask("e do Chile?");
         c.fail(&Failure::UsageLimit);
@@ -328,7 +448,7 @@ mod tests {
         let mut c = asked();
         c.origin = "Windows".into();
         c.apply(&Event::Started { session: "s1".into() });
-        c.apply(&Event::Delta("Li".into()));
+        c.apply(&delta("Li"));
         let back = Conversation::from_json(&c.to_json()).unwrap();
         assert_eq!((back.session.as_str(), back.created, back.origin.as_str()), ("s1", true, "Windows"));
         assert_eq!((back.messages[1].text.as_str(), back.messages[1].state), ("Li", State::Stopped), "chegando quando o Zefiro fechou");

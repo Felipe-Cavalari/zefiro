@@ -43,8 +43,8 @@ fn run() -> Result<(), String> {
         for s in service.take() {
             match s {
                 Signal::Ready { origin } => println!("pronto em {origin}"),
-                Signal::Event(Event::Delta(d)) => reply.push_str(&d),
-                Signal::Event(Event::Assistant(t)) if reply.is_empty() => reply = t,
+                Signal::Event(Event::Delta { text, .. }) => reply.push_str(&text),
+                Signal::Event(Event::Assistant { text, .. }) if reply.is_empty() => reply = text,
                 Signal::Event(Event::Finished { error: Some(e), .. }) => return Err(e),
                 Signal::Event(Event::Finished { .. }) => {
                     println!("resposta em {:.1} s: {reply}", started.elapsed().as_secs_f32());

@@ -73,6 +73,19 @@ pub fn error_text(message: &str) -> String {
         .unwrap_or_else(|| message.to_string())
 }
 
+fn item_id(v: &Value) -> Option<String> {
+    v.as_str().filter(|s| !s.is_empty()).map(str::to_string)
+}
+
+/// O `ImageGenerationItem` terminado: o PNG vem em base64 no `result` (vale no Windows e no WSL,
+/// sem traduzir o `savedPath`).
+fn generated_image(item: &Value) -> Event {
+    match item["result"].as_str().filter(|r| !r.is_empty()) {
+        Some(data) if item["failure"].is_null() && item["status"] != "failed" => Event::Image { item: item["id"].as_str().unwrap_or_default().to_string(), data: data.to_string() },
+        _ => Event::ImageFailed,
+    }
+}
+
 pub fn parse(line: &str) -> Incoming {
     let Ok(v) = serde_json::from_str::<Value>(line.trim()) else { return Incoming::Other };
     let method = v["method"].as_str();
@@ -82,10 +95,14 @@ pub fn parse(line: &str) -> Incoming {
         }
         let p = &v["params"];
         let event = match method {
-            "item/agentMessage/delta" => p["delta"].as_str().map(|d| Event::Delta(d.to_string())),
+            "item/agentMessage/delta" => p["delta"].as_str().map(|d| Event::Delta { text: d.to_string(), item: item_id(&p["itemId"]) }),
             "item/reasoning/summaryTextDelta" | "item/reasoning/textDelta" | "item/reasoning/summaryPartAdded" => Some(Event::Thinking),
             "item/started" if p["item"]["type"] == "reasoning" => Some(Event::Thinking),
-            "item/completed" if p["item"]["type"] == "agentMessage" => p["item"]["text"].as_str().filter(|t| !t.is_empty()).map(|t| Event::Assistant(t.to_string())),
+            "item/started" if p["item"]["type"] == "imageGeneration" => Some(Event::ImageStarted),
+            "item/completed" if p["item"]["type"] == "agentMessage" => {
+                p["item"]["text"].as_str().filter(|t| !t.is_empty()).map(|t| Event::Assistant { text: t.to_string(), item: item_id(&p["item"]["id"]) })
+            }
+            "item/completed" if p["item"]["type"] == "imageGeneration" => Some(generated_image(&p["item"])),
             "turn/started" => p["turn"]["id"].as_str().map(|id| Event::Turn(id.to_string())),
             "turn/completed" => {
                 let turn = &p["turn"];
@@ -165,10 +182,10 @@ mod tests {
 
     #[test]
     fn notifications_become_events() {
-        assert_eq!(parse(r#"{"method":"item/agentMessage/delta","params":{"threadId":"t","turnId":"u","itemId":"i","delta":"Ol"}}"#), Incoming::Event(Event::Delta("Ol".into())));
+        assert_eq!(parse(r#"{"method":"item/agentMessage/delta","params":{"threadId":"t","turnId":"u","itemId":"i","delta":"Ol"}}"#), Incoming::Event(Event::Delta { text: "Ol".into(), item: Some("i".into()) }));
         assert_eq!(parse(r#"{"method":"turn/started","params":{"threadId":"t","turn":{"id":"u1","items":[],"status":"inProgress"}}}"#), Incoming::Event(Event::Turn("u1".into())));
         assert_eq!(parse(r#"{"method":"item/started","params":{"item":{"type":"reasoning","id":"r","summary":[],"content":[]}}}"#), Incoming::Event(Event::Thinking));
-        assert_eq!(parse(r#"{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"i","text":"Olá"}}}"#), Incoming::Event(Event::Assistant("Olá".into())));
+        assert_eq!(parse(r#"{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"i","text":"Olá"}}}"#), Incoming::Event(Event::Assistant { text: "Olá".into(), item: Some("i".into()) }));
         assert_eq!(parse(r#"{"method":"turn/completed","params":{"turn":{"id":"u","status":"completed","error":null}}}"#), Incoming::Event(Event::Finished { text: None, error: None }));
         assert_eq!(parse(r#"{"method":"turn/completed","params":{"turn":{"id":"u","status":"interrupted"}}}"#), Incoming::Event(Event::Finished { text: None, error: Some("interrupted".into()) }));
         let failed = r#"{"method":"turn/completed","params":{"turn":{"status":"failed","error":{"message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.\"}}"}}}}"#;
@@ -176,6 +193,16 @@ mod tests {
         for other in [r#"{"method":"thread/status/changed","params":{}}"#, r#"{"method":"mcpServer/startupStatus/updated","params":{}}"#, "lixo"] {
             assert_eq!(parse(other), Incoming::Other, "{other}");
         }
+    }
+
+    #[test]
+    fn generated_images_come_as_base64() {
+        // Formato do `ImageGenerationItem` (`codex app-server generate-ts`), com o PNG encurtado.
+        let done = r#"{"method":"item/completed","params":{"threadId":"t","turnId":"u","item":{"type":"imageGeneration","id":"exec-5b77","status":"completed","revisedPrompt":"Ilustração","result":"iVBORw0KGgo=","transparentBackground":false,"failure":null,"savedPath":"C:\\Users\\x\\.codex\\generated_images\\a.png"}}}"#;
+        assert_eq!(parse(done), Incoming::Event(Event::Image { item: "exec-5b77".into(), data: "iVBORw0KGgo=".into() }));
+        assert_eq!(parse(r#"{"method":"item/started","params":{"item":{"type":"imageGeneration","id":"exec-5b77","status":"inProgress","revisedPrompt":null,"result":"","failure":null}}}"#), Incoming::Event(Event::ImageStarted));
+        let limit = r#"{"method":"item/completed","params":{"item":{"type":"imageGeneration","id":"x","status":"failed","revisedPrompt":null,"result":"","failure":{"type":"usageLimitExceeded","limitId":"l","resetsAt":null}}}}"#;
+        assert_eq!(parse(limit), Incoming::Event(Event::ImageFailed));
     }
 
     #[test]

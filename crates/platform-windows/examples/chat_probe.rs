@@ -27,7 +27,7 @@ fn wait_turn(service: &ChatService, c: &mut Conversation, limit: Duration, stop_
                     return if stopped { Ok(started.elapsed()) } else { Err(format!("erro no fim do turno: {e}")) };
                 }
                 Signal::Event(e) => {
-                    if matches!(e, Event::Delta(_)) && first.is_none() {
+                    if matches!(e, Event::Delta { .. }) && first.is_none() {
                         first = Some(started.elapsed());
                         println!("  primeiro texto em {:.1} s", started.elapsed().as_secs_f32());
                     }

@@ -359,6 +359,8 @@ const GLYPH_REMOVE: &str = "\u{E711}";
 const ATTACH: f32 = 56.0;
 const PICTURE_H: f32 = 72.0;
 const PICTURE_GAP: f32 = 6.0;
+/// Altura máxima de uma imagem gerada no balão da resposta (ela ocupa a largura do balão).
+pub const REPLY_PICTURE_H: f32 = 260.0;
 
 pub fn text_style(scale: f32) -> TextStyle {
     TextStyle { size: TEXT * scale, weight: FontWeight::Regular, family: Family::Text }
@@ -383,8 +385,9 @@ pub fn history_max_scroll(count: usize) -> usize {
     count.saturating_sub(HISTORY_VISIBLE)
 }
 
-/// Uma mensagem como o painel desenha. `images`: as da pergunta (`None` = ainda carregando).
-pub struct MessageView<'a> { pub role: Role, pub state: State, pub wrapped: &'a Wrapped, pub note: Option<&'a str>, pub images: &'a [Option<Image>] }
+/// Uma mensagem como o painel desenha. `images`: as coladas na pergunta ou as geradas na resposta
+/// (`None` = ainda carregando). `generating`: a resposta está gerando mais uma imagem.
+pub struct MessageView<'a> { pub role: Role, pub state: State, pub wrapped: &'a Wrapped, pub note: Option<&'a str>, pub images: &'a [Option<Image>], pub generating: bool }
 
 /// `rect` reduzido para caber em `cell` mantendo a proporção da imagem, centrado.
 fn fit(image: &Image, cell: Rect) -> Rect {
@@ -393,13 +396,65 @@ fn fit(image: &Image, cell: Rect) -> Rect {
     Rect::new(cell.x + (cell.w - w) / 2.0, cell.y + (cell.h - h) / 2.0, w, h)
 }
 
-/// Largura de cada imagem no balão (altura fixa, proporção mantida, entre 40 e 160 DIP).
-fn picture_widths(images: &[Option<Image>], scale: f32) -> Vec<f32> {
-    images.iter().map(|i| i.as_ref().map_or(PICTURE_H, |i| (PICTURE_H * i.width() as f32 / i.height() as f32).clamp(40.0, 160.0)) * scale).collect()
+/// Onde fica cada imagem no balão, a partir do canto do conteúdo. Na pergunta, numa fileira de
+/// altura fixa (largura entre 40 e 160 DIP); na resposta, uma embaixo da outra na largura do
+/// balão, com a altura limitada. Com `generating`, a última é o lugar da que está sendo gerada.
+fn picture_cells(m: &MessageView, scale: f32) -> Vec<Rect> {
+    let px = |v: f32| (v * scale).round();
+    let count = m.images.len() + usize::from(m.generating);
+    let mut cells = Vec::with_capacity(count);
+    let mut at = 0.0;
+    for i in 0..count {
+        let image = m.images.get(i).and_then(Option::as_ref);
+        let ratio = image.map(|i| i.width() as f32 / i.height().max(1) as f32);
+        let cell = match m.role {
+            Role::User => {
+                let w = ratio.map_or(PICTURE_H, |r| (PICTURE_H * r).clamp(40.0, 160.0)) * scale;
+                let r = Rect::new(at, 0.0, w, px(PICTURE_H));
+                at += w + px(PICTURE_GAP);
+                r
+            }
+            Role::Claude => {
+                let full = text_width(Role::Claude, scale);
+                let ratio = ratio.unwrap_or(1.5);
+                let (mut w, mut h) = (full, (full / ratio).round());
+                if h > px(REPLY_PICTURE_H) {
+                    h = px(REPLY_PICTURE_H);
+                    w = (h * ratio).round();
+                }
+                let r = Rect::new(0.0, at, w, h);
+                at += h + px(PICTURE_GAP);
+                r
+            }
+        };
+        cells.push(cell);
+    }
+    cells
+}
+
+/// Largura e altura do bloco das imagens.
+fn pictures_size(cells: &[Rect]) -> (f32, f32) {
+    cells.iter().fold((0.0, 0.0), |(w, h), c| (w.max(c.right()), h.max(c.bottom())))
 }
 
 fn has_text(m: &MessageView) -> bool {
     !m.wrapped.lines.iter().all(|l| l.is_empty())
+}
+
+fn has_pictures(m: &MessageView) -> bool {
+    !m.images.is_empty() || m.generating
+}
+
+/// Linhas de texto no balão: uma ("…", "Pensando…") enquanto nada chegou, nenhuma quando só há
+/// imagens.
+fn text_lines(m: &MessageView) -> usize {
+    if has_text(m) {
+        m.wrapped.lines.len().max(1)
+    } else if has_pictures(m) {
+        0
+    } else {
+        1
+    }
 }
 
 /// Uma linha das conversas antigas: o título e "Codex · Ubuntu · 21/10 20:37".
@@ -416,7 +471,25 @@ pub enum Page<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Hit { Send, Stop, NewChat, History, Back, Agent(Agent), Origins, Models, Pick(usize), Prefer(Prefer), Open(usize), Delete(usize), Copy(usize), Unattach(usize), Field }
+pub enum Hit {
+    Send,
+    Stop,
+    NewChat,
+    History,
+    Back,
+    Agent(Agent),
+    Origins,
+    Models,
+    Pick(usize),
+    Prefer(Prefer),
+    Open(usize),
+    Delete(usize),
+    Copy(usize),
+    Unattach(usize),
+    /// Imagem `.1` da mensagem `.0` (abre no visualizador).
+    Picture(usize, usize),
+    Field,
+}
 
 pub struct ChatView<'a> {
     pub messages: &'a [MessageView<'a>],
@@ -459,18 +532,19 @@ fn message_h(m: &MessageView, scale: f32, note_lines: usize) -> f32 {
     if bubbleless(m) {
         return (note_lines as f32 * 16.0 + 4.0) * scale;
     }
-    let lines = if m.state.busy() && !has_text(m) { 1 } else if !has_text(m) && !m.images.is_empty() { 0 } else { m.wrapped.lines.len().max(1) };
-    let mut h = lines as f32 * LINE + 2.0 * PAD_Y;
-    if !m.images.is_empty() {
-        h += PICTURE_H + if lines > 0 { PICTURE_GAP } else { 0.0 };
+    let lines = text_lines(m);
+    let (_, pictures_h) = pictures_size(&picture_cells(m, scale));
+    let mut h = (lines as f32 * LINE + 2.0 * PAD_Y) * scale;
+    if has_pictures(m) {
+        h += pictures_h + if lines > 0 { PICTURE_GAP * scale } else { 0.0 };
     }
     if m.role == Role::Claude {
-        h += note_lines as f32 * 16.0;
+        h += note_lines as f32 * 16.0 * scale;
         if !m.state.busy() {
-            h += 22.0;
+            h += 22.0 * scale;
         }
     }
-    h * scale
+    h
 }
 
 /// Cor de texto legível sobre o destaque.
@@ -748,9 +822,9 @@ fn chat_page(view: &ChatView, mut ops: Vec<DrawOp>, mut hits: Vec<(Rect, Hit)>, 
     ChatLayout { list: DisplayList { size, ops }, hits, max_scroll, line }
 }
 
-/// Resposta que terminou sem texto (só o aviso do erro): sem balão.
+/// Resposta que terminou sem texto nem imagem (só o aviso do erro): sem balão.
 fn bubbleless(m: &MessageView) -> bool {
-    m.role == Role::Claude && !m.state.busy() && m.wrapped.lines.iter().all(|l| l.is_empty())
+    m.role == Role::Claude && !m.state.busy() && !has_text(m) && !has_pictures(m)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -766,11 +840,11 @@ fn draw_message(ops: &mut Vec<DrawOp>, hits: &mut Vec<(Rect, Hit)>, view: &ChatV
         }
         return;
     }
-    let waiting = msg.state.busy() && !has_text(msg);
-    let lines = if waiting { 1 } else if !has_text(msg) && !msg.images.is_empty() { 0 } else { msg.wrapped.lines.len().max(1) };
-    let pictures = picture_widths(msg.images, scale);
-    let pictures_w = pictures.iter().sum::<f32>() + px(PICTURE_GAP) * pictures.len().saturating_sub(1) as f32;
-    let pictures_h = if msg.images.is_empty() { 0.0 } else { px(PICTURE_H) + if lines > 0 { px(PICTURE_GAP) } else { 0.0 } };
+    let waiting = msg.state.busy() && !has_text(msg) && !has_pictures(msg);
+    let lines = text_lines(msg);
+    let cells = picture_cells(msg, scale);
+    let (pictures_w, pictures_h) = pictures_size(&cells);
+    let pictures_h = if has_pictures(msg) { pictures_h + if lines > 0 { px(PICTURE_GAP) } else { 0.0 } } else { 0.0 };
     let text_w = if msg.role == Role::User { msg.wrapped.widths.iter().copied().fold(0.0, f32::max).ceil() } else { text_width(Role::Claude, scale) };
     let bubble_w = (text_w.max(pictures_w) + px(2.0 * PAD_X)).min(w - px(24.0));
     let bubble_h = lines as f32 * line + px(2.0 * PAD_Y) + pictures_h;
@@ -782,22 +856,38 @@ fn draw_message(ops: &mut Vec<DrawOp>, hits: &mut Vec<(Rect, Hit)>, view: &ChatV
     };
     ops.push(DrawOp::RoundRect { rect: bubble, radius: px(12.0), color: fill });
     let tx = bubble.x + px(PAD_X);
-    let mut px_x = tx;
-    for (image, pw) in msg.images.iter().zip(&pictures) {
-        let cell = Rect::new(px_x, bubble.y + px(PAD_Y), *pw, px(PICTURE_H));
-        match image {
-            Some(i) => ops.push(DrawOp::Image { rect: fit(i, cell), image: i.clone(), radius: px(8.0), opacity: 1.0 }),
-            None => ops.push(DrawOp::RoundRect { rect: cell, radius: px(8.0), color: tokens.raised_strong }),
+    // Na pergunta as imagens vêm antes do texto; na resposta, depois.
+    let (pictures_y, text_y) = match msg.role {
+        Role::User => (bubble.y + px(PAD_Y), bubble.y + px(PAD_Y) + pictures_h),
+        Role::Claude => (bubble.y + px(PAD_Y) + lines as f32 * line + if lines > 0 { px(PICTURE_GAP) } else { 0.0 }, bubble.y + px(PAD_Y)),
+    };
+    for (i, c) in cells.iter().enumerate() {
+        let cell = Rect::new(tx + c.x, pictures_y + c.y, c.w, c.h);
+        match msg.images.get(i) {
+            Some(Some(image)) => {
+                let shown = fit(image, cell);
+                ops.push(DrawOp::Image { rect: shown, image: image.clone(), radius: px(8.0), opacity: 1.0 });
+                // Só a parte visível da imagem recebe o clique.
+                let top = shown.y.max(area.y);
+                let bottom = shown.bottom().min(area.bottom());
+                if bottom > top {
+                    let visible = if top == shown.y && bottom == shown.bottom() { shown } else { Rect::new(shown.x, top, shown.w, bottom - top) };
+                    hits.push((visible, Hit::Picture(index, i)));
+                }
+            }
+            Some(None) => ops.push(DrawOp::RoundRect { rect: cell, radius: px(8.0), color: tokens.raised_strong }),
+            None => {
+                ops.push(DrawOp::RoundRect { rect: cell, radius: px(8.0), color: tokens.raised_strong });
+                ops.push(DrawOp::Text { rect: cell, text: "Gerando imagem…".into(), style: TextStyle { size: 11.5 * scale, weight: FontWeight::Regular, family: Family::Text }, color: tokens.text_tertiary, align: Align::Center });
+            }
         }
-        px_x += pw + px(PICTURE_GAP);
     }
-    let bubble = Rect::new(bubble.x, bubble.y + pictures_h, bubble.w, bubble.h - pictures_h);
     if waiting {
         let label = if msg.state == State::Thinking { "Pensando…" } else { "…" };
-        ops.push(DrawOp::Text { rect: Rect::new(tx, bubble.y + px(PAD_Y), bubble.w - px(2.0 * PAD_X), line), text: label.into(), style: body, color: tokens.text_tertiary, align: Align::Leading });
+        ops.push(DrawOp::Text { rect: Rect::new(tx, text_y, bubble.w - px(2.0 * PAD_X), line), text: label.into(), style: body, color: tokens.text_tertiary, align: Align::Leading });
     } else {
         for (row, s) in msg.wrapped.lines.iter().enumerate() {
-            let ly = bubble.y + px(PAD_Y) + row as f32 * line;
+            let ly = text_y + row as f32 * line;
             if ly + line < area.y || ly > area.bottom() || s.is_empty() {
                 continue;
             }
@@ -1060,9 +1150,9 @@ mod tests {
         let text_only = wrapped("Que número é este?");
         let blank = Wrapped { lines: vec![String::new()], widths: vec![0.0] };
         let pics = [Some(img(160, 90))];
-        let with_text = [MessageView { role: Role::User, state: State::Done, wrapped: &text_only, note: None, images: &pics }];
-        let only_image = [MessageView { role: Role::User, state: State::Done, wrapped: &blank, note: None, images: &pics }];
-        let no_image = [MessageView { role: Role::User, state: State::Done, wrapped: &text_only, note: None, images: &[] }];
+        let with_text = [MessageView { role: Role::User, state: State::Done, wrapped: &text_only, note: None, images: &pics, generating: false }];
+        let only_image = [MessageView { role: Role::User, state: State::Done, wrapped: &blank, note: None, images: &pics, generating: false }];
+        let no_image = [MessageView { role: Role::User, state: State::Done, wrapped: &text_only, note: None, images: &[], generating: false }];
         let a = panel(&with_text, &Field::default(), 0.0);
         let b = panel(&only_image, &Field::default(), 0.0);
         let c = panel(&no_image, &Field::default(), 0.0);
@@ -1073,6 +1163,67 @@ mod tests {
         let bubble = a.list.ops.iter().find_map(|o| if let DrawOp::RoundRect { rect, color, .. } = o { (*color == tokens().accent_soft).then_some(*rect) } else { None }).unwrap();
         let pic = images(&a)[0];
         assert!(bubble.contains(Point { x: pic.x + 1.0, y: pic.y + 1.0 }) && pic.right() <= bubble.right(), "a imagem fica dentro do balão");
+    }
+
+    fn reply<'a>(wrapped: &'a Wrapped, images: &'a [Option<Image>], state: State, generating: bool) -> MessageView<'a> {
+        MessageView { role: Role::Claude, state, wrapped, note: None, images, generating }
+    }
+
+    fn hit_rect(l: &ChatLayout, hit: Hit) -> Option<Rect> {
+        l.hits.iter().find(|(_, h)| *h == hit).map(|(r, _)| *r)
+    }
+
+    #[test]
+    fn generated_images_fill_the_reply_bubble() {
+        let text = wrapped("Pronto! Bonsai numa mesa gamer.");
+        let wide = [Some(img(1536, 1024))];
+        let tall = [Some(img(500, 1000))];
+        let with = panel(&[reply(&text, &wide, State::Done, false)], &Field::default(), 0.0);
+        let without = panel(&[reply(&text, &[], State::Done, false)], &Field::default(), 0.0);
+        let pic = images(&with)[0];
+        assert!((pic.w - text_width(Role::Claude, 1.0)).abs() < 1.0, "na largura do balão: {pic:?}");
+        assert!((pic.w / pic.h - 1.5).abs() < 0.02, "mantém a proporção");
+        assert!(with.list.size.h - without.list.size.h >= pic.h, "a imagem ocupa espaço");
+        let bubble = with.list.ops.iter().find_map(|o| if let DrawOp::RoundRect { rect, color, .. } = o { (*color == tokens().raised && rect.x == 12.0).then_some(*rect) } else { None }).unwrap();
+        assert!(bubble.contains(Point { x: pic.x + 1.0, y: pic.y + 1.0 }) && pic.right() <= bubble.right() && pic.bottom() <= bubble.bottom(), "dentro do balão");
+        let line = with.list.ops.iter().find_map(|o| if let DrawOp::Text { rect, text, .. } = o { (text.starts_with("Pronto!")).then_some(*rect) } else { None }).unwrap();
+        assert!(line.bottom() <= pic.y, "o texto vem antes da imagem");
+        assert_eq!(hit_rect(&with, Hit::Picture(0, 0)), Some(pic), "clique abre a imagem");
+        assert!(has(&with, Hit::Copy(0)));
+        let t = images(&panel(&[reply(&text, &tall, State::Done, false)], &Field::default(), 0.0))[0];
+        assert!(t.h <= REPLY_PICTURE_H && (t.w / t.h - 0.5).abs() < 0.02, "alta: altura limitada, proporção mantida");
+    }
+
+    #[test]
+    fn reply_with_only_an_image_still_has_a_bubble() {
+        let blank = Wrapped { lines: vec![String::new()], widths: vec![0.0] };
+        let wide = [Some(img(300, 200))];
+        let l = panel(&[reply(&blank, &wide, State::Done, false)], &Field::default(), 0.0);
+        assert_eq!(images(&l).len(), 1, "não some como resposta sem texto");
+        assert!(has(&l, Hit::Picture(0, 0)));
+    }
+
+    #[test]
+    fn image_being_generated_has_a_placeholder() {
+        let text = wrapped("Vou gerar a imagem.");
+        let l = panel(&[reply(&text, &[], State::Streaming, true)], &Field::default(), 0.0);
+        let plain = panel(&[reply(&text, &[], State::Streaming, false)], &Field::default(), 0.0);
+        assert!(texts(&l.list).contains(&"Gerando imagem…".to_string()));
+        assert!(l.list.size.h > plain.list.size.h + 100.0, "o lugar da imagem já fica reservado");
+        assert!(!l.hits.iter().any(|(_, h)| matches!(h, Hit::Picture(..))), "nada para abrir ainda");
+        let loading = [None];
+        let l = panel(&[reply(&text, &loading, State::Done, false)], &Field::default(), 0.0);
+        assert!(!texts(&l.list).contains(&"Gerando imagem…".to_string()) && !has(&l, Hit::Picture(0, 0)), "carregando do disco: só o lugar");
+    }
+
+    #[test]
+    fn question_images_open_on_click() {
+        let q = wrapped("e isto?");
+        let pics = [Some(img(160, 90)), Some(img(90, 90))];
+        let l = panel(&[MessageView { role: Role::User, state: State::Done, wrapped: &q, note: None, images: &pics, generating: false }], &Field::default(), 0.0);
+        let shown = images(&l);
+        assert_eq!(hit_rect(&l, Hit::Picture(0, 1)), Some(shown[1]));
+        assert_eq!(l.hit(Point { x: shown[0].x + 2.0, y: shown[0].y + 2.0 }), Some(Hit::Picture(0, 0)));
     }
 
     fn panel(messages: &[MessageView], field: &Field, scroll: f32) -> ChatLayout {
@@ -1173,7 +1324,7 @@ mod tests {
     fn conversation_with_waiting_reply_shows_stop_and_thinking() {
         let q = wrapped("Qual a capital do Peru?");
         let a = Wrapped::default();
-        let msgs = [MessageView { role: Role::User, state: State::Done, wrapped: &q, note: None, images: &[] }, MessageView { role: Role::Claude, state: State::Thinking, wrapped: &a, note: None, images: &[] }];
+        let msgs = [MessageView { role: Role::User, state: State::Done, wrapped: &q, note: None, images: &[], generating: false }, MessageView { role: Role::Claude, state: State::Thinking, wrapped: &a, note: None, images: &[], generating: false }];
         let l = panel(&msgs, &Field::default(), 0.0);
         let t = texts(&l.list);
         assert!(t.contains(&"Qual a capital do Peru?".to_string()) && t.contains(&"Pensando…".to_string()));
@@ -1184,7 +1335,7 @@ mod tests {
     #[test]
     fn failed_reply_without_text_is_just_the_note() {
         let a = Wrapped { lines: vec![String::new()], widths: vec![0.0] };
-        let msgs = [MessageView { role: Role::Claude, state: State::Failed, wrapped: &a, note: Some("Entre no Claude Code."), images: &[] }];
+        let msgs = [MessageView { role: Role::Claude, state: State::Failed, wrapped: &a, note: Some("Entre no Claude Code."), images: &[], generating: false }];
         let l = panel(&msgs, &Field::default(), 0.0);
         assert!(texts(&l.list).contains(&"Entre no Claude Code.".to_string()));
         assert!(!l.hits.iter().any(|(_, h)| matches!(h, Hit::Copy(_))));
@@ -1202,7 +1353,7 @@ mod tests {
     #[test]
     fn finished_reply_has_copy_and_note() {
         let a = wrapped("Lima.");
-        let msgs = [MessageView { role: Role::Claude, state: State::Stopped, wrapped: &a, note: Some("Resposta interrompida."), images: &[] }];
+        let msgs = [MessageView { role: Role::Claude, state: State::Stopped, wrapped: &a, note: Some("Resposta interrompida."), images: &[], generating: false }];
         let l = panel(&msgs, &Field::default(), 0.0);
         assert!(texts(&l.list).contains(&"Resposta interrompida.".to_string()));
         assert!(l.hits.iter().any(|(_, h)| *h == Hit::Copy(0)));
@@ -1212,7 +1363,7 @@ mod tests {
     fn long_conversation_scrolls_and_culls() {
         let text = (0..60).map(|i| format!("linha {i}")).collect::<Vec<_>>().join("\n");
         let a = wrapped(&text);
-        let msgs = [MessageView { role: Role::Claude, state: State::Done, wrapped: &a, note: None, images: &[] }];
+        let msgs = [MessageView { role: Role::Claude, state: State::Done, wrapped: &a, note: None, images: &[], generating: false }];
         let bottom = panel(&msgs, &Field::default(), 0.0);
         assert!(bottom.max_scroll > 0.0);
         assert!(bottom.list.size.h < AREA_Y + MAX_AREA + 120.0, "a área não passa do máximo");

@@ -24,6 +24,38 @@ pub fn base64(bytes: &[u8]) -> String {
     out
 }
 
+/// Base64 de volta para bytes (a imagem que o Codex gera). Quebras de linha e o `=` do fim são
+/// ignorados; qualquer outro caractere fora do alfabeto dá `None`.
+pub fn decode_base64(text: &str) -> Option<Vec<u8>> {
+    let mut table = [u8::MAX; 256];
+    for (i, &a) in ALPHABET.iter().enumerate() {
+        table[a as usize] = i as u8;
+    }
+    let mut out = Vec::with_capacity(text.len() / 4 * 3);
+    let (mut acc, mut bits) = (0u32, 0u32);
+    for c in text.bytes().filter(|c| !matches!(c, b'\r' | b'\n' | b'=')) {
+        let v = table[c as usize];
+        if v == u8::MAX {
+            return None;
+        }
+        let v = u32::from(v);
+        acc = (acc << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    // Sobra de 6 bits: um caractere a mais que não forma byte.
+    (bits < 6).then_some(out)
+}
+
+/// Os 8 bytes da assinatura do PNG.
+pub fn is_png(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0x89, b'P', b'N', b'G', 13, 10, 26, 10])
+}
+
 /// Um `CF_DIB` (cabeçalho `BITMAPINFO` + pixels) vira um arquivo `.bmp`: falta só o cabeçalho de
 /// 14 bytes, com o deslocamento até os pixels (depois das máscaras e da paleta, se houver).
 pub fn dib_to_bmp(dib: &[u8]) -> Option<Vec<u8>> {
@@ -96,6 +128,25 @@ mod tests {
         assert_eq!(offset(&dib_to_bmp(&dib(124, 32, 3, 0, 16)).unwrap()), 138, "V5: máscaras dentro do cabeçalho");
         assert!(dib_to_bmp(&[1, 2, 3]).is_none());
         assert!(dib_to_bmp(&dib(40, 8, 0, 0, 0)).is_none(), "paleta maior que os dados");
+    }
+
+    #[test]
+    fn base64_decodes_back() {
+        for input in ["", "f", "fo", "foo", "foob", "fooba", "foobar"] {
+            assert_eq!(decode_base64(&base64(input.as_bytes())).as_deref(), Some(input.as_bytes()), "{input}");
+        }
+        let bytes: Vec<u8> = (0..=255).collect();
+        assert_eq!(decode_base64(&base64(&bytes)), Some(bytes));
+        assert_eq!(decode_base64("Zm9v
+YmFy").as_deref(), Some(&b"foobar"[..]), "quebras de linha são ignoradas");
+        assert_eq!(decode_base64("Zm9vYg"), Some(b"foob".to_vec()), "sem o preenchimento");
+        assert!(decode_base64("Zm9v!").is_none() && decode_base64("Z").is_none());
+    }
+
+    #[test]
+    fn png_signature() {
+        assert!(is_png(&[0x89, b'P', b'N', b'G', 13, 10, 26, 10, 0]));
+        assert!(!is_png(b"GIF89a") && !is_png(&[]));
     }
 
     #[test]

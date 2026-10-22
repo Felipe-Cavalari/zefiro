@@ -85,3 +85,16 @@ campo é desenhado pelo painel. A origem é `[chat] origin` (`auto` = Windows; s
   no `turn/start` (vale no Windows e no WSL, sem traduzir caminhos). Sonda `chat_image_probe`: o
   Claude e o Codex (Windows e WSL) leram o número das imagens de teste; um BMP de 11 MB virou um PNG
   de 16 KB em ~50 ms. Apagar a conversa apaga as imagens dela.
+- **Imagens geradas pelo Codex:** o `item/completed` com `item.type == "imageGeneration"` traz o
+  PNG em base64 no `result` (o `savedPath` é do lado do Codex e não vale no WSL, então não é
+  usado). O laço dá um id novo, liga o id à resposta (`Message.images` da mensagem do agente, como
+  nas perguntas) e uma thread grava o PNG sem reduzir em `chat\imagens\<id>.png` (o original, para
+  abrir no visualizador) e decodifica a versão da tela (800 px). No balão da resposta, a imagem vem
+  depois do texto, na largura do balão e com até 260 DIP de altura; enquanto gera
+  (`item/started`), um lugar reservado diz "Gerando imagem…". Clique em qualquer imagem da conversa
+  (pergunta ou resposta) abre o arquivo no app padrão do Windows e fecha o painel. Ela volta ao
+  reabrir a conversa e vai embora junto ao apagá-la. Sonda `chat_generated_probe`.
+- **Várias mensagens no mesmo turno do Codex:** um turno pode ter mais de um `agentMessage` (o
+  aviso "Vou usar a skill…" e a resposta final). Os deltas trazem `itemId`; quando o item muda e a
+  resposta já tem texto, entra uma linha em branco. Um `agentMessage` de outro item que chega
+  inteiro, sem deltas, também é acrescentado (antes ele era descartado).

@@ -12,13 +12,13 @@ use zefiro_core::config::set_value;
 use zefiro_integration_chat::agent::{Agent, ModelOption, claude_models, effective_model, model_label};
 use zefiro_integration_chat::conversation::{Conversation, Role};
 use zefiro_integration_chat::history::{self, Summary};
-use zefiro_integration_chat::image::{MAX_IMAGES, MAX_SIDE, base64};
+use zefiro_integration_chat::image::{MAX_IMAGES, MAX_SIDE, base64, decode_base64, is_png};
 use zefiro_integration_chat::origin::{Choice, Prefer, parse_choice};
 use zefiro_integration_chat::protocol::{Event, Failure, classify};
 use zefiro_platform::geometry::Point;
 use zefiro_platform::image::Image;
 use zefiro_platform_windows::chat::{ChatService, Signal, Start, conversations_dir, images_dir, new_id, windows_dir};
-use zefiro_platform_windows::{imaging, system_events, window};
+use zefiro_platform_windows::{imaging, system, system_events, window};
 use zefiro_ui::paint::DisplayList;
 
 use crate::event_loop::{Loop, TIMER_CHAT_IDLE, USER_CHAT, USER_CHAT_IMAGE};
@@ -29,6 +29,10 @@ const IDLE_MS: u32 = 10 * 60 * 1000;
 const WHEEL_LINES: f32 = 3.0;
 /// Lado das miniaturas decodificadas (px; cabem em 72 DIP a 175 %).
 const THUMB_PX: u32 = 128;
+/// Lado das imagens geradas na tela (px; a largura do balão a 200 %).
+const REPLY_THUMB_PX: u32 = 800;
+/// Imagem gerada que não vem em PNG é convertida até este lado (px).
+const GENERATED_MAX_SIDE: u32 = 4096;
 
 /// Imagem colada esperando o envio. `thumb` vazio enquanto converte.
 struct Attachment { id: String, thumb: Option<Image> }
@@ -79,6 +83,8 @@ pub struct ChatRuntime {
     /// Miniaturas das imagens das perguntas, por id, e as que estão sendo lidas.
     thumbs: HashMap<String, Image>,
     loading: HashSet<String>,
+    /// Imagens cujo arquivo não abriu (não tenta ler de novo a cada quadro).
+    missing: HashSet<String>,
     images_done: Arc<Mutex<Vec<ImageDone>>>,
     /// "iniciando…" até o processo subir; "indisponível" se não subiu.
     status: Option<String>,
@@ -281,7 +287,20 @@ impl Loop {
         let origin_options = self.chat_origin_options(agent);
         let prefer = self.chat_prefer(agent);
         let history_rows = self.chat_history_rows();
-        let wanted: Vec<String> = self.chat.conversation.as_ref().map(|c| c.images().map(str::to_string).collect()).unwrap_or_default();
+        let wanted: Vec<(String, u32)> = self
+            .chat
+            .conversation
+            .as_ref()
+            .map(|c| {
+                c.messages
+                    .iter()
+                    .flat_map(|m| {
+                        let side = if m.role == Role::Claude { REPLY_THUMB_PX } else { THUMB_PX };
+                        m.images.iter().map(move |id| (id.clone(), side))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         self.chat_load_thumbs(wanted);
         let measure = &self.ctx.text;
         let c = &mut self.chat;
@@ -325,7 +344,16 @@ impl Loop {
         };
         let pictures: Vec<Vec<Option<Image>>> = conv.messages.iter().map(|m| m.images.iter().map(|id| c.thumbs.get(id).cloned()).collect()).collect();
         let attachments: Vec<Option<Image>> = c.attachments.iter().map(|a| a.thumb.clone()).collect();
-        let views: Vec<MessageView> = conv.messages.iter().zip(&c.wraps).zip(&pictures).map(|((m, w), p)| MessageView { role: m.role, state: m.state, wrapped: &w.wrapped, note: m.note.as_deref(), images: p }).collect();
+        let last = conv.messages.len().saturating_sub(1);
+        let generating = conv.generating();
+        let views: Vec<MessageView> = conv
+            .messages
+            .iter()
+            .zip(&c.wraps)
+            .zip(&pictures)
+            .enumerate()
+            .map(|(i, ((m, w), p))| MessageView { role: m.role, state: m.state, wrapped: &w.wrapped, note: m.note.as_deref(), images: p, generating: generating && i == last })
+            .collect();
         let tokens = &self.ctx.theme.tokens;
         let mut view = ChatView { messages: &views, field: &c.field, field_lines: &c.field_lines, attachments: &attachments, agent, origin: &origin_label, model: &model_text, status: c.status.as_deref(), page, scroll: c.scroll, hover: c.hover, copied: c.copied };
         let mut layout = chat_panel(&view, scale, tokens, measure);
@@ -752,6 +780,7 @@ impl Loop {
                 }
             }
             Some(Hit::Unattach(i)) => self.chat_unattach(i)?,
+            Some(Hit::Picture(m, i)) => self.chat_open_picture(m, i)?,
             Some(Hit::Field) | None => {}
         }
         Ok(true)
@@ -835,17 +864,72 @@ impl Loop {
         Ok(())
     }
 
-    /// Lê numa thread as miniaturas das perguntas que ainda não estão na memória.
-    fn chat_load_thumbs(&mut self, ids: Vec<String>) {
-        let missing: Vec<String> = ids.into_iter().filter(|id| !self.chat.thumbs.contains_key(id) && !self.chat.loading.contains(id)).collect();
+    /// Abre uma imagem da conversa no visualizador do Windows (e fecha o painel, que ficaria por
+    /// cima dele).
+    fn chat_open_picture(&mut self, message: usize, index: usize) -> Result<()> {
+        let id = self.chat.conversation.as_ref().and_then(|c| c.messages.get(message)).and_then(|m| m.images.get(index)).cloned();
+        let Some(path) = id.and_then(|id| history::image_file(&images_dir(), &id)).filter(|p| p.is_file()) else {
+            tracing::warn!("chat: a imagem não está mais na pasta");
+            return Ok(());
+        };
+        tracing::info!("chat: abrindo a imagem no visualizador");
+        system::open_folder(&path);
+        self.close_open_panel()
+    }
+
+    /// O Codex gerou uma imagem: ela entra na resposta já com o id, e uma thread grava o PNG na
+    /// pasta das imagens e faz a versão da tela.
+    fn chat_generated_image(&mut self, data: String) -> bool {
+        let id = new_id();
+        let Some(c) = self.chat.conversation.as_mut() else { return false };
+        if !c.add_reply_image(id.clone()) {
+            return false;
+        }
+        self.chat.loading.insert(id.clone());
+        let done = self.chat.images_done.clone();
+        let spawned = std::thread::Builder::new().name("zefiro-chat-generated".into()).spawn(move || {
+            let result = decode_base64(&data)
+                .ok_or_else(|| "base64 inválido".to_string())
+                .and_then(|bytes| if is_png(&bytes) { Ok(bytes) } else { imaging::to_png(&bytes, GENERATED_MAX_SIDE).map_err(|e| e.to_string()) })
+                .and_then(|png| {
+                    let path = history::image_file(&images_dir(), &id).ok_or("id inválido")?;
+                    std::fs::create_dir_all(images_dir()).and_then(|_| std::fs::write(&path, &png)).map_err(|e| e.to_string())?;
+                    Ok(png)
+                });
+            let image = match result {
+                Ok(png) => {
+                    tracing::info!(bytes = png.len(), "chat: imagem gerada gravada");
+                    imaging::decode_bytes(&png, REPLY_THUMB_PX)
+                }
+                Err(e) => {
+                    tracing::warn!("chat: não consegui gravar a imagem gerada: {e}");
+                    None
+                }
+            };
+            if let Ok(mut d) = done.lock() {
+                d.push(ImageDone::Thumb { id, image });
+            }
+            window::post_user(USER_CHAT_IMAGE);
+        });
+        if let Err(e) = spawned {
+            tracing::warn!("chat: não consegui gravar a imagem gerada: {e}");
+        }
+        self.chat_save();
+        true
+    }
+
+    /// Lê numa thread as imagens da conversa que ainda não estão na memória (`side`: lado em px).
+    fn chat_load_thumbs(&mut self, ids: Vec<(String, u32)>) {
+        let c = &self.chat;
+        let missing: Vec<(String, u32)> = ids.into_iter().filter(|(id, _)| !c.thumbs.contains_key(id) && !c.loading.contains(id) && !c.missing.contains(id)).collect();
         if missing.is_empty() {
             return;
         }
-        self.chat.loading.extend(missing.iter().cloned());
+        self.chat.loading.extend(missing.iter().map(|(id, _)| id.clone()));
         let done = self.chat.images_done.clone();
         let spawned = std::thread::Builder::new().name("zefiro-chat-thumbs".into()).spawn(move || {
-            for id in missing {
-                let image = history::image_file(&images_dir(), &id).and_then(|p| std::fs::read(p).ok()).and_then(|b| imaging::decode_bytes(&b, THUMB_PX));
+            for (id, side) in missing {
+                let image = history::image_file(&images_dir(), &id).and_then(|p| std::fs::read(p).ok()).and_then(|b| imaging::decode_bytes(&b, side));
                 if let Ok(mut d) = done.lock() {
                     d.push(ImageDone::Thumb { id, image });
                 }
@@ -875,8 +959,13 @@ impl Loop {
                 },
                 ImageDone::Thumb { id, image } => {
                     self.chat.loading.remove(&id);
-                    if let Some(image) = image {
-                        self.chat.thumbs.insert(id, image);
+                    match image {
+                        Some(image) => {
+                            self.chat.thumbs.insert(id, image);
+                        }
+                        None => {
+                            self.chat.missing.insert(id);
+                        }
                     }
                 }
             }
@@ -951,8 +1040,13 @@ impl Loop {
                     }
                     changed = true;
                 }
+                Signal::Event(Event::Image { data, .. }) => {
+                    if busy {
+                        changed |= self.chat_generated_image(data);
+                    }
+                }
                 Signal::Event(e) => {
-                    if matches!(e, Event::Delta(_)) && !self.chat.first_text {
+                    if matches!(e, Event::Delta { .. }) && !self.chat.first_text {
                         self.chat.first_text = true;
                         if let Some(at) = self.chat.asked_at {
                             tracing::info!(ms = at.elapsed().as_millis() as u64, "chat: primeiro texto");

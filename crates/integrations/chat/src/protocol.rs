@@ -10,10 +10,17 @@ pub enum Event {
     Started { session: String },
     /// O modelo está pensando (bloco ou delta de raciocínio), ainda sem texto.
     Thinking,
-    /// Pedaço de texto da resposta.
-    Delta(String),
+    /// Pedaço de texto da resposta. `item`: no Codex, a mensagem a que o pedaço pertence (um turno
+    /// pode ter várias, como o aviso antes de uma ferramenta e a resposta final).
+    Delta { text: String, item: Option<String> },
     /// Mensagem completa do assistente (vem depois dos pedaços; serve quando eles não vêm).
-    Assistant(String),
+    Assistant { text: String, item: Option<String> },
+    /// Codex: começou a gerar uma imagem.
+    ImageStarted,
+    /// Codex: imagem gerada (PNG em base64). `item`: o id do item no Codex.
+    Image { item: String, data: String },
+    /// Codex: a geração da imagem falhou (limite de uso, recusa).
+    ImageFailed,
     /// Fim do turno. `error` é o texto do erro (ou o subtipo, sem texto).
     Finished { text: Option<String>, error: Option<String> },
     /// Codex: o turno começou com este id (para interromper).
@@ -57,7 +64,7 @@ pub fn parse_line(line: &str) -> Event {
             let e = &v["event"];
             match e["type"].as_str() {
                 Some("content_block_delta") => match e["delta"]["type"].as_str() {
-                    Some("text_delta") => e["delta"]["text"].as_str().map_or(Event::Other, |t| Event::Delta(t.to_string())),
+                    Some("text_delta") => e["delta"]["text"].as_str().map_or(Event::Other, |t| Event::Delta { text: t.to_string(), item: None }),
                     Some("thinking_delta") => Event::Thinking,
                     _ => Event::Other,
                 },
@@ -67,7 +74,7 @@ pub fn parse_line(line: &str) -> Event {
         }
         Some("assistant") => {
             let text = text_blocks(&v["message"]["content"]);
-            if text.is_empty() { Event::Other } else { Event::Assistant(text) }
+            if text.is_empty() { Event::Other } else { Event::Assistant { text, item: None } }
         }
         Some("result") => {
             let text = v["result"].as_str().filter(|t| !t.is_empty()).map(str::to_string);
@@ -145,9 +152,9 @@ mod tests {
     #[test]
     fn reads_the_events_the_chat_needs() {
         assert_eq!(parse_line(INIT), Event::Started { session: "0673b2d0-53b5-47ea-8d84-b078a50bf1f5".into() });
-        assert_eq!(parse_line(DELTA), Event::Delta("o".into()));
+        assert_eq!(parse_line(DELTA), Event::Delta { text: "o".into(), item: None });
         assert_eq!(parse_line(THINKING), Event::Thinking);
-        assert_eq!(parse_line(ASSISTANT), Event::Assistant("oi".into()), "só os blocos de texto");
+        assert_eq!(parse_line(ASSISTANT), Event::Assistant { text: "oi".into(), item: None }, "só os blocos de texto");
         assert_eq!(parse_line(DONE), Event::Finished { text: Some("oi".into()), error: None });
     }
 
