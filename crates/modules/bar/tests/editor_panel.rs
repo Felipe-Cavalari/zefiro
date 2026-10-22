@@ -105,6 +105,22 @@ fn clean_bar_switches_sit_above_the_buttons_on_both_pages() {
 }
 
 #[test]
+fn back_row_on_top_returns_to_the_menu_on_both_pages() {
+    let s = session();
+    let names = ["Principal".to_string(), "Lateral".to_string()];
+    let tokens = zefiro_resources::tokens::derive_tokens(&zefiro_resources::theme::parse_theme("obsidian", "o", zefiro_resources::theme::BUILTIN[0].1).unwrap(), zefiro_platform::color::Rgba::rgb(0, 120, 215), None);
+    for page in [zefiro_bar::editor_panel::EditorPage::Items, zefiro_bar::editor_panel::EditorPage::Options] {
+        let panel = EditorPanel { page, ..Default::default() };
+        let layout = panel.layout(&cx(&s, &names, false), &FixedWidthMeasurer);
+        let back = layout.buttons.iter().find(|b| b.action == EditorAction::BackToMenu).unwrap_or_else(|| panic!("‹ Editar barra em {page:?}"));
+        assert!(back.enabled && layout.buttons.iter().filter(|b| b.action != EditorAction::BackToMenu).all(|b| b.rect.y >= back.rect.bottom()), "no topo, como o ‹ Tema");
+        assert_eq!(EditorPanel::hit(&layout, Point { x: back.rect.center_x(), y: back.rect.y + back.rect.h / 2.0 }), Some(Target::Button(EditorAction::BackToMenu)));
+        let texts: Vec<String> = panel.paint(&layout, &s, &tokens).ops.into_iter().filter_map(|o| if let zefiro_ui::paint::DrawOp::Text { text, .. } = o { Some(text) } else { None }).collect();
+        assert!(texts.contains(&"‹ Editar barra".to_string()) && !texts.contains(&"Editar barra".to_string()), "{texts:?}");
+    }
+}
+
+#[test]
 fn options_button_appears_for_the_selected_clock_and_tab_cycles_everything() {
     let s = session();
     let names = ["Principal".to_string()];

@@ -252,6 +252,13 @@ impl Loop {
         let mut error = None;
         match action {
             EditorAction::Cancel => { self.editor = Some(editor); return self.finish_editor(None); }
+            EditorAction::BackToMenu => {
+                let monitor = editor.monitor;
+                self.editor = Some(editor);
+                self.finish_editor(None)?;
+                let fx = self.controller.handle(zefiro_bar::controller::PanelInput::ChipClick { monitor, chip: "zefiro".into() });
+                return self.run_effects(fx);
+            }
             EditorAction::Save => {
                 if let Err(message) = self.ctx.clock.validate_format(&editor.session.draft.clock.format) { error = Some(message); }
                 else if !editor.session.conflict {

@@ -16,6 +16,8 @@ pub enum EditorAction {
     MoveSection(Section), MoveBefore, MoveAfter, Options, Back,
     ToggleSeconds, EditFormat, SystemFormat, Reload, Reapply, ResolveFile, ResolveDraft,
     ToggleAutohide, TogglePrimaryOnly,
+    /// "‹ Editar barra": como o Cancelar, e o menu do Z abre no lugar.
+    BackToMenu,
     Cancel, Save,
 }
 
@@ -31,7 +33,8 @@ pub enum Zone { Section(Section), Shelf }
 pub enum Target { Button(EditorAction), Chip(String) }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ButtonKind { Plain, Primary, Segment { selected: bool }, Row, Switch { on: bool } }
+/// `Back`: o título "‹ Editar barra", que só ganha fundo sob o mouse ou o foco.
+pub enum ButtonKind { Plain, Primary, Segment { selected: bool }, Row, Switch { on: bool }, Back }
 
 #[derive(Debug, Clone)]
 pub struct Button { pub action: EditorAction, pub rect: Rect, pub label: String, pub enabled: bool, pub kind: ButtonKind }
@@ -104,6 +107,8 @@ impl EditorPanel {
         let inner = cx.width - s(2.0 * PAD);
         let enabled = !session.saving;
         let mut out = EditorLayout { size: Size { w: cx.width, h: 0.0 }, buttons: Vec::new(), zones: Vec::new(), chips: Vec::new(), labels: Vec::new(), empty_shelf: None, center_locked: cx.island_locked, scale: cx.scale };
+        // O título volta ao menu do Z, como o "‹ Tema" e o "‹ Configurações".
+        out.buttons.push(Button { action: EditorAction::BackToMenu, rect: Rect::new(s(PAD - 8.0), s(4.0), s(150.0), s(28.0)), label: "‹ Editar barra".into(), enabled, kind: ButtonKind::Back });
         let mut y = s(54.0);
 
         if cx.monitors.len() > 1 {
@@ -278,7 +283,6 @@ impl EditorPanel {
         let mut list = DisplayList::new(layout.size);
         let inner = layout.size.w - s(2.0 * PAD);
         let text = |size: f32, weight: FontWeight| TextStyle { size: s(size), weight, family: Family::Text };
-        list.push(DrawOp::Text { rect: Rect::new(s(PAD), s(12.0), inner, s(20.0)), text: "Editar barra".into(), style: text(14.0, FontWeight::SemiBold), color: tokens.text, align: Align::Leading });
         let message = if session.conflict && self.message.is_empty() { "A configuração mudou fora do editor" } else if self.message.is_empty() { "Arraste os itens entre as seções" } else { &self.message };
         list.push(DrawOp::Text { rect: Rect::new(s(PAD), s(32.0), inner, s(16.0)), text: message.into(), style: text(11.0, FontWeight::Regular), color: tokens.text_secondary, align: Align::Leading });
         for (rect, label) in &layout.labels {
@@ -370,6 +374,13 @@ impl EditorPanel {
                         list.push(DrawOp::RoundRect { rect, radius, color: veil });
                     }
                     color = on_accent(tokens.accent);
+                }
+                ButtonKind::Back => {
+                    if lit || pressed {
+                        list.push(DrawOp::RoundRect { rect, radius: s(10.0), color: tokens.raised });
+                    }
+                    list.push(DrawOp::Text { rect: rect.inset(s(8.0), 0.0), text: b.label.clone(), style: text(14.0, FontWeight::SemiBold), color: tokens.text, align: Align::Leading });
+                    continue;
                 }
                 ButtonKind::Switch { on } => {
                     let fill = if lit || pressed { tokens.raised_strong } else { tokens.raised };
