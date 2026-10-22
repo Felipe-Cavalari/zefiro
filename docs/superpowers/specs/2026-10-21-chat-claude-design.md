@@ -149,3 +149,48 @@ origem, conversa, edição, quebra de linha, layout do painel). Sonda `chat_prob
 
 Medidas finas do painel, ícones exatos, o texto do prompt do chat, a política de coalescer os
 redesenhos durante o streaming.
+
+## Segunda rodada: Codex, origem, modelo e conversas antigas (2026-10-21)
+
+Depois de usar o painel, o usuário pediu: escolher o WSL e o modelo pela interface, ver conversas
+antigas como no `/resume` (só as feitas no chat da barra, decisão dele) e conversar também com o
+Codex.
+
+### Codex pelo `codex app-server` (decisão do agente)
+
+- `codex exec --json` só entrega a resposta inteira no fim (~6 s). O `codex app-server` (JSON-RPC
+  por linhas no stdin/stdout, o mesmo que os editores usam) manda `item/agentMessage/delta`, aceita
+  `turn/interrupt`, retoma por `thread/resume` e devolve os modelos por `model/list`. Medido: ~5 s
+  por resposta no WSL (0.163) e no Windows (0.149).
+- Sequência: `initialize`, notificação `initialized`, `model/list`; na primeira pergunta,
+  `thread/start` (`sandbox = "read-only"`, `approvalPolicy = "never"`, `developerInstructions` = o
+  prompt do chat) e depois `turn/start` com o modelo escolhido; numa conversa antiga,
+  `thread/resume` ao subir. O id da conversa no Codex é o `thread.id`.
+- O modelo vai sempre explícito, tirado do `model/list` (padrão = o `isDefault`): o Codex 0.149 do
+  Windows não aceita o `gpt-6.1-sol` do `config.toml` do usuário, e a lista dele só traz o que ele
+  aceita.
+- `codex.exe`: `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin\codex.exe` ou o `PATH`; no WSL,
+  `exec codex app-server` no shell de login, na mesma pasta do chat.
+
+### Interface
+
+- Cabeçalho: "Claude | Codex" (segmentos), e à direita os botões de conversas antigas (relógio) e
+  de conversa nova (+). Embaixo, dois seletores: origem e modelo.
+- Origem: "Automático", "Windows" (se o executável existe) e as distros **rodando** que têm o
+  `claude`/`codex` (descobertas numa thread ao abrir o seletor). Trocar de origem ou de agente começa
+  uma conversa nova (a sessão só existe onde nasceu); com a conversa vazia, só troca.
+- Modelo: Claude = Padrão, Opus, Sonnet, Haiku (aliases do `--model`); Codex = o `model/list`. Trocar
+  no meio da conversa mantém o contexto: o Claude reinicia o processo com `--resume --model`, o Codex
+  manda o modelo no próximo `turn/start`.
+- Conversas antigas: lista (mais recente primeiro) com o título (a primeira pergunta), agente,
+  origem e data; clique reabre e continua; lixeira apaga a cópia do Zefiro (a sessão do
+  `claude`/`codex` fica). Esc ou a seta voltam ao chat.
+- As escolhas ficam em `[chat] agent` e em `[chat.claude]`/`[chat.codex]` (`origin`, `model`),
+  gravadas pelo painel sem fechá-lo (como o `[terminal]`). Reabrir uma conversa antiga seleciona o
+  agente, a origem e o modelo dela.
+
+### Gravação
+
+- Uma conversa por arquivo: `%LOCALAPPDATA%\zefiro\chat\conversas\<id>.json` (id do Zefiro; a
+  sessão do agente fica dentro). O `conversa.json` da primeira rodada vira um arquivo desses.
+- Ao abrir o painel pela primeira vez, volta a conversa mais recente.
