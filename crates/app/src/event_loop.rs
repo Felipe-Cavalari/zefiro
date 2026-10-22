@@ -794,6 +794,11 @@ impl Loop {
 pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
     let _context_hook = zefiro_platform_windows::bar_context::BarContextHook::install().map_err(|error| tracing::warn!("recuperação pelo botão direito indisponível: {error}")).ok();
     let mut l = Loop::new(ctx, bars)?;
+    // Vive até o fim do laço; soltar desinstala o gancho.
+    let foreground_hook = window::ForegroundHook::install();
+    if foreground_hook.is_none() {
+        tracing::warn!("gancho de foco indisponível: a barra só sai da frente da tela cheia pelo aviso do Windows");
+    }
     l.schedule_clock();
     if let Err(e) = l.refresh_island_accent() {
         tracing::warn!(error = %e, "não consegui aplicar o destaque da ilha");

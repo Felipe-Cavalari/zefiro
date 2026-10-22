@@ -18,6 +18,8 @@ pub const WM_USER_BASE: u32 = WM_APP + 0x100;
 const WM_APPBAR: u32 = WM_APP + 1;
 /// Cliques no ícone da bandeja (`tray`); `lParam` é a mensagem de mouse.
 pub const WM_TRAY: u32 = WM_APP + 3;
+/// Outro app ganhou o foco (`ForegroundHook`).
+const WM_FOREGROUND: u32 = WM_APP + 4;
 /// Em `Win32::UI::Controls` na crate windows; definida aqui para não puxar a feature inteira.
 const WM_MOUSELEAVE: u32 = 0x02A3;
 
@@ -56,6 +58,8 @@ pub enum WinEvent {
     /// Ícone da bandeja: `mouse` é WM_LBUTTONUP, WM_RBUTTONUP etc.
     Tray { mouse: u32 },
     TaskbarCreated,
+    /// Uma janela de outro processo veio para o primeiro plano (`ForegroundHook`).
+    ForegroundChanged,
     SettingChanged,
     User { code: u32 },
     /// Pedido de fechar a janela (Alt+F4, `taskkill` sem /f): o app decide o que fechar.
@@ -214,6 +218,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         WM_CLOSE => push(WinEvent::Close { hwnd: h }),
         m if m == WM_APPBAR => push(WinEvent::AppBar { hwnd: h, notification: wp.0 as u32, param: lp.0 }),
         m if m == WM_TRAY => push(WinEvent::Tray { mouse: (lp.0 & 0xFFFF) as u32 }),
+        m if m == WM_FOREGROUND => push(WinEvent::ForegroundChanged),
         m if (WM_USER_BASE..WM_USER_BASE + 0x100).contains(&m) => push(WinEvent::User { code: m - WM_USER_BASE }),
         m if Some(&m) == TASKBAR_CREATED.get() => push(WinEvent::TaskbarCreated),
         m if Some(&m) == ISLAND_GEOMETRY.get() => push(WinEvent::IslandGeometryChanged),
@@ -300,6 +305,33 @@ pub fn post_user(code: u32) {
         // SAFETY: PostMessage é seguro entre threads; a janela de mensagens vive até o fim do app.
         let _ = unsafe { PostMessageW(Some(HWND(h as *mut _)), WM_USER_BASE + code, WPARAM(0), LPARAM(0)) };
     }
+}
+
+/// Avisa a janela de mensagens a cada troca do primeiro plano. O aviso de tela cheia do Windows
+/// (`ABN_FULLSCREENAPP`) chega uma vez só: sem isto, a barra que voltou quando o foco saiu do jogo
+/// ficava por cima dele quando o jogo voltava ao foco.
+pub struct ForegroundHook(windows::Win32::UI::Accessibility::HWINEVENTHOOK);
+
+impl ForegroundHook {
+    pub fn install() -> Option<Self> {
+        use windows::Win32::UI::Accessibility::SetWinEventHook;
+        // SAFETY: gancho fora do processo; o callback roda nesta thread, que bombeia mensagens.
+        let hook = unsafe { SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, None, Some(on_foreground), 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS) };
+        (!hook.is_invalid()).then_some(Self(hook))
+    }
+}
+
+impl Drop for ForegroundHook {
+    fn drop(&mut self) {
+        // SAFETY: handle instalado por esta thread.
+        let _ = unsafe { windows::Win32::UI::Accessibility::UnhookWinEvent(self.0) };
+    }
+}
+
+unsafe extern "system" fn on_foreground(_: windows::Win32::UI::Accessibility::HWINEVENTHOOK, _: u32, _: HWND, _: i32, _: i32, _: u32, _: u32) {
+    // Só posta: o laço trata depois do GetMessage, com os outros eventos.
+    // SAFETY: PostMessage sem ponteiros para a janela de mensagens, que vive até o fim do app.
+    let _ = unsafe { PostMessageW(Some(message_window()), WM_FOREGROUND, WPARAM(0), LPARAM(0)) };
 }
 
 /// A janela de mensagens (temporizadores, avisos do sistema).

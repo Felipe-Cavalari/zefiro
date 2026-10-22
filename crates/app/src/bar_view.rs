@@ -65,6 +65,8 @@ pub struct BarView {
     /// Mouse em cima do player desta barra (espia só ele).
     player_hover: bool,
     hidden: bool,
+    /// O app em tela cheia que escondeu a barra (o HWND); ela volta quando ele sai, mesmo com o foco em outro monitor.
+    fullscreen_window: isize,
     /// Áreas clicáveis sem a ilha (a ilha muda de tamanho sem refazer o layout inteiro).
     interactive_base: Vec<Rect>,
 }
@@ -167,7 +169,7 @@ impl BarView {
         let divider = ctx.comp.compositor.CreateSpriteVisual()?;
         root.Children()?.InsertAtTop(&divider)?;
         let groups = Vec::new();
-        let mut view = BarView { hwnd, monitor: monitor.clone(), scale, _target: target, root, strip, divider, groups, rails: Vec::new(), chips: Vec::new(), layout: None, appbar: false, hover: None, active: None, guides: None, drag_ghost: None, drag_marker: None, island: None, player: None, player_hover: false, hidden: false, interactive_base: Vec::new() };
+        let mut view = BarView { hwnd, monitor: monitor.clone(), scale, _target: target, root, strip, divider, groups, rails: Vec::new(), chips: Vec::new(), layout: None, appbar: false, hover: None, active: None, guides: None, drag_ghost: None, drag_marker: None, island: None, player: None, player_hover: false, hidden: false, fullscreen_window: 0, interactive_base: Vec::new() };
         view.apply(ctx, false)?;
         window::set_bounds(hwnd, bounds, true);
         Ok(view)
@@ -709,6 +711,18 @@ impl BarView {
         } else {
             window::show(self.hwnd);
         }
+    }
+
+    /// Esconde por causa do app em tela cheia `window` (ver `fullscreen_window`).
+    pub fn hide_for_fullscreen(&mut self, window: isize) {
+        self.fullscreen_window = window;
+        if !self.hidden {
+            self.set_hidden(true);
+        }
+    }
+
+    pub fn fullscreen_window(&self) -> isize {
+        self.fullscreen_window
     }
 
     pub fn destroy(self) {
