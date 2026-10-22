@@ -11,6 +11,8 @@ theme = "obsidian"
 [bar]
 height = "completa"   # completa | compacta
 format = "faixa"      # faixa | pilulas | ilhas | fluent | vidro
+# autohide = true     # a barra só aparece com o mouse no topo da tela (Editar barra)
+# display = "principal" # todos | principal: só o monitor principal tem barra (Editar barra)
 
 [bar.sections]
 start  = ["zefiro"]
@@ -147,11 +149,30 @@ pub struct BarConfig {
     pub sections: Sections,
     pub layout_mode: LayoutMode,
     pub monitors: BTreeMap<String, MonitorConfig>,
+    /// A barra só aparece com o mouse no topo do monitor (Editar barra). Ver `Config::autohide`.
+    pub autohide: bool,
+    /// Em que monitores há barra (Editar barra). Não é `monitors`: esse nome são os layouts próprios.
+    pub display: BarDisplay,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LayoutMode { #[default] Shared, PerMonitor }
+
+/// `todos` (padrão) ou `principal`: só o monitor principal do Windows tem barra. Os layouts dos
+/// outros continuam no arquivo e voltam ao trocar para `todos`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BarDisplay { #[default] Todos, Principal }
+
+impl BarDisplay {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BarDisplay::Todos => "todos",
+            BarDisplay::Principal => "principal",
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct MonitorConfig {
@@ -203,6 +224,18 @@ impl BarConfig {
         self.sections.ids().any(|i| i == id) || self.monitors.values().any(|m| m.sections.ids().any(|i| i == id))
     }
 
+    /// Este monitor tem barra? (`display = "principal"` deixa só o principal.)
+    pub fn shows_on(&self, primary: bool) -> bool {
+        primary || self.display == BarDisplay::Todos
+    }
+
+    /// Índices dos monitores (na ordem de `primary`, um por monitor) que ganham barra. Sem nenhum
+    /// marcado como principal, fica o primeiro: o laço sempre tem ao menos uma barra.
+    pub fn monitors_with_bar(&self, primary: &[bool]) -> Vec<usize> {
+        let kept: Vec<usize> = (0..primary.len()).filter(|&i| self.shows_on(primary[i])).collect();
+        if kept.is_empty() && !primary.is_empty() { vec![0] } else { kept }
+    }
+
     pub fn sections_for(&self, monitor_id: Option<&str>) -> &Sections {
         if self.layout_mode == LayoutMode::PerMonitor
             && let Some(entry) = monitor_id.and_then(|id| self.monitors.get(id)) {
@@ -247,6 +280,12 @@ impl Config {
     pub fn shows_embedded_island(&self) -> bool {
         self.island.embedded() && self.bar.uses(ISLAND_CHIP)
     }
+
+    /// Ocultar automaticamente vale agora? Com a ilha externa, não: ela é outro processo e não
+    /// acompanharia a barra.
+    pub fn autohide(&self) -> bool {
+        self.bar.autohide && !self.island.external()
+    }
 }
 
 impl IslandConfig {
@@ -271,7 +310,7 @@ impl Default for Config {
 
 impl Default for BarConfig {
     fn default() -> Self {
-        BarConfig { height: BarHeight::Completa, format: BarFormat::Faixa, sections: Sections::default(), layout_mode: LayoutMode::Shared, monitors: BTreeMap::new() }
+        BarConfig { height: BarHeight::Completa, format: BarFormat::Faixa, sections: Sections::default(), layout_mode: LayoutMode::Shared, monitors: BTreeMap::new(), autohide: false, display: BarDisplay::Todos }
     }
 }
 

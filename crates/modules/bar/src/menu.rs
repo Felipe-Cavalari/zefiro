@@ -50,7 +50,7 @@ fn theme_actions() -> [(&'static str, MenuAction); 2] {
 }
 
 /// Chave liga/desliga à direita da linha: trilho no destaque quando ligada, botão do lado dela.
-fn switch(list: &mut DisplayList, row: Rect, on: bool, scale: f32, tokens: &Tokens) {
+pub(crate) fn switch(list: &mut DisplayList, row: Rect, on: bool, scale: f32, tokens: &Tokens) {
     let s = |v: f32| v * scale;
     let track = Rect::new(row.right() - s(46.0), row.y + (row.h - s(18.0)) / 2.0, s(34.0), s(18.0));
     list.push(DrawOp::RoundRect { rect: track, radius: track.h / 2.0, color: if on { tokens.accent } else { tokens.text_tertiary.with_alpha(0.4) } });

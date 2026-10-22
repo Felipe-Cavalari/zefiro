@@ -36,7 +36,7 @@ pub fn handle(l: &mut Loop, e: WinEvent) -> Result<bool> {
             for p in l.panels.drain(..) {
                 p.destroy();
             }
-            for m in monitors::list() {
+            for m in bar_monitors(&l.ctx.config) {
                 let mut b = BarView::create(&l.ctx, &m)?;
                 b.register_appbar(&l.ctx);
                 l.panels.push(PanelView::create(&l.ctx, &m)?);
@@ -67,6 +67,13 @@ pub fn handle(l: &mut Loop, e: WinEvent) -> Result<bool> {
         _ => {}
     }
     Ok(true)
+}
+
+/// Os monitores que ganham barra (`[bar] display`: todos ou só o principal).
+pub fn bar_monitors(config: &zefiro_core::config::Config) -> Vec<monitors::Monitor> {
+    let all = monitors::list();
+    let kept = config.bar.monitors_with_bar(&all.iter().map(|m| m.primary).collect::<Vec<_>>());
+    all.into_iter().enumerate().filter(|(i, _)| kept.contains(i)).map(|(_, m)| m).collect()
 }
 
 /// A barra de um monitor fica escondida? `verdict` é o que a janela em primeiro plano diz sobre ele

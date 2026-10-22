@@ -1,6 +1,6 @@
 //! Sessão portável de edição. Alterações são prévias até a confirmação da persistência.
 
-use zefiro_core::config::{Config, LayoutMode, MonitorConfig, Sections};
+use zefiro_core::config::{BarDisplay, Config, LayoutMode, MonitorConfig, Sections};
 use zefiro_core::config_edit::ConfigPatch;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,6 +92,18 @@ impl EditorSession {
         self.draft.bar.layout_mode = mode;
     }
 
+    /// "Ocultar automaticamente": a barra só aparece com o mouse no topo.
+    pub fn toggle_autohide(&mut self) {
+        if !self.saving { self.draft.bar.autohide = !self.draft.bar.autohide; }
+    }
+
+    /// "Só no monitor principal". Os layouts próprios dos outros monitores ficam guardados.
+    pub fn toggle_primary_only(&mut self) {
+        if self.saving { return; }
+        self.cancel_move();
+        self.draft.bar.display = match self.draft.bar.display { BarDisplay::Todos => BarDisplay::Principal, BarDisplay::Principal => BarDisplay::Todos };
+    }
+
     pub fn copy_monitor_layout(&mut self, source: &str) -> Result<(), String> {
         let sections = self.draft.bar.monitors.get(source).ok_or("Monitor de origem não encontrado")?.sections.clone();
         *self.sections_mut()? = sections;
@@ -140,6 +152,8 @@ impl EditorSession {
             let old = self.original.bar.monitors.get(id).map(|entry| &entry.sections);
             patch_sections(&mut patch, &["bar", "monitors", id, "sections"], old, &entry.sections);
         }
+        if self.original.bar.autohide != self.draft.bar.autohide { patch.set_bool(&["bar", "autohide"], self.draft.bar.autohide); }
+        if self.original.bar.display != self.draft.bar.display { patch.set_string(&["bar", "display"], self.draft.bar.display.as_str()); }
         if self.original.clock.seconds != self.draft.clock.seconds { patch.set_bool(&["clock", "seconds"], self.draft.clock.seconds); }
         if self.original.clock.format != self.draft.clock.format { patch.set_string(&["clock", "format"], &self.draft.clock.format); }
         patch

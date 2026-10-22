@@ -2,7 +2,7 @@
 //! barra de ferramentas" do Mac), prateleira com os itens fora da barra e botões com hover e aperto.
 //! Arrastar um chip entre as seções (ou para a prateleira) só muda o rascunho ao soltar.
 
-use zefiro_core::config::LayoutMode;
+use zefiro_core::config::{BarDisplay, LayoutMode};
 use zefiro_platform::color::Rgba;
 use zefiro_platform::geometry::{Point, Rect, Size};
 use zefiro_platform::text::{Align, Family, FontWeight, TextMeasurer, TextStyle};
@@ -15,6 +15,7 @@ pub enum EditorAction {
     Monitor(usize), ToggleMode, SelectItem(String), Add(String), Remove,
     MoveSection(Section), MoveBefore, MoveAfter, Options, Back,
     ToggleSeconds, EditFormat, SystemFormat, Reload, Reapply, ResolveFile, ResolveDraft,
+    ToggleAutohide, TogglePrimaryOnly,
     Cancel, Save,
 }
 
@@ -30,7 +31,7 @@ pub enum Zone { Section(Section), Shelf }
 pub enum Target { Button(EditorAction), Chip(String) }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ButtonKind { Plain, Primary, Segment { selected: bool }, Row }
+pub enum ButtonKind { Plain, Primary, Segment { selected: bool }, Row, Switch { on: bool } }
 
 #[derive(Debug, Clone)]
 pub struct Button { pub action: EditorAction, pub rect: Rect, pub label: String, pub enabled: bool, pub kind: ButtonKind }
@@ -106,14 +107,16 @@ impl EditorPanel {
         let mut y = s(54.0);
 
         if cx.monitors.len() > 1 {
+            // Só no principal: os outros monitores não têm barra, escolher monitor ou layout não faz efeito.
+            let per_monitor = enabled && session.draft.bar.display == BarDisplay::Todos;
             let segments_w = inner * 0.62;
             let each = segments_w / cx.monitors.len() as f32;
             for (i, name) in cx.monitors.iter().enumerate() {
-                out.buttons.push(Button { action: EditorAction::Monitor(i), rect: Rect::new(s(PAD) + each * i as f32, y, each, s(CHIP_H)), label: name.clone(), enabled, kind: ButtonKind::Segment { selected: i == cx.monitor } });
+                out.buttons.push(Button { action: EditorAction::Monitor(i), rect: Rect::new(s(PAD) + each * i as f32, y, each, s(CHIP_H)), label: name.clone(), enabled: per_monitor, kind: ButtonKind::Segment { selected: i == cx.monitor } });
             }
             let shared = session.draft.bar.layout_mode == LayoutMode::Shared;
             let x = s(PAD) + segments_w + s(8.0);
-            out.buttons.push(Button { action: EditorAction::ToggleMode, rect: Rect::new(x, y, cx.width - s(PAD) - x, s(CHIP_H)), label: if shared { "Mesmo layout em todos" } else { "Layout próprio" }.into(), enabled, kind: ButtonKind::Plain });
+            out.buttons.push(Button { action: EditorAction::ToggleMode, rect: Rect::new(x, y, cx.width - s(PAD) - x, s(CHIP_H)), label: if shared { "Mesmo layout em todos" } else { "Layout próprio" }.into(), enabled: per_monitor, kind: ButtonKind::Plain });
             y += s(CHIP_H + 14.0);
         }
 
@@ -191,7 +194,20 @@ impl EditorPanel {
             y = out.buttons.last().map_or(y, |b| b.rect.bottom());
         }
 
-        y += s(18.0);
+        // Onde e quando a barra aparece: valem ao concluir, como o resto.
+        y += s(14.0);
+        let external = session.draft.island.external();
+        let autohide_label = if external { "Ocultar automaticamente · indisponível com a ilha externa" } else { "Ocultar automaticamente" };
+        let mut switches = vec![(EditorAction::ToggleAutohide, autohide_label, session.draft.bar.autohide && !external, enabled && !external)];
+        if cx.monitors.len() > 1 {
+            switches.push((EditorAction::TogglePrimaryOnly, "Só no monitor principal", session.draft.bar.display == BarDisplay::Principal, enabled));
+        }
+        for (action, label, on, enabled) in switches {
+            out.buttons.push(Button { action, rect: Rect::new(s(PAD), y, inner, s(BUTTON_H)), label: label.into(), enabled, kind: ButtonKind::Switch { on } });
+            y += s(BUTTON_H + 4.0);
+        }
+
+        y += s(14.0);
         let half = (inner - s(8.0)) / 2.0;
         out.buttons.push(Button { action: EditorAction::Cancel, rect: Rect::new(s(PAD), y, half, s(BUTTON_H)), label: "Cancelar".into(), enabled, kind: ButtonKind::Plain });
         out.buttons.push(Button { action: EditorAction::Save, rect: Rect::new(s(PAD) + half + s(8.0), y, half, s(BUTTON_H)), label: if session.saving { "Gravando…" } else { "Concluir" }.into(), enabled: enabled && !session.conflict, kind: ButtonKind::Primary });
@@ -352,12 +368,17 @@ impl EditorPanel {
                     }
                     color = on_accent(tokens.accent);
                 }
+                ButtonKind::Switch { on } => {
+                    let fill = if lit || pressed { tokens.raised_strong } else { tokens.raised };
+                    list.push(DrawOp::RoundRect { rect, radius, color: fill });
+                    crate::menu::switch(&mut list, rect.inset(s(4.0), 0.0), on && b.enabled, layout.scale, tokens);
+                }
                 _ => {
                     let fill = if lit || pressed { tokens.raised_strong } else { tokens.raised };
                     list.push(DrawOp::RoundRect { rect, radius, color: fill });
                 }
             }
-            let (label_rect, align) = if b.kind == ButtonKind::Row { (rect.inset(s(14.0), 0.0), Align::Leading) } else { (rect.inset(s(8.0), 0.0), Align::Center) };
+            let (label_rect, align) = if matches!(b.kind, ButtonKind::Row | ButtonKind::Switch { .. }) { (rect.inset(s(14.0), 0.0), Align::Leading) } else { (rect.inset(s(8.0), 0.0), Align::Center) };
             let weight = if b.kind == ButtonKind::Primary { FontWeight::SemiBold } else { FontWeight::Regular };
             list.push(DrawOp::Text { rect: label_rect, text: b.label.clone(), style: TextStyle { weight, ..body }, color, align });
         }

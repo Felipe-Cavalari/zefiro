@@ -73,6 +73,34 @@ fn shelf_lists_items_off_the_bar_and_accepts_removal() {
 }
 
 #[test]
+fn clean_bar_switches_sit_above_the_buttons_on_both_pages() {
+    let mut s = session();
+    let two = ["Principal".to_string(), "Lateral".to_string()];
+    let one = ["Principal".to_string()];
+    for page in [zefiro_bar::editor_panel::EditorPage::Items, zefiro_bar::editor_panel::EditorPage::Options] {
+        let panel = EditorPanel { page, ..Default::default() };
+        let layout = panel.layout(&cx(&s, &two, false), &FixedWidthMeasurer);
+        let find = |a: EditorAction| layout.buttons.iter().find(|b| b.action == a).unwrap_or_else(|| panic!("{a:?} em {page:?}")).clone();
+        let (autohide, primary, save) = (find(EditorAction::ToggleAutohide), find(EditorAction::TogglePrimaryOnly), find(EditorAction::Save));
+        assert!(autohide.enabled && primary.enabled);
+        assert!(autohide.rect.bottom() <= save.rect.y && primary.rect.bottom() <= save.rect.y, "acima do Cancelar/Concluir");
+    }
+    // Um monitor só: "Só no monitor principal" não aparece.
+    let layout = EditorPanel::default().layout(&cx(&s, &one, false), &FixedWidthMeasurer);
+    assert!(!layout.buttons.iter().any(|b| b.action == EditorAction::TogglePrimaryOnly));
+    // Só no principal ligado: a escolha de monitor e de layout fica apagada.
+    s.toggle_primary_only();
+    let layout = EditorPanel::default().layout(&cx(&s, &two, false), &FixedWidthMeasurer);
+    for b in layout.buttons.iter().filter(|b| matches!(b.action, EditorAction::Monitor(_) | EditorAction::ToggleMode)) {
+        assert!(!b.enabled, "{:?} fica apagado", b.action);
+    }
+    // Ilha externa: ocultar automaticamente fica apagado.
+    s.draft.island.engine = zefiro_core::config::IslandEngine::Externa;
+    let layout = EditorPanel::default().layout(&cx(&s, &two, false), &FixedWidthMeasurer);
+    assert!(!layout.buttons.iter().find(|b| b.action == EditorAction::ToggleAutohide).unwrap().enabled);
+}
+
+#[test]
 fn options_button_appears_for_the_selected_clock_and_tab_cycles_everything() {
     let s = session();
     let names = ["Principal".to_string()];

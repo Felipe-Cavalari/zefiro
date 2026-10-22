@@ -52,6 +52,36 @@ fn layout_limits_reject_instead_of_truncating() {
 }
 
 #[test]
+fn clean_bar_options_default_to_todays_behavior() {
+    let config = parse_config(DEFAULT_CONFIG).unwrap();
+    assert!(!config.bar.autohide);
+    assert_eq!(config.bar.display, BarDisplay::Todos);
+    assert!(config.bar.shows_on(false), "sem a chave, todo monitor tem barra");
+
+    let text = "[bar]\nautohide = true\ndisplay = 'principal'\nlayout_mode = 'per_monitor'\n[bar.monitors.x.sections]\nstart = []\ncenter = ['clock']\nend = []";
+    let config = parse_config(text).unwrap();
+    assert!(config.bar.shows_on(true) && !config.bar.shows_on(false), "só o principal");
+    assert_eq!(config.bar.sections_for(Some("x")).center, ["clock"], "o layout do secundário continua guardado");
+    assert!(config.autohide());
+    assert!(parse_config("[bar]\ndisplay = 'segundo'").is_err(), "valor errado é erro, como height e format");
+
+    // Ilha externa: outro processo, não acompanha a barra; ocultar automaticamente não vale.
+    let external = parse_config("[bar]\nautohide = true\n[island]\nengine = 'externa'").unwrap();
+    assert!(!external.autohide());
+}
+
+#[test]
+fn primary_only_keeps_one_bar_even_without_a_primary_flag() {
+    let mut bar = BarConfig::default();
+    assert_eq!(bar.monitors_with_bar(&[false, true, false]), [0, 1, 2]);
+    bar.display = BarDisplay::Principal;
+    assert_eq!(bar.monitors_with_bar(&[false, true, false]), [1]);
+    // Nenhum marcado como principal (troca de monitor no meio): fica o primeiro, nunca zero barras.
+    assert_eq!(bar.monitors_with_bar(&[false, false]), [0]);
+    assert!(bar.monitors_with_bar(&[]).is_empty());
+}
+
+#[test]
 fn reading_a_legacy_file_does_not_rewrite_it() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");

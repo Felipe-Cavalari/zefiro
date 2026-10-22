@@ -27,7 +27,7 @@ use std::time::Instant;
 use zefiro_core::config::{default_config_dir, load_or_create};
 use zefiro_core::observability::{default_log_dir, init_logging, install_panic_hook};
 use zefiro_platform::geometry::Rect;
-use zefiro_platform_windows::{compositor::Comp, gfx::Gfx, monitors, system, text::DWriteText, window};
+use zefiro_platform_windows::{compositor::Comp, gfx::Gfx, system, text::DWriteText, window};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -74,7 +74,7 @@ fn run(started: Instant) -> windows::core::Result<()> {
     let ctx = app::AppCtx { gfx, comp, text, theme, config, config_path, themes_dir, clock: zefiro_integration_clock::windows::WindowsClock, island: Default::default(), devices: Default::default(), usage: Default::default(), system: Default::default(), epoch: started };
 
     let mut bars = Vec::new();
-    for m in monitors::list() {
+    for m in robustness::bar_monitors(&ctx.config) {
         bars.push(bar_view::BarView::create(&ctx, &m)?);
     }
     tracing::info!(ms = started.elapsed().as_millis() as u64, monitors = bars.len(), "primeiro quadro da barra");

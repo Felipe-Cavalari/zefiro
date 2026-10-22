@@ -307,6 +307,14 @@ impl Loop {
             }
             EditorAction::Back => { editor.ui.page = EditorPage::Items; editor.ui.focus = None; editor.ui.hover = None; editor.ui.editing_format = false; editor.ui.message.clear(); }
             EditorAction::ToggleSeconds => editor.session.draft.clock.seconds = !editor.session.draft.clock.seconds,
+            EditorAction::ToggleAutohide => {
+                editor.session.toggle_autohide();
+                editor.ui.message = if editor.session.draft.bar.autohide { "Ao concluir, a barra só aparece com o mouse no topo da tela".into() } else { "Ao concluir, a barra fica sempre visível".into() };
+            }
+            EditorAction::TogglePrimaryOnly => {
+                editor.session.toggle_primary_only();
+                editor.ui.message = if editor.session.draft.bar.display == zefiro_core::config::BarDisplay::Principal { "Ao concluir, só o monitor principal terá barra; os layouts dos outros ficam guardados".into() } else { "Ao concluir, todos os monitores terão barra".into() };
+            }
             EditorAction::EditFormat => { editor.ui.editing_format = true; editor.ui.format_select_all = true; editor.ui.message = "Digite o padrão de data do Windows; Enter confirma, Ctrl+A seleciona tudo".into(); }
             EditorAction::SystemFormat => { editor.session.draft.clock.format.clear(); editor.ui.editing_format = false; }
             EditorAction::Reload => { editor.session.reload(); editor.choices.clear(); editor.conflicts.clear(); editor.ui.message = "Configuração recarregada".into(); }
