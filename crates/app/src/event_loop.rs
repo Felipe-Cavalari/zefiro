@@ -3,8 +3,9 @@
 use windows::Win32::UI::WindowsAndMessaging::PostQuitMessage;
 use windows::core::Result;
 use zefiro_bar::calendar::{calendar_names, calendar_paint};
-use zefiro_bar::controller::{PanelController, PanelEffect, PanelInput, PanelKind};
+use zefiro_bar::controller::{PanelController, PanelEffect, PanelInput, PanelKind, SETTINGS_CHIP};
 use zefiro_bar::menu::{MenuAction, MenuModel, NavKey, ThemeSwatch};
+use zefiro_bar::settings::{SettingsAction, SettingsModel};
 use zefiro_core::config::set_value;
 use zefiro_integration_clock::format::ClockText;
 use zefiro_integration_clock::grid::{month_grid, ms_to_next_minute, shift_month};
@@ -121,6 +122,7 @@ pub struct Loop {
     overflow_focus: usize,
     overflow_scroll: usize,
     menu: Option<MenuModel>,
+    settings: Option<SettingsModel>,
     pub(crate) shown_month: (i32, u32),
     pub(crate) island: crate::island_loop::IslandRuntime,
     pub(crate) debug: crate::debug_loop::DebugRuntime,
@@ -154,7 +156,7 @@ impl Loop {
             panels.push(PanelView::create(&ctx, b.monitor())?);
         }
         let today = now_local().date;
-        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), debug: Default::default(), update: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), terminal: Default::default(), chat: Default::default(), power: Default::default(), system: Default::default(), autohide: Default::default(), cycles: None })
+        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, settings: None, shown_month: (today.year, today.month), island: Default::default(), debug: Default::default(), update: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), terminal: Default::default(), chat: Default::default(), power: Default::default(), system: Default::default(), autohide: Default::default(), cycles: None })
     }
 
     pub(crate) fn bar_index(&self, hwnd: isize) -> Option<usize> { self.bars.iter().position(|b| b.hwnd().0 as isize == hwnd) }
@@ -163,9 +165,15 @@ impl Loop {
     fn panel_list(&mut self, kind: PanelKind, scale: f32) -> DisplayList {
         match kind {
             PanelKind::Menu => {
-                let m = self.menu.get_or_insert_with(|| MenuModel::new(self.ctx.config.bar.height, self.ctx.config.bar.format, &self.ctx.config.theme, swatches(&self.ctx)).with_autostart(zefiro_platform_windows::system::autostart_enabled()));
+                let m = self.menu.get_or_insert_with(|| MenuModel::new(self.ctx.config.bar.height, self.ctx.config.bar.format, &self.ctx.config.theme, swatches(&self.ctx)));
                 m.set_update(self.update.label.clone());
                 m.set_acrylic(self.ctx.theme.acrylic_wanted(), zefiro_platform_windows::system::transparency_enabled());
+                m.paint(scale, &self.ctx.theme.tokens)
+            }
+            PanelKind::Settings => {
+                let hud = self.hud_open();
+                let m = self.settings.get_or_insert_with(|| SettingsModel::new(zefiro_platform_windows::system::autostart_enabled(), hud, env!("CARGO_PKG_VERSION")));
+                m.hud = hud;
                 m.paint(scale, &self.ctx.theme.tokens)
             }
             PanelKind::Calendar => {
@@ -222,6 +230,7 @@ impl Loop {
                         }
                     }
                     self.menu = None;
+                    self.settings = None;
                     self.island_panel_closed();
                     self.devices_panel_closed();
                     self.power_panel_closed();
@@ -316,6 +325,8 @@ impl Loop {
     }
 
     pub(crate) fn panel_anchor(&self, monitor: usize, id: &str) -> Rect {
+        // As Configurações abrem no lugar do menu do Z.
+        let id = if id == SETTINGS_CHIP { "zefiro" } else { id };
         self.bars[monitor].chip_rect(id).unwrap_or_else(|| {
             let bar = &self.bars[monitor];
             let rect = bar.monitor().rect;
@@ -381,15 +392,11 @@ impl Loop {
                 }
                 return self.redraw_open_panel();
             }
-            MenuAction::ToggleHud => return self.toggle_hud(),
             MenuAction::InstallUpdate => return self.install_update(),
-            MenuAction::ExportDiagnostics => {
-                self.close_open_panel()?;
-                return self.export_diagnostics();
-            }
-            MenuAction::RestartIsland => {
-                window::post_user(USER_ISLAND);
-                return Ok(());
+            MenuAction::OpenSettings => {
+                let monitor = self.controller.open().map_or(0, |p| p.monitor);
+                let fx = self.controller.handle(PanelInput::ChipClick { monitor, chip: SETTINGS_CHIP.into() });
+                return self.run_effects(fx);
             }
             MenuAction::ToggleAcrylic => {
                 // Sem "Efeitos de transparência" no Windows não há acrílico para ligar.
@@ -400,14 +407,6 @@ impl Loop {
                 self.ctx.config.acrylic = Some(on);
                 self.ctx.theme.acrylic = Some(on);
                 let _ = set_value(&path, &["acrylic"], on);
-            }
-            MenuAction::ToggleAutostart => {
-                crate::tray_loop::toggle_autostart();
-                // O menu continua aberto, com a chave na posição nova.
-                if let Some(m) = &mut self.menu {
-                    m.set_autostart(zefiro_platform_windows::system::autostart_enabled());
-                }
-                return self.redraw_open_panel();
             }
             MenuAction::Exit => {
                 // SAFETY: encerra o laço de mensagens desta thread.
@@ -427,6 +426,25 @@ impl Loop {
         }
         self.apply_bars(true)?;
         crate::island::sync(&self.ctx);
+        self.redraw_open_panel()
+    }
+
+    /// Item das Configurações: vale na hora; as chaves continuam no painel aberto, na posição nova.
+    fn settings_action(&mut self, a: SettingsAction) -> Result<()> {
+        match a {
+            SettingsAction::ToggleAutostart => {
+                crate::tray_loop::toggle_autostart();
+                if let Some(m) = &mut self.settings {
+                    m.autostart = zefiro_platform_windows::system::autostart_enabled();
+                }
+            }
+            SettingsAction::ToggleHud => self.toggle_hud()?,
+            SettingsAction::RestartIsland => window::post_user(USER_ISLAND),
+            SettingsAction::ExportDiagnostics => {
+                self.close_open_panel()?;
+                return self.export_diagnostics();
+            }
+        }
         self.redraw_open_panel()
     }
 
@@ -496,7 +514,10 @@ impl Loop {
                     let (ox, oy) = self.panels[i].content_origin();
                     let scale = self.bars[i].scale();
                     let hit = self.menu.as_ref().and_then(|m| m.hit(Point { x: x - ox, y: y - oy }, scale));
-                    if self.controller.open().is_some_and(|o| o.kind.tabbed()) {
+                    let setting = self.settings.as_ref().and_then(|m| m.hit(Point { x: x - ox, y: y - oy }, scale));
+                    if let Some(a) = setting {
+                        self.settings_action(a)?;
+                    } else if self.controller.open().is_some_and(|o| o.kind.tabbed()) {
                         self.island_panel_click(Point { x: x - ox, y: y - oy })?;
                     } else if self.power_click(Point { x: x - ox, y: y - oy })? {
                         // Botão de energia (armar, confirmar ou agir).
@@ -559,9 +580,13 @@ impl Loop {
                     self.chat_move(Point { x: x - ox, y: y - oy })?;
                     // Menu do Z: o item sob o mouse ganha o destaque (só redesenha quando muda).
                     let scale = self.bars[i].scale();
-                    if self.effective_open_kind() == Some(PanelKind::Menu)
-                        && self.menu.as_mut().is_some_and(|m| m.hover(Point { x: x - ox, y: y - oy }, scale))
-                    {
+                    let p = Point { x: x - ox, y: y - oy };
+                    let lit = match self.effective_open_kind() {
+                        Some(PanelKind::Menu) => self.menu.as_mut().is_some_and(|m| m.hover(p, scale)),
+                        Some(PanelKind::Settings) => self.settings.as_mut().is_some_and(|m| m.hover(p, scale)),
+                        _ => false,
+                    };
+                    if lit {
                         self.redraw_open_panel()?;
                     }
                 }
@@ -626,6 +651,15 @@ impl Loop {
                         if let (Some(k), Some(m)) = (key, self.menu.as_mut()) {
                             match m.key(k) {
                                 Some(a) => self.menu_action(a)?,
+                                None => self.redraw_open_panel()?,
+                            }
+                        }
+                    }
+                    Some(PanelKind::Settings) => {
+                        let key = match vk { VK_UP => Some(Some(false)), VK_DOWN => Some(Some(true)), VK_RETURN => Some(None), _ => None };
+                        if let (Some(k), Some(m)) = (key, self.settings.as_mut()) {
+                            match m.key(k) {
+                                Some(a) => self.settings_action(a)?,
                                 None => self.redraw_open_panel()?,
                             }
                         }

@@ -9,7 +9,8 @@ use zefiro_resources::tokens::Tokens;
 use zefiro_ui::paint::{DisplayList, DrawOp};
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum MenuAction { SetHeight(BarHeight), SetFormat(BarFormat), SetTheme(String), OpenThemes, BackToMenu, ReloadTheme, OpenThemesFolder, RestartIsland, ToggleAcrylic, ToggleAutostart, ToggleHud, ExportDiagnostics, InstallUpdate, Exit, EditBar }
+/// O que se usa pouco está em Configurações (`settings`).
+pub enum MenuAction { SetHeight(BarHeight), SetFormat(BarFormat), SetTheme(String), OpenThemes, BackToMenu, ReloadTheme, OpenThemesFolder, ToggleAcrylic, InstallUpdate, Exit, EditBar, OpenSettings }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThemeSwatch { pub id: String, pub name: String, pub background: Rgba, pub text: Rgba, pub border: Option<Rgba> }
@@ -33,15 +34,8 @@ const SWATCH_H: f32 = 56.0;
 const SECTION_GAP: f32 = 8.0;
 const COLS: usize = 4;
 
-fn actions() -> [(&'static str, MenuAction); 6] {
-    [
-        ("Editar barra", MenuAction::EditBar),
-        ("Reiniciar a ilha", MenuAction::RestartIsland),
-        ("Iniciar com o Windows", MenuAction::ToggleAutostart),
-        ("HUD de debug", MenuAction::ToggleHud),
-        ("Exportar diagnóstico", MenuAction::ExportDiagnostics),
-        ("Sair", MenuAction::Exit),
-    ]
+fn actions() -> [(&'static str, MenuAction); 3] {
+    [("Editar barra", MenuAction::EditBar), ("Configurações", MenuAction::OpenSettings), ("Sair", MenuAction::Exit)]
 }
 
 /// Ações do fim da tela de temas.
@@ -63,20 +57,20 @@ fn action_label(action: &MenuAction) -> &'static str {
 }
 
 /// `acrylic`: (ligado agora, a transparência do Windows deixa).
-pub struct MenuModel { height: BarHeight, format: BarFormat, theme_id: String, themes: Vec<ThemeSwatch>, focus: (usize, usize), autostart: bool, acrylic: (bool, bool), page: MenuPage, update: Option<String> }
+pub struct MenuModel { height: BarHeight, format: BarFormat, theme_id: String, themes: Vec<ThemeSwatch>, focus: (usize, usize), acrylic: (bool, bool), page: MenuPage, update: Option<String> }
 
 /// Títulos de seção (texto e topo, em px), para o `paint`.
 type Titles = Vec<(&'static str, f32)>;
 
-/// Linha da tela de temas: o "‹ Tema" é a linha 0, a grade começa na 1.
-const GRID_ROW: usize = 1;
+/// Linha da tela de temas: o "‹ Tema" é a linha 0, o Acrílico a 1 e a grade começa na 2.
+const GRID_ROW: usize = 2;
 /// Linha "Tema" no menu (depois de altura e formato).
 const THEME_ROW: usize = 2;
 
 impl MenuModel {
     pub fn new(height: BarHeight, format: BarFormat, theme_id: &str, themes: Vec<ThemeSwatch>) -> MenuModel {
         let col = if height == BarHeight::Compacta { 1 } else { 0 };
-        MenuModel { height, format, theme_id: theme_id.to_string(), themes, focus: (0, col), autostart: false, acrylic: (false, true), page: MenuPage::Main, update: None }
+        MenuModel { height, format, theme_id: theme_id.to_string(), themes, focus: (0, col), acrylic: (false, true), page: MenuPage::Main, update: None }
     }
 
     pub fn page(&self) -> MenuPage {
@@ -118,16 +112,6 @@ impl MenuModel {
         self.acrylic = (on, available);
     }
 
-    pub fn set_autostart(&mut self, on: bool) {
-        self.autostart = on;
-    }
-
-    /// "Iniciar com o Windows" ligado (a chave do item acende).
-    pub fn with_autostart(mut self, on: bool) -> MenuModel {
-        self.autostart = on;
-        self
-    }
-
     pub fn focus(&self) -> (usize, usize) {
         self.focus
     }
@@ -160,7 +144,6 @@ impl MenuModel {
                     row += 1;
                 }
                 line(&mut out, &mut y, &mut row, MenuAction::OpenThemes);
-                line(&mut out, &mut y, &mut row, MenuAction::ToggleAcrylic);
                 y += s(SECTION_GAP);
                 if self.update.is_some() {
                     line(&mut out, &mut y, &mut row, MenuAction::InstallUpdate);
@@ -171,6 +154,8 @@ impl MenuModel {
             }
             MenuPage::Themes => {
                 line(&mut out, &mut y, &mut row, MenuAction::BackToMenu);
+                // O acrílico é o material do tema: fica aqui, antes da grade.
+                line(&mut out, &mut y, &mut row, MenuAction::ToggleAcrylic);
                 y += s(SECTION_GAP) / 2.0;
                 for (i, t) in self.themes.iter().enumerate() {
                     let (r, c) = (i / COLS, i % COLS);
@@ -332,9 +317,6 @@ impl MenuModel {
                         list.push(DrawOp::RoundRect { rect: b.rect, radius: s(10.0), color: tokens.raised });
                     }
                     list.push(DrawOp::Text { rect: b.rect.inset(s(12.0), 0.0), text: label.into(), style: body, color: tokens.text, align: Align::Leading });
-                    if *action == MenuAction::ToggleAutostart {
-                        switch(&mut list, b.rect, self.autostart, scale, tokens);
-                    }
                 }
             }
         }
@@ -357,24 +339,28 @@ mod tests {
     }
 
     #[test]
-    fn autostart_item_shows_a_switch_lit_only_when_on() {
-        let tokens = zefiro_resources::tokens::derive_tokens(&zefiro_resources::theme::parse_theme("obsidian", "o", zefiro_resources::theme::BUILTIN[0].1).unwrap(), Rgba::rgb(0, 120, 215), None);
-        let accent_pills = |m: &MenuModel| m.paint(1.0, &tokens).ops.iter().filter(|o| matches!(o, DrawOp::RoundRect { color, .. } if *color == tokens.accent)).count();
-        let off = model();
-        assert!(off.layout(1.0).iter().any(|b| b.action == MenuAction::ToggleAutostart), "o item existe");
-        assert_eq!(accent_pills(&off), 0, "desligado: a chave fica apagada");
-        assert_eq!(accent_pills(&model().with_autostart(true)), 1, "ligado: a chave acende");
+    fn main_menu_keeps_only_everyday_items() {
+        let m = model();
+        let actions: Vec<MenuAction> = m.layout(1.0).into_iter().filter(|b| b.row >= THEME_ROW).map(|b| b.action).collect();
+        assert_eq!(actions, [MenuAction::OpenThemes, MenuAction::EditBar, MenuAction::OpenSettings, MenuAction::Exit], "o resto foi para Configurações");
+        let texts = texts(&m.paint(1.0, &tokens()));
+        assert!(texts.contains(&"Configurações".to_string()), "{texts:?}");
+        for gone in ["Acrílico", "Janelas em mosaico", "Iniciar com o Windows", "Reiniciar a ilha", "HUD de debug", "Exportar diagnóstico"] {
+            assert!(!texts.contains(&gone.to_string()), "{gone} saiu do menu");
+        }
     }
 
     #[test]
-    fn acrylic_row_follows_the_theme_row_with_a_switch() {
+    fn acrylic_sits_on_top_of_the_themes_page_with_a_switch() {
         let tokens = zefiro_resources::tokens::derive_tokens(&zefiro_resources::theme::parse_theme("obsidian", "o", zefiro_resources::theme::BUILTIN[0].1).unwrap(), Rgba::rgb(0, 120, 215), None);
         let lit = |m: &MenuModel| m.paint(1.0, &tokens).ops.iter().filter(|o| matches!(o, DrawOp::RoundRect { color, .. } if *color == tokens.accent)).count();
         let mut m = model();
+        m.open_themes();
         let boxes = m.layout(1.0);
-        let theme = boxes.iter().find(|b| b.action == MenuAction::OpenThemes).unwrap();
+        let back = boxes.iter().find(|b| b.action == MenuAction::BackToMenu).unwrap();
         let acrylic = boxes.iter().find(|b| b.action == MenuAction::ToggleAcrylic).expect("a linha existe");
-        assert_eq!(acrylic.row, theme.row + 1, "logo abaixo de Tema");
+        assert_eq!(acrylic.row, back.row + 1, "logo abaixo de ‹ Tema");
+        assert!(boxes.iter().filter(|b| matches!(b.action, MenuAction::SetTheme(_))).all(|b| b.row > acrylic.row), "antes da grade");
         assert_eq!(lit(&m), 0, "desligado: a chave fica apagada");
         m.set_acrylic(true, true);
         assert_eq!(lit(&m), 1, "ligado: a chave acende");
@@ -415,10 +401,10 @@ mod tests {
         assert_eq!(m.key(NavKey::Enter), Some(MenuAction::SetFormat(BarFormat::Faixa)));
         m.key(NavKey::Down); // a linha "Tema", coluna volta a 0
         assert_eq!(m.key(NavKey::Enter), Some(MenuAction::OpenThemes));
-        m.key(NavKey::Down); // Acrílico
-        assert_eq!(m.key(NavKey::Enter), Some(MenuAction::ToggleAcrylic));
         m.key(NavKey::Down); // primeira ação
         assert_eq!(m.key(NavKey::Enter), Some(MenuAction::EditBar));
+        m.key(NavKey::Down);
+        assert_eq!(m.key(NavKey::Enter), Some(MenuAction::OpenSettings));
         for _ in 0..10 {
             m.key(NavKey::Down);
         }
@@ -495,21 +481,6 @@ mod tests {
         assert!(m.layout(1.0).iter().any(|b| b.action == MenuAction::SetTheme("t5".into())));
         m.back();
         assert!(texts(&m.paint(1.0, &tokens())).contains(&"T5 ›".to_string()));
-    }
-
-    #[test]
-    fn debug_items_sit_before_exit() {
-        let m = model();
-        let labels: Vec<_> = m.layout(1.0).into_iter().filter_map(|b| match b.action {
-            MenuAction::ToggleHud => Some("hud"),
-            MenuAction::ExportDiagnostics => Some("diag"),
-            MenuAction::Exit => Some("sair"),
-            _ => None,
-        }).collect();
-        assert_eq!(labels, ["hud", "diag", "sair"]);
-        let texts: Vec<String> = m.paint(1.0, &zefiro_resources::tokens::derive_tokens(&zefiro_resources::theme::parse_theme("obsidian", "o", zefiro_resources::theme::BUILTIN[0].1).unwrap(), Rgba::rgb(0, 120, 215), None))
-            .ops.into_iter().filter_map(|o| if let DrawOp::Text { text, .. } = o { Some(text) } else { None }).collect();
-        assert!(texts.contains(&"HUD de debug".to_string()) && texts.contains(&"Exportar diagnóstico".to_string()), "{texts:?}");
     }
 
     #[test]

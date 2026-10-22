@@ -78,7 +78,12 @@ impl Loop {
         }
     }
 
-    /// `Ctrl+Alt+Shift+D` ou o item do menu: mostra ou esconde o HUD.
+    /// O HUD está aberto (a chave das Configurações acende).
+    pub fn hud_open(&self) -> bool {
+        self.debug.hud.is_some()
+    }
+
+    /// `Ctrl+Alt+Shift+D` ou a chave das Configurações: mostra ou esconde o HUD.
     pub fn toggle_hud(&mut self) -> Result<()> {
         if let Some(hud) = self.debug.hud.take() {
             window::kill_timer(TIMER_HUD);
