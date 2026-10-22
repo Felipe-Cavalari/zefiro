@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use windows::core::Result;
 use zefiro_bar::controller::PanelKind;
-use zefiro_bar::usage::{UsageBlock, UsageRow, refresh_button_rect, usage_panel};
+use zefiro_bar::usage::{RefreshButton, UsageBlock, UsageRow, refresh_button_rect, usage_panel};
 use zefiro_integration_clock::windows::utc_offset_seconds;
 use zefiro_integration_usage::claude::{ClaudeSnapshot, Limit, UsageError, can_refresh};
 use zefiro_integration_usage::codex::{CodexService, CodexSnapshot, Window, effective_percent, window_name};
@@ -28,6 +28,8 @@ pub struct UsageRuntime {
     /// O botão de atualizar foi tocado e a resposta ainda não chegou.
     claude_refreshing: bool,
     codex_refreshing: bool,
+    /// O mouse está sobre o botão de atualizar do painel aberto.
+    refresh_hover: bool,
 }
 
 pub fn now_unix() -> i64 {
@@ -256,7 +258,8 @@ impl Loop {
     }
 
     /// Ao abrir o painel: confere o dado agora.
-    pub fn usage_prepare(&self, kind: PanelKind) {
+    pub fn usage_prepare(&mut self, kind: PanelKind) {
+        self.usage.refresh_hover = false;
         if kind == PanelKind::Codex
             && let Some(s) = &self.usage.codex
         {
@@ -298,6 +301,30 @@ impl Loop {
         Ok(false)
     }
 
+    /// Mouse sobre o painel do Claude ou do Codex: o botão de atualizar acende sob ele (só redesenha quando muda).
+    pub fn usage_move(&mut self, p: Point, scale: f32) -> Result<()> {
+        if !(self.usage_panel_open(PanelKind::Claude) || self.usage_panel_open(PanelKind::Codex)) {
+            return Ok(());
+        }
+        self.usage_hover(refresh_button_rect(scale).contains(p))
+    }
+
+    /// O mouse saiu do painel: o botão apaga.
+    pub fn usage_leave(&mut self) -> Result<()> {
+        self.usage_hover(false)
+    }
+
+    fn usage_hover(&mut self, over: bool) -> Result<()> {
+        if over == self.usage.refresh_hover {
+            return Ok(());
+        }
+        self.usage.refresh_hover = over;
+        if self.usage_panel_open(PanelKind::Claude) || self.usage_panel_open(PanelKind::Codex) {
+            self.redraw_open_panel()?;
+        }
+        Ok(())
+    }
+
     fn claude_refresh_enabled(&self) -> bool {
         !self.usage.claude_refreshing && self.ctx.usage.claude.as_ref().is_some_and(|s| can_refresh(s, now_unix()))
     }
@@ -305,15 +332,16 @@ impl Loop {
     pub fn usage_panel_list(&self, kind: PanelKind, scale: f32) -> DisplayList {
         let (tokens, text) = (&self.ctx.theme.tokens, &self.ctx.text);
         let (now, offset) = (now_unix(), utc_offset_seconds());
+        let hovered = self.usage.refresh_hover;
         if kind == PanelKind::Claude {
-            let refresh = Some(self.claude_refresh_enabled());
+            let refresh = Some(RefreshButton { enabled: self.claude_refresh_enabled(), hovered });
             return match &self.ctx.usage.claude {
                 None => usage_panel(&[block("Claude".into(), String::new(), Vec::new(), Some("Carregando…".into()))], "", refresh, scale, tokens, text),
                 Some(s) => usage_panel(&claude_blocks(s, now, offset), &claude_footer(s, now, offset, self.usage.claude_refreshing), refresh, scale, tokens, text),
             };
         }
         let blocks = codex_blocks(self.ctx.usage.codex.as_ref().unwrap_or(&CodexSnapshot::default()), now, offset);
-        usage_panel(&blocks, "", Some(!self.usage.codex_refreshing), scale, tokens, text)
+        usage_panel(&blocks, "", Some(RefreshButton { enabled: !self.usage.codex_refreshing, hovered }), scale, tokens, text)
     }
 }
 

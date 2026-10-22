@@ -587,6 +587,7 @@ impl Loop {
                     self.vscode_move(Point { x: x - ox, y: y - oy })?;
                     // Menu do Z: o item sob o mouse ganha o destaque (só redesenha quando muda).
                     let scale = self.bars[i].scale();
+                    self.usage_move(Point { x: x - ox, y: y - oy }, scale)?;
                     let p = Point { x: x - ox, y: y - oy };
                     let lit = match self.effective_open_kind() {
                         Some(PanelKind::Menu) => self.menu.as_mut().is_some_and(|m| m.hover(p, scale)),
@@ -613,6 +614,7 @@ impl Loop {
                 if self.panel_index(hwnd).is_some() {
                     self.terminal_leave()?;
                     self.chat_leave()?;
+                    self.usage_leave()?;
                 }
                 if let Some(i) = self.bar_index(hwnd) {
                     self.bars[i].set_hover(&self.ctx, None)?;

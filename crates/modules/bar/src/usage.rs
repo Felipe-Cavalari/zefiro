@@ -40,6 +40,11 @@ pub struct UsageBlock { pub title: String, pub subtitle: String, pub rows: Vec<U
 /// "Atualizar" do Segoe Fluent Icons.
 pub const GLYPH_REFRESH: &str = "\u{E72C}";
 
+/// Estado do botão de atualizar: `enabled` (apagado enquanto atualiza ou em pausa) e `hovered`
+/// (o mouse em cima, que acende o fundo como o dos chips).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RefreshButton { pub enabled: bool, pub hovered: bool }
+
 /// Botão de atualizar, no canto do título do primeiro bloco.
 pub fn refresh_button_rect(scale: f32) -> Rect {
     let px = |v: f32| (v * scale).round();
@@ -63,8 +68,8 @@ fn fit(text: &str, style: &TextStyle, max_w: f32, m: &dyn TextMeasurer) -> Strin
 
 /// Painel com um bloco por conta (título, subtítulo, uma linha por janela com rótulo, %, barra e
 /// detalhe) e o rodapé. Com um bloco sem subtítulo, é o painel de uma conta só de antes. `refresh`:
-/// botão de atualizar no título (`Some(false)` apagado); `None`, sem botão.
-pub fn usage_panel(blocks: &[UsageBlock], footer: &str, refresh: Option<bool>, scale: f32, tokens: &Tokens, m: &dyn TextMeasurer) -> DisplayList {
+/// botão de atualizar no título; `None`, sem botão.
+pub fn usage_panel(blocks: &[UsageBlock], footer: &str, refresh: Option<RefreshButton>, scale: f32, tokens: &Tokens, m: &dyn TextMeasurer) -> DisplayList {
     let px = |v: f32| (v * scale).round();
     let text = |size: f32, weight: FontWeight| TextStyle { size: size * scale, weight, family: Family::Text };
     let lines = |b: &UsageBlock| -> Vec<String> { b.message.as_deref().map(|msg| msg.lines().map(String::from).collect()).unwrap_or_default() };
@@ -113,11 +118,12 @@ pub fn usage_panel(blocks: &[UsageBlock], footer: &str, refresh: Option<bool>, s
         }
         y = top + body_h(b);
     }
-    if let Some(enabled) = refresh {
+    if let Some(RefreshButton { enabled, hovered }) = refresh {
         let r = refresh_button_rect(scale);
         let icons = TextStyle { size: 12.0 * scale, weight: FontWeight::Regular, family: Family::Icons };
-        list.push(DrawOp::RoundRect { rect: r, radius: r.h / 2.0, color: tokens.raised });
-        let color = if enabled { tokens.text_secondary } else { tokens.text_tertiary };
+        let lit = enabled && hovered;
+        list.push(DrawOp::RoundRect { rect: r, radius: r.h / 2.0, color: if lit { tokens.raised_strong } else { tokens.raised } });
+        let color = if lit { tokens.text } else if enabled { tokens.text_secondary } else { tokens.text_tertiary };
         list.push(DrawOp::Text { rect: r, text: GLYPH_REFRESH.into(), style: icons, color, align: Align::Center });
     }
     if !footer.is_empty() {
@@ -196,16 +202,31 @@ mod tests {
     fn refresh_button_in_the_header() {
         let blocks = [block("Claude · Pro", "a@b.c · Windows", rows(), None)];
         let t = tokens();
-        let on = usage_panel(&blocks, "", Some(true), 1.0, &t, &FixedWidthMeasurer);
+        let on = usage_panel(&blocks, "", Some(RefreshButton { enabled: true, hovered: false }), 1.0, &t, &FixedWidthMeasurer);
         assert_eq!(glyph(&on), Some((refresh_button_rect(1.0), t.text_secondary)));
         // Apagado enquanto atualiza, logo depois de consultar ou com tudo em pausa.
-        let off = usage_panel(&blocks, "", Some(false), 1.0, &t, &FixedWidthMeasurer);
+        let off = usage_panel(&blocks, "", Some(RefreshButton { enabled: false, hovered: false }), 1.0, &t, &FixedWidthMeasurer);
         assert_eq!(glyph(&off).map(|g| g.1), Some(t.text_tertiary));
         assert_eq!(glyph(&panel(&blocks, "")), None);
         // O título não passa por baixo do botão.
         let title = text_rect(&on, "Claude · Pro");
         assert!(title.x + title.w <= refresh_button_rect(1.0).x);
         assert_eq!(refresh_button_rect(2.0), Rect::new(584.0, 24.0, 56.0, 56.0));
+    }
+
+    #[test]
+    fn refresh_button_lights_up_under_the_mouse() {
+        let blocks = [block("Claude · Pro", "a@b.c · Windows", rows(), None)];
+        let t = tokens();
+        let fill = |l: &DisplayList| l.ops.iter().find_map(|o| if let DrawOp::RoundRect { rect, color, .. } = o { (*rect == refresh_button_rect(1.0)).then_some(*color) } else { None });
+        let rest = usage_panel(&blocks, "", Some(RefreshButton { enabled: true, hovered: false }), 1.0, &t, &FixedWidthMeasurer);
+        let over = usage_panel(&blocks, "", Some(RefreshButton { enabled: true, hovered: true }), 1.0, &t, &FixedWidthMeasurer);
+        assert_eq!(fill(&rest), Some(t.raised));
+        assert_eq!(fill(&over), Some(t.raised_strong), "sob o mouse, o fundo acende como o dos chips");
+        assert_eq!(glyph(&over).map(|g| g.1), Some(t.text), "e o ícone fica mais forte");
+        // Apagado (atualizando, ou em pausa) não reage ao mouse.
+        let off = usage_panel(&blocks, "", Some(RefreshButton { enabled: false, hovered: true }), 1.0, &t, &FixedWidthMeasurer);
+        assert_eq!((fill(&off), glyph(&off).map(|g| g.1)), (Some(t.raised), Some(t.text_tertiary)));
     }
 
     fn text_rect(l: &DisplayList, wanted: &str) -> Rect {
