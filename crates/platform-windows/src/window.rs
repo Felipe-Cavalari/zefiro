@@ -369,7 +369,14 @@ pub fn show(hwnd: HWND) {
     let flags = SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW;
     for h in std::iter::once(hwnd).chain(input_window(hwnd)) {
         // SAFETY: hwnd válido.
-        let _ = unsafe { SetWindowPos(h, Some(HWND_TOPMOST), 0, 0, 0, 0, flags) };
+        unsafe {
+            // Minimizada por outro programa (vira um retângulo de 160×28 no canto): SWP_SHOWWINDOW
+            // não restaura, e a barra ficava presa lá.
+            if IsIconic(h).as_bool() {
+                let _ = ShowWindow(h, SW_SHOWNOACTIVATE);
+            }
+            let _ = SetWindowPos(h, Some(HWND_TOPMOST), 0, 0, 0, 0, flags);
+        }
     }
 }
 
@@ -533,6 +540,28 @@ mod tests {
             }
         }
         assert!(seen);
+    }
+
+    #[test]
+    fn show_brings_back_a_bar_minimized_by_another_program() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        register_classes().unwrap();
+        create(WindowKind::Message, Rect::default()).unwrap();
+        let hwnd = create(WindowKind::Bar, Rect::new(-4000.0, -4000.0, 200.0, 50.0)).unwrap();
+        let input = input_window(hwnd).unwrap();
+        // SAFETY: janelas recém-criadas por este teste.
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_SHOWMINNOACTIVE);
+            let _ = ShowWindow(input, SW_SHOWMINNOACTIVE);
+            assert!(IsIconic(hwnd).as_bool());
+        }
+        show(hwnd);
+        // SAFETY: só consulta o estado.
+        unsafe {
+            assert!(!IsIconic(hwnd).as_bool() && !IsIconic(input).as_bool(), "restaurada, não um retângulo no canto");
+            assert!(IsWindowVisible(hwnd).as_bool());
+        }
+        destroy(hwnd);
     }
 
     #[test]

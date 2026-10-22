@@ -68,7 +68,10 @@ impl Loop {
             let was = self.bars[i].is_retracted();
             // Escondida por tela cheia, recolhe sem animar: ao sair da tela cheia ela não pisca.
             self.bars[i].set_retracted(&self.ctx, !step.visible, !inputs.fullscreen)?;
-            changed |= was != self.bars[i].is_retracted();
+            if was != self.bars[i].is_retracted() {
+                tracing::debug!(monitor = i, desceu = step.visible, "ocultar automaticamente");
+                changed = true;
+            }
         }
         if changed {
             self.island_visibility_changed();
