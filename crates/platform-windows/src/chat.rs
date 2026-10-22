@@ -14,7 +14,7 @@ use windows::Win32::System::Com::CoCreateGuid;
 use zefiro_integration_chat::agent::Agent;
 use zefiro_integration_chat::codex::{self, Incoming};
 use zefiro_integration_chat::command::{Session, UserDirs, claude_args, codex_args, windows_candidates, wsl_args, wsl_probe};
-use zefiro_integration_chat::origin::{Choice, Origin, choices, pick, pick_error_text};
+use zefiro_integration_chat::origin::{Choice, Origin, Prefer, choices, pick_error_text, pick_with};
 use zefiro_integration_chat::protocol::{Event, interrupt_line, parse_line, user_line};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -42,6 +42,8 @@ pub enum Signal {
 pub struct Start {
     pub agent: Agent,
     pub choice: Choice,
+    /// O que o automático tenta primeiro.
+    pub prefer: Prefer,
     pub model: String,
     /// Sessão do Claude ou `thread` do Codex (vazio = conversa nova no Codex).
     pub session: String,
@@ -379,8 +381,9 @@ fn spawn(start: &Start, generation: u64, inbox: &Arc<Inbox>, back: &Sender<Reque
     use std::os::windows::process::CommandExt;
     let agent = start.agent;
     let windows_exe = if matches!(start.choice, Choice::Auto | Choice::Windows) { find_exe(agent) } else { None };
-    let running = if start.choice == Choice::Auto && windows_exe.is_none() { crate::wsl::running_distros() } else { Vec::new() };
-    let origin = pick(&start.choice, windows_exe, &running, &mut |d| wsl_has(d, agent.binary())).map_err(|e| pick_error_text(&e, agent))?;
+    let auto_wsl = start.choice == Choice::Auto && (windows_exe.is_none() || start.prefer == Prefer::Wsl);
+    let running = if auto_wsl { crate::wsl::running_distros() } else { Vec::new() };
+    let origin = pick_with(&start.choice, start.prefer, windows_exe, &running, &mut |d| wsl_has(d, agent.binary())).map_err(|e| pick_error_text(&e, agent))?;
     let args = match agent {
         Agent::Claude => {
             let session = if start.resume { Session::Resume(&start.session) } else { Session::New(&start.session) };

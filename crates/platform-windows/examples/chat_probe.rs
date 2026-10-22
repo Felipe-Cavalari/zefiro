@@ -7,7 +7,7 @@
 
 use std::time::{Duration, Instant};
 use zefiro_integration_chat::conversation::Conversation;
-use zefiro_integration_chat::origin::parse_choice;
+use zefiro_integration_chat::origin::{Prefer, parse_choice};
 use zefiro_integration_chat::agent::Agent;
 use zefiro_integration_chat::protocol::{Event, classify};
 use zefiro_platform_windows::chat::{ChatService, Signal, Start, new_id};
@@ -70,7 +70,7 @@ fn run() -> Result<(), String> {
     let service = ChatService::new(0).map_err(|e| e.to_string())?;
     let agent = Agent::parse(&std::env::var("ZEFIRO_CHAT_AGENT").unwrap_or_default());
     let mut c = Conversation::new(new_id(), agent);
-    let start = |c: &Conversation| Start { agent, choice: choice.clone(), model: model.clone(), session: c.session.clone(), resume: c.created, windows_dir: dir.clone() };
+    let start = |c: &Conversation| Start { agent, prefer: Prefer::parse(&std::env::var("ZEFIRO_CHAT_PREFER").unwrap_or_default()), choice: choice.clone(), model: model.clone(), session: c.session.clone(), resume: c.created, windows_dir: dir.clone() };
     println!("1. pergunta com o processo frio");
     service.start(start(&c));
     ask(&service, &mut c, &model, "Guarde a palavra-chave: girassol. Responda só: ok", None)?;

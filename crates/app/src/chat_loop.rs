@@ -10,7 +10,7 @@ use zefiro_core::config::set_value;
 use zefiro_integration_chat::agent::{Agent, ModelOption, claude_models, effective_model, model_label};
 use zefiro_integration_chat::conversation::{Conversation, Role};
 use zefiro_integration_chat::history::{self, Summary};
-use zefiro_integration_chat::origin::{Choice, parse_choice};
+use zefiro_integration_chat::origin::{Choice, Prefer, parse_choice};
 use zefiro_integration_chat::protocol::{Event, Failure, classify};
 use zefiro_platform::geometry::Point;
 use zefiro_platform_windows::chat::{ChatService, Signal, Start, conversations_dir, new_id, windows_dir};
@@ -37,9 +37,10 @@ enum ChatPage {
     History,
 }
 
-/// O processo vivo: agente, origem e (no Claude, que recebe o modelo na partida) o modelo.
+/// O processo vivo: agente, origem (e a preferência, no automático) e (no Claude, que recebe o
+/// modelo na partida) o modelo.
 #[derive(Debug, Clone, PartialEq)]
-struct RunningKey { agent: Agent, choice: Choice, model: String }
+struct RunningKey { agent: Agent, choice: Choice, prefer: Option<Prefer>, model: String }
 
 #[derive(Default)]
 pub struct ChatRuntime {
@@ -96,6 +97,10 @@ impl Loop {
         parse_choice(&self.ctx.config.chat.of(agent == Agent::Codex).origin)
     }
 
+    fn chat_prefer(&self, agent: Agent) -> Prefer {
+        Prefer::parse(&self.ctx.config.chat.of(agent == Agent::Codex).prefer)
+    }
+
     fn chat_models(&self, agent: Agent) -> Vec<ModelOption> {
         match agent {
             Agent::Claude => claude_models(),
@@ -139,7 +144,8 @@ impl Loop {
         let agent = self.chat_conversation().agent;
         let choice = self.chat_choice(agent);
         let model = self.chat_model(agent);
-        let key = RunningKey { agent, choice: choice.clone(), model: if agent == Agent::Claude { model.clone() } else { String::new() } };
+        let prefer = self.chat_prefer(agent);
+        let key = RunningKey { agent, choice: choice.clone(), prefer: (choice == Choice::Auto).then_some(prefer), model: if agent == Agent::Claude { model.clone() } else { String::new() } };
         if self.chat.running.as_ref().is_some_and(|r| *r != key)
             && let Some(s) = &self.chat.service
         {
@@ -150,7 +156,7 @@ impl Loop {
             self.chat.status = Some("iniciando…".into());
         }
         let c = self.chat_conversation();
-        let spec = Start { agent, choice, model, session: c.session.clone(), resume: c.created, windows_dir: windows_dir() };
+        let spec = Start { agent, choice, prefer, model, session: c.session.clone(), resume: c.created, windows_dir: windows_dir() };
         if let Some(s) = &self.chat.service {
             s.start(spec);
         }
@@ -250,6 +256,7 @@ impl Loop {
         let chosen_model = self.ctx.config.chat.of(agent == Agent::Codex).model.clone();
         let model_text = if agent == Agent::Codex && self.chat.codex_models.is_none() && chosen_model.is_empty() { "Modelo".to_string() } else { model_label(&models, &chosen_model) };
         let origin_options = self.chat_origin_options(agent);
+        let prefer = self.chat_prefer(agent);
         let history_rows = self.chat_history_rows();
         let measure = &self.ctx.text;
         let c = &mut self.chat;
@@ -280,12 +287,14 @@ impl Loop {
                 options: &origin_names,
                 selected: origin_options.iter().position(|o| *o == choice),
                 note: c.origins[slot(agent)].is_none().then_some("Procurando o Windows e as distros do WSL…"),
+                prefer: Some(prefer),
             },
             ChatPage::Models => Page::Picker {
                 title: &model_title,
                 options: &model_names,
                 selected: models.iter().position(|m| m.id == effective_model(&models, &chosen_model)),
                 note: models.is_empty().then_some("Carregando os modelos do Codex…"),
+                prefer: None,
             },
             ChatPage::History => Page::History { rows: &history_rows, scroll: c.history_scroll },
         };
@@ -398,6 +407,28 @@ impl Loop {
                 self.chat_new_conversation();
             }
             tracing::info!(agente = agent.label(), origem = %choice.label(), "chat: origem trocada");
+            self.chat_start();
+        }
+        self.redraw_open_panel()
+    }
+
+    /// O que o automático tenta primeiro. Com a origem no automático, o processo pode mudar de
+    /// lugar: aí começa outra conversa (se havia uma), como ao trocar de origem.
+    fn chat_set_prefer(&mut self, prefer: Prefer) -> Result<()> {
+        let agent = self.chat_conversation().agent;
+        if prefer == self.chat_prefer(agent) {
+            return Ok(());
+        }
+        self.ctx.config.chat.of_mut(agent == Agent::Codex).prefer = prefer.as_str().into();
+        self.chat_write(&["chat", agent.as_str(), "prefer"], prefer.as_str());
+        tracing::info!(agente = agent.label(), primeiro = prefer.label(), "chat: preferência do automático trocada");
+        if self.chat_choice(agent) == Choice::Auto {
+            self.chat_stop_process();
+            self.chat.codex_models = None;
+            if !self.chat_conversation().messages.is_empty() {
+                self.chat_new_conversation();
+                self.chat.page = ChatPage::Origins;
+            }
             self.chat_start();
         }
         self.redraw_open_panel()
@@ -650,6 +681,7 @@ impl Loop {
                 }
                 _ => {}
             },
+            Some(Hit::Prefer(p)) => self.chat_set_prefer(p)?,
             Some(Hit::Open(i)) => self.chat_open_conversation(i)?,
             Some(Hit::Delete(i)) => self.chat_delete_conversation(i)?,
             Some(Hit::Copy(i)) => {

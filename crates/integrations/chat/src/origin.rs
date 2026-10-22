@@ -84,19 +84,57 @@ pub fn ignored_distro(name: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PickError { NotFound, WindowsMissing }
 
-/// Escolhe a origem. No automático, o Windows ganha; sem ele, a primeira distro rodando que tem
-/// `claude` (`has_claude` só é chamado para distros rodando e fora as ignoradas, e nunca liga uma
-/// distro parada). As escolhas explícitas do WSL não conferem nada: o usuário pediu aquela distro.
-pub fn pick(choice: &Choice, windows_exe: Option<PathBuf>, running: &[String], has_claude: &mut dyn FnMut(&str) -> bool) -> Result<Origin, PickError> {
+/// O que o automático tenta primeiro (`[chat.<agente>] prefer`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Prefer {
+    #[default]
+    Windows,
+    Wsl,
+}
+
+impl Prefer {
+    pub const ALL: [Prefer; 2] = [Prefer::Windows, Prefer::Wsl];
+
+    pub fn parse(value: &str) -> Prefer {
+        if value.trim().eq_ignore_ascii_case("wsl") { Prefer::Wsl } else { Prefer::Windows }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Prefer::Windows => "windows",
+            Prefer::Wsl => "wsl",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Prefer::Windows => "Windows",
+            Prefer::Wsl => "WSL",
+        }
+    }
+}
+
+/// Escolhe a origem, com o automático preferindo o Windows.
+pub fn pick(choice: &Choice, windows_exe: Option<PathBuf>, running: &[String], has_binary: &mut dyn FnMut(&str) -> bool) -> Result<Origin, PickError> {
+    pick_with(choice, Prefer::Windows, windows_exe, running, has_binary)
+}
+
+/// Escolhe a origem. No automático, tenta primeiro o que `prefer` diz e depois o outro: o Windows
+/// (se tem o executável) ou a primeira distro rodando que tem o executável (`has_binary` só é
+/// chamado para distros rodando e fora as ignoradas, e nunca liga uma distro parada). As escolhas
+/// explícitas do WSL não conferem nada: o usuário pediu aquela distro.
+pub fn pick_with(choice: &Choice, prefer: Prefer, windows_exe: Option<PathBuf>, running: &[String], has_binary: &mut dyn FnMut(&str) -> bool) -> Result<Origin, PickError> {
     match choice {
         Choice::Windows => windows_exe.map(Origin::Windows).ok_or(PickError::WindowsMissing),
         Choice::WslDefault => Ok(Origin::Wsl(None)),
         Choice::Distro(d) => Ok(Origin::Wsl(Some(d.clone()))),
         Choice::Auto => {
-            if let Some(exe) = windows_exe {
-                return Ok(Origin::Windows(exe));
-            }
-            running.iter().filter(|d| !ignored_distro(d)).find(|d| has_claude(d)).map(|d| Origin::Wsl(Some(d.clone()))).ok_or(PickError::NotFound)
+            let mut wsl = || running.iter().filter(|d| !ignored_distro(d)).find(|d| has_binary(d)).map(|d| Origin::Wsl(Some(d.clone())));
+            let found = match prefer {
+                Prefer::Windows => windows_exe.map(Origin::Windows).or_else(wsl),
+                Prefer::Wsl => wsl().or_else(|| windows_exe.map(Origin::Windows)),
+            };
+            found.ok_or(PickError::NotFound)
         }
     }
 }
@@ -145,6 +183,28 @@ mod tests {
         assert_eq!(got, Ok(Origin::Wsl(Some("Ubuntu".into()))));
         assert_eq!(asked, ["Debian", "Ubuntu"], "docker-desktop fica de fora");
         assert_eq!(pick(&Choice::Auto, None, &[], &mut |_| true), Err(PickError::NotFound));
+    }
+
+    #[test]
+    fn auto_can_prefer_wsl_and_falls_back_to_windows() {
+        let exe = PathBuf::from("codex.exe");
+        let running = ["docker-desktop".to_string(), "Ubuntu".into()];
+        let got = pick_with(&Choice::Auto, Prefer::Wsl, Some(exe.clone()), &running, &mut |d| d == "Ubuntu");
+        assert_eq!(got, Ok(Origin::Wsl(Some("Ubuntu".into()))));
+        let got = pick_with(&Choice::Auto, Prefer::Wsl, Some(exe.clone()), &running, &mut |_| false);
+        assert_eq!(got, Ok(Origin::Windows(exe.clone())), "nenhuma distro com o executável");
+        assert_eq!(pick_with(&Choice::Auto, Prefer::Wsl, None, &[], &mut |_| true), Err(PickError::NotFound));
+        assert_eq!(pick_with(&Choice::Auto, Prefer::Windows, Some(exe.clone()), &running, &mut |_| true), Ok(Origin::Windows(exe)));
+        assert_eq!(pick_with(&Choice::Windows, Prefer::Wsl, None, &running, &mut |_| true), Err(PickError::WindowsMissing), "só vale no automático");
+    }
+
+    #[test]
+    fn prefer_from_the_config() {
+        assert_eq!(Prefer::parse("wsl"), Prefer::Wsl);
+        assert_eq!(Prefer::parse("WSL"), Prefer::Wsl);
+        assert_eq!(Prefer::parse(""), Prefer::Windows);
+        assert_eq!(Prefer::parse("windows"), Prefer::Windows);
+        assert_eq!((Prefer::Wsl.as_str(), Prefer::Windows.label()), ("wsl", "Windows"));
     }
 
     #[test]

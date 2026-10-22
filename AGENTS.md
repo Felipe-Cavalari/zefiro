@@ -82,7 +82,7 @@ elease` só checa com `ZEFIRO_UPDATE_CHECK=1`.
   - `[bar] height = completa | compacta`
   - `[bar] format = faixa | pilulas | ilhas | fluent | vidro`
   - `[bar.sections] start/center/end`: ids do catálogo (`zefiro`, `clock`, `audio`, `mic`, `brightness`, `claude`, `codex`, `vscode`, `terminal`, `chat`, `notifications`, `dnd`, `island`, `player`, `weather`, `hardware`, `power`)
-  - `[chat] agent = claude | codex`; `[chat.claude]` e `[chat.codex]` com `origin = auto | windows | wsl | <distro>` e `model` (vazio = o padrão), gravados pelo painel
+  - `[chat] agent = claude | codex`; `[chat.claude]` e `[chat.codex]` com `origin = auto | windows | wsl | <distro>`, `prefer = windows | wsl` (o que o automático tenta primeiro) e `model` (vazio = o padrão), gravados pelo painel
   - `[terminal] order/hidden`: `guid`s dos perfis do Windows Terminal, gravados pelo painel do chip (lápis → Concluir)
 - `ZEFIRO_CONFIG_DIR=<pasta>` troca a pasta da configuração: use um perfil isolado para testes, sem mexer no do usuário.
 - Os temas do usuário ficam em `%APPDATA%\zefiro\themes\`.

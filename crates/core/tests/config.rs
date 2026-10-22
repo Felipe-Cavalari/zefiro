@@ -172,6 +172,9 @@ fn chat_section_defaults_to_auto_and_is_parsed() {
     let c = parse_config("[chat]\nagent = \"codex\"\n[chat.codex]\norigin = \"Ubuntu-24.04\"\nmodel = \"gpt-5.6-sol\"\n").unwrap();
     assert_eq!((c.chat.agent.as_str(), c.chat.of(true).origin.as_str(), c.chat.of(true).model.as_str()), ("codex", "Ubuntu-24.04", "gpt-5.6-sol"));
     assert_eq!(c.chat.of(false), &ChatAgentConfig::default(), "o Claude fica no padrão");
+    assert_eq!(c.chat.of(true).prefer, "windows", "sem a chave, o automático prefere o Windows");
+    let c = parse_config("[chat.claude]\nprefer = \"wsl\"\n").unwrap();
+    assert_eq!((c.chat.claude.prefer.as_str(), c.chat.claude.origin.as_str()), ("wsl", "auto"));
 }
 
 #[test]

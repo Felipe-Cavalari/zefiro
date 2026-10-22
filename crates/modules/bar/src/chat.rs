@@ -3,6 +3,7 @@
 
 use zefiro_integration_chat::agent::Agent;
 use zefiro_integration_chat::conversation::{MAX_PROMPT, Role, State};
+use zefiro_integration_chat::origin::Prefer;
 use zefiro_platform::color::Rgba;
 use zefiro_platform::geometry::{Point, Rect, Size};
 use zefiro_platform::text::{Align, Family, FontWeight, TextMeasurer, TextStyle};
@@ -387,12 +388,13 @@ pub struct HistoryRow { pub title: String, pub meta: String, pub current: bool }
 pub enum Page<'a> {
     Chat,
     /// Escolha da origem ou do modelo. `note`: "Procurando distros…", "Carregando modelos…".
-    Picker { title: &'a str, options: &'a [String], selected: Option<usize>, note: Option<&'a str> },
+    /// `prefer`: só na origem, a chave do que o automático tenta primeiro.
+    Picker { title: &'a str, options: &'a [String], selected: Option<usize>, note: Option<&'a str>, prefer: Option<Prefer> },
     History { rows: &'a [HistoryRow], scroll: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Hit { Send, Stop, NewChat, History, Back, Agent(Agent), Origins, Models, Pick(usize), Open(usize), Delete(usize), Copy(usize), Field }
+pub enum Hit { Send, Stop, NewChat, History, Back, Agent(Agent), Origins, Models, Pick(usize), Prefer(Prefer), Open(usize), Delete(usize), Copy(usize), Field }
 
 pub struct ChatView<'a> {
     pub messages: &'a [MessageView<'a>],
@@ -524,7 +526,7 @@ pub fn chat_panel(view: &ChatView, scale: f32, tokens: &Tokens, m: &dyn TextMeas
     let text = |size: f32, weight: FontWeight| TextStyle { size: size * scale, weight, family: Family::Text };
     match &view.page {
         Page::Chat => chat_page(view, ops, hits, scale, tokens, m),
-        Page::Picker { title, options, selected, note } => {
+        Page::Picker { title, options, selected, note, prefer } => {
             let mut y = draw_page_title(&mut ops, &mut hits, title, view.hover == Some(Hit::Back), scale, tokens);
             for (i, option) in options.iter().enumerate() {
                 let r = Rect::new(px(10.0), y, w - px(20.0), px(PICK_H));
@@ -542,6 +544,9 @@ pub fn chat_panel(view: &ChatView, scale: f32, tokens: &Tokens, m: &dyn TextMeas
             if let Some(note) = note {
                 ops.push(DrawOp::Text { rect: Rect::new(px(38.0), y + px(4.0), w - px(52.0), px(20.0)), text: (*note).into(), style: text(11.0, FontWeight::Regular), color: tokens.text_tertiary, align: Align::Leading });
                 y += px(28.0);
+            }
+            if let Some(prefer) = prefer {
+                y = draw_prefer(&mut ops, &mut hits, *prefer, view.hover, y, scale, tokens, m);
             }
             let size = Size { w, h: y + px(10.0) };
             ChatLayout { list: DisplayList { size, ops }, hits, max_scroll: 0.0, line }
@@ -581,6 +586,38 @@ pub fn chat_panel(view: &ChatView, scale: f32, tokens: &Tokens, m: &dyn TextMeas
             ChatLayout { list: DisplayList { size, ops }, hits, max_scroll: 0.0, line }
         }
     }
+}
+
+/// "No automático, primeiro: Windows | WSL", embaixo das origens. Devolve o fim da linha.
+#[allow(clippy::too_many_arguments)]
+fn draw_prefer(ops: &mut Vec<DrawOp>, hits: &mut Vec<(Rect, Hit)>, prefer: Prefer, hover: Option<Hit>, top: f32, scale: f32, tokens: &Tokens, m: &dyn TextMeasurer) -> f32 {
+    let px = |v: f32| (v * scale).round();
+    let w = px(WIDTH);
+    let y = top + px(8.0);
+    ops.push(DrawOp::RoundRect { rect: Rect::new(px(20.0), y, w - px(40.0), px(1.0)), radius: 0.0, color: tokens.hairline });
+    let label = "No automático, primeiro:";
+    let ls = TextStyle { size: 11.5 * scale, weight: FontWeight::Regular, family: Family::Text };
+    let row = Rect::new(px(20.0), y + px(10.0), w - px(40.0), px(28.0));
+    let lw = m.measure(label, &ls).w.ceil();
+    ops.push(DrawOp::Text { rect: Rect::new(row.x + px(18.0), row.y, lw + px(2.0), row.h), text: label.into(), style: ls, color: tokens.text_secondary, align: Align::Leading });
+    let seg = TextStyle { size: 11.5 * scale, weight: FontWeight::SemiBold, family: Family::Text };
+    let widths: Vec<f32> = Prefer::ALL.iter().map(|p| m.measure(p.label(), &seg).w.ceil() + px(22.0)).collect();
+    let track = Rect::new(row.x + px(18.0) + lw + px(10.0), row.y, widths.iter().sum::<f32>() + px(6.0), row.h);
+    ops.push(DrawOp::RoundRect { rect: track, radius: track.h / 2.0, color: tokens.raised });
+    let mut x = track.x + px(3.0);
+    for (p, sw) in Prefer::ALL.iter().zip(&widths) {
+        let r = Rect::new(x, track.y + px(3.0), *sw, track.h - px(6.0));
+        let on = *p == prefer;
+        if on {
+            ops.push(DrawOp::RoundRect { rect: r, radius: r.h / 2.0, color: tokens.raised_strong });
+        } else if hover == Some(Hit::Prefer(*p)) {
+            ops.push(DrawOp::RoundRect { rect: r, radius: r.h / 2.0, color: tokens.raised });
+        }
+        ops.push(DrawOp::Text { rect: r, text: p.label().into(), style: seg, color: if on { tokens.text } else { tokens.text_secondary }, align: Align::Center });
+        hits.push((r, Hit::Prefer(*p)));
+        x += sw;
+    }
+    row.bottom()
 }
 
 /// A conversa, com rolagem, e o campo embaixo.
@@ -966,7 +1003,7 @@ mod tests {
         let lines = [Line { start: 0, end: 0 }];
         let f = Field::default();
         let options = vec!["Automático".to_string(), "Windows".to_string(), "Ubuntu-24.04".to_string()];
-        let v = view(&[], &f, &lines, Page::Picker { title: "Origem do Claude", options: &options, selected: Some(2), note: Some("Procurando distros…") });
+        let v = view(&[], &f, &lines, Page::Picker { title: "Origem do Claude", options: &options, selected: Some(2), note: Some("Procurando distros…"), prefer: None });
         let l = chat_panel(&v, 1.0, &tokens(), &FixedWidthMeasurer);
         let t = texts(&l.list);
         for s in ["Origem do Claude", "Ubuntu-24.04", "Procurando distros…", GLYPH_CHECK, GLYPH_BACK] {
@@ -974,6 +1011,28 @@ mod tests {
         }
         assert!(has(&l, Hit::Pick(0)) && has(&l, Hit::Pick(2)) && has(&l, Hit::Back));
         assert!(!has(&l, Hit::Field) && !has(&l, Hit::Send), "sem campo nas escolhas");
+        assert!(!has(&l, Hit::Prefer(Prefer::Wsl)), "sem a chave do automático no seletor de modelo");
+    }
+
+    #[test]
+    fn origin_picker_has_the_auto_preference_switch() {
+        let lines = [Line { start: 0, end: 0 }];
+        let f = Field::default();
+        let options = vec!["Automático".to_string(), "Windows".to_string()];
+        let picker = |prefer| Page::Picker { title: "Origem do Codex", options: &options, selected: Some(0), note: None, prefer: Some(prefer) };
+        let without = chat_panel(&view(&[], &f, &lines, Page::Picker { title: "Origem do Codex", options: &options, selected: Some(0), note: None, prefer: None }), 1.0, &tokens(), &FixedWidthMeasurer);
+        let l = chat_panel(&view(&[], &f, &lines, picker(Prefer::Wsl)), 1.0, &tokens(), &FixedWidthMeasurer);
+        let t = texts(&l.list);
+        assert!(t.contains(&"No automático, primeiro:".to_string()) && t.contains(&"WSL".to_string()));
+        assert!(has(&l, Hit::Prefer(Prefer::Windows)) && has(&l, Hit::Prefer(Prefer::Wsl)));
+        assert!(l.list.size.h > without.list.size.h, "a chave ocupa uma linha a mais");
+        let lit = |l: &ChatLayout, p: Prefer| {
+            let r = l.hits.iter().find(|(_, h)| *h == Hit::Prefer(p)).unwrap().0;
+            l.list.ops.iter().any(|o| matches!(o, DrawOp::RoundRect { rect, color, .. } if *rect == r && *color == tokens().raised_strong))
+        };
+        assert!(lit(&l, Prefer::Wsl) && !lit(&l, Prefer::Windows), "a escolhida fica acesa");
+        let w = chat_panel(&view(&[], &f, &lines, picker(Prefer::Windows)), 1.0, &tokens(), &FixedWidthMeasurer);
+        assert!(lit(&w, Prefer::Windows) && !lit(&w, Prefer::Wsl));
     }
 
     #[test]

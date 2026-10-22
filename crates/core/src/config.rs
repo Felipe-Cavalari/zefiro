@@ -34,10 +34,12 @@ agent = "claude"      # claude | codex: com quem o chip "chat" conversa (o paine
 
 [chat.claude]
 origin = "auto"       # auto | windows | wsl | nome da distro
+prefer = "windows"    # windows | wsl: o que o automático tenta primeiro
 model  = ""           # vazio = o padrão do Claude Code; ou opus, sonnet, haiku
 
 [chat.codex]
 origin = "auto"
+prefer = "windows"
 model  = ""           # vazio = o padrão da versão instalada do Codex
 "#;
 
@@ -90,11 +92,12 @@ pub struct Config {
 #[serde(default)]
 pub struct ChatConfig { pub agent: String, pub claude: ChatAgentConfig, pub codex: ChatAgentConfig }
 
-/// `origin`: `auto` (o Windows; sem ele, uma distro do WSL rodando que tenha o executável),
-/// `windows`, `wsl` (a distro padrão) ou o nome de uma distro. `model`: vazio = o padrão do agente.
+/// `origin`: `auto`, `windows`, `wsl` (a distro padrão) ou o nome de uma distro. `prefer`: o que o
+/// automático tenta primeiro, `windows` (padrão) ou `wsl` (uma distro rodando que tenha o
+/// executável). `model`: vazio = o padrão do agente.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
-pub struct ChatAgentConfig { pub origin: String, pub model: String }
+pub struct ChatAgentConfig { pub origin: String, pub prefer: String, pub model: String }
 
 impl Default for ChatConfig {
     fn default() -> Self {
@@ -104,7 +107,7 @@ impl Default for ChatConfig {
 
 impl Default for ChatAgentConfig {
     fn default() -> Self {
-        ChatAgentConfig { origin: "auto".into(), model: String::new() }
+        ChatAgentConfig { origin: "auto".into(), prefer: "windows".into(), model: String::new() }
     }
 }
 

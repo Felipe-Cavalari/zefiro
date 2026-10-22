@@ -73,3 +73,6 @@ campo é desenhado pelo painel. A origem é `[chat] origin` (`auto` = Windows; s
 - Agente, origem e modelo ficam em `[chat] agent` e `[chat.claude]`/`[chat.codex]`, gravados pelo
   painel sem fechá-lo (`Config::same_except_panels`). Trocar de agente ou de origem começa outra
   conversa; trocar de modelo, não (o Claude reinicia com `--resume --model`).
+- O automático tenta primeiro o que `[chat.<agente>] prefer` diz (`windows`, o padrão, ou `wsl`) e
+  depois o outro; a chave fica na página de origem ("No automático, primeiro: Windows | WSL").
+  Mudá-la com a origem no automático pode mudar o processo de lugar, então começa outra conversa.
