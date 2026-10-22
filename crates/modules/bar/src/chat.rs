@@ -355,6 +355,13 @@ const GLYPH_CHEVRON: &str = "\u{E70D}";
 const GLYPH_BACK: &str = "\u{E72B}";
 const GLYPH_DELETE: &str = "\u{E74D}";
 const GLYPH_REMOVE: &str = "\u{E711}";
+const GLYPH_LIBRARY: &str = "\u{E8B9}";
+const GLYPH_FOLDER: &str = "\u{E838}";
+const GLYPH_CHAT: &str = "\u{E8BD}";
+/// Biblioteca de imagens: colunas e fileiras à vista (a roda rola de uma fileira em uma).
+pub const LIBRARY_COLUMNS: usize = 3;
+pub const LIBRARY_ROWS: usize = 3;
+const LIBRARY_GAP: f32 = 6.0;
 /// Miniaturas no campo (quadradas) e altura das imagens no balão da pergunta.
 const ATTACH: f32 = 56.0;
 const PICTURE_H: f32 = 72.0;
@@ -384,6 +391,20 @@ pub fn field_text_width(scale: f32) -> f32 {
 pub fn history_max_scroll(count: usize) -> usize {
     count.saturating_sub(HISTORY_VISIBLE)
 }
+
+/// Primeira fileira máxima da rolagem da biblioteca.
+pub fn library_max_scroll(count: usize) -> usize {
+    count.div_ceil(LIBRARY_COLUMNS).saturating_sub(LIBRARY_ROWS)
+}
+
+/// Os quadros à vista da biblioteca com a rolagem `scroll` (em fileiras).
+pub fn library_visible(count: usize, scroll: usize) -> std::ops::Range<usize> {
+    let first = scroll.min(library_max_scroll(count)) * LIBRARY_COLUMNS;
+    first..(first + LIBRARY_COLUMNS * LIBRARY_ROWS).min(count)
+}
+
+/// Um quadro da biblioteca: a miniatura (`None` = carregando) e se foi gerada ou colada.
+pub struct LibraryTile { pub image: Option<Image>, pub generated: bool }
 
 /// Uma mensagem como o painel desenha. `images`: as coladas na pergunta ou as geradas na resposta
 /// (`None` = ainda carregando). `generating`: a resposta está gerando mais uma imagem.
@@ -468,6 +489,8 @@ pub enum Page<'a> {
     /// `prefer`: só na origem, a chave do que o automático tenta primeiro.
     Picker { title: &'a str, options: &'a [String], selected: Option<usize>, note: Option<&'a str>, prefer: Option<Prefer> },
     History { rows: &'a [HistoryRow], scroll: usize },
+    /// Biblioteca de imagens: todos os quadros (só os à vista são desenhados); `scroll` em fileiras.
+    Library { tiles: &'a [LibraryTile], scroll: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -488,6 +511,12 @@ pub enum Hit {
     Unattach(usize),
     /// Imagem `.1` da mensagem `.0` (abre no visualizador).
     Picture(usize, usize),
+    /// Botão da biblioteca no cabeçalho; na biblioteca, o quadro (abre a imagem), o botão da
+    /// conversa de origem e "Abrir pasta".
+    Library,
+    Tile(usize),
+    GoTo(usize),
+    OpenFolder,
     Field,
 }
 
@@ -576,10 +605,13 @@ fn draw_header(ops: &mut Vec<DrawOp>, hits: &mut Vec<(Rect, Hit)>, view: &ChatVi
         hits.push((r, Hit::Agent(*agent)));
         x += sw;
     }
-    let history_on = matches!(view.page, Page::History { .. });
-    for (i, (glyph, hit)) in [(GLYPH_NEW, Hit::NewChat), (GLYPH_HISTORY, Hit::History)].into_iter().enumerate() {
+    for (i, (glyph, hit)) in [(GLYPH_NEW, Hit::NewChat), (GLYPH_HISTORY, Hit::History), (GLYPH_LIBRARY, Hit::Library)].into_iter().enumerate() {
         let r = Rect::new(w - px(14.0 + 30.0) - i as f32 * px(36.0), px(12.0), px(30.0), px(30.0));
-        let lit = hit == Hit::History && history_on;
+        let lit = match hit {
+            Hit::History => matches!(view.page, Page::History { .. }),
+            Hit::Library => matches!(view.page, Page::Library { .. }),
+            _ => false,
+        };
         let fill = if lit { tokens.accent_soft } else if view.hover == Some(hit) { tokens.raised_strong } else { tokens.raised };
         ops.push(DrawOp::RoundRect { rect: r, radius: r.h / 2.0, color: fill });
         ops.push(DrawOp::Text { rect: r, text: glyph.into(), style: icons(12.0), color: if lit { tokens.accent } else { tokens.text_secondary }, align: Align::Center });
@@ -686,7 +718,67 @@ pub fn chat_panel(view: &ChatView, scale: f32, tokens: &Tokens, m: &dyn TextMeas
             let size = Size { w, h: y + px(10.0) };
             ChatLayout { list: DisplayList { size, ops }, hits, max_scroll: 0.0, line }
         }
+        Page::Library { tiles, scroll } => {
+            let y = library_page(&mut ops, &mut hits, tiles, *scroll, view.hover, scale, tokens, m);
+            let size = Size { w, h: y + px(10.0) };
+            ChatLayout { list: DisplayList { size, ops }, hits, max_scroll: 0.0, line }
+        }
     }
+}
+
+/// A biblioteca de imagens: o título com "Abrir pasta" e a grade das fileiras à vista. Com o mouse
+/// num quadro, o botão da conversa de origem aparece no canto dele. Devolve o fim da grade.
+#[allow(clippy::too_many_arguments)]
+fn library_page(ops: &mut Vec<DrawOp>, hits: &mut Vec<(Rect, Hit)>, tiles: &[LibraryTile], scroll: usize, hover: Option<Hit>, scale: f32, tokens: &Tokens, m: &dyn TextMeasurer) -> f32 {
+    let px = |v: f32| (v * scale).round();
+    let text = |size: f32, weight: FontWeight| TextStyle { size: size * scale, weight, family: Family::Text };
+    let icons = |size: f32| TextStyle { size: size * scale, weight: FontWeight::Regular, family: Family::Icons };
+    let w = px(WIDTH);
+    let y = draw_page_title(ops, hits, "Imagens", hover == Some(Hit::Back), scale, tokens);
+    // "Abrir pasta" no fim do título, por cima da seta de voltar.
+    let label = "Abrir pasta";
+    let ls = text(11.5, FontWeight::Regular);
+    let bw = m.measure(label, &ls).w.ceil() + px(36.0);
+    let folder = Rect::new(w - px(14.0) - bw, px(AREA_Y + 2.0), bw, px(PAGE_TITLE_H - 8.0));
+    let fill = if hover == Some(Hit::OpenFolder) { tokens.raised_strong } else { tokens.raised };
+    ops.push(DrawOp::RoundRect { rect: folder, radius: folder.h / 2.0, color: fill });
+    ops.push(DrawOp::Text { rect: Rect::new(folder.x + px(8.0), folder.y, px(16.0), folder.h), text: GLYPH_FOLDER.into(), style: icons(11.0), color: tokens.text_secondary, align: Align::Center });
+    ops.push(DrawOp::Text { rect: Rect::new(folder.x + px(28.0), folder.y, bw - px(32.0), folder.h), text: label.into(), style: ls, color: tokens.text_secondary, align: Align::Leading });
+    hits.insert(0, (folder, Hit::OpenFolder));
+    if tiles.is_empty() {
+        ops.push(DrawOp::Text { rect: Rect::new(px(38.0), y + px(4.0), w - px(52.0), px(20.0)), text: "Nenhuma imagem ainda.".into(), style: text(12.0, FontWeight::Regular), color: tokens.text_secondary, align: Align::Leading });
+        return y + px(32.0);
+    }
+    let gap = px(LIBRARY_GAP);
+    let side = ((w - px(20.0) - gap * (LIBRARY_COLUMNS - 1) as f32) / LIBRARY_COLUMNS as f32).floor();
+    let visible = library_visible(tiles.len(), scroll);
+    let first = visible.start;
+    let mut bottom = y;
+    for i in visible {
+        let (row, col) = ((i - first) / LIBRARY_COLUMNS, (i - first) % LIBRARY_COLUMNS);
+        let cell = Rect::new(px(10.0) + col as f32 * (side + gap), y + row as f32 * (side + gap), side, side);
+        let tile = &tiles[i];
+        ops.push(DrawOp::RoundRect { rect: cell, radius: px(10.0), color: tokens.raised });
+        if let Some(image) = &tile.image {
+            ops.push(DrawOp::Image { rect: fit(image, cell), image: image.clone(), radius: px(8.0), opacity: 1.0 });
+        }
+        let tag = if tile.generated { "Gerada" } else { "Colada" };
+        let ts = text(10.0, FontWeight::SemiBold);
+        let tw = m.measure(tag, &ts).w.ceil() + px(12.0);
+        let tr = Rect::new(cell.x + px(6.0), cell.bottom() - px(6.0 + 18.0), tw, px(18.0));
+        ops.push(DrawOp::RoundRect { rect: tr, radius: tr.h / 2.0, color: tokens.raised_strong });
+        ops.push(DrawOp::Text { rect: tr, text: tag.into(), style: ts, color: tokens.text_secondary, align: Align::Center });
+        if matches!(hover, Some(Hit::Tile(j) | Hit::GoTo(j)) if j == i) {
+            let go = Rect::new(cell.right() - px(6.0 + 26.0), cell.y + px(6.0), px(26.0), px(26.0));
+            let on = hover == Some(Hit::GoTo(i));
+            ops.push(DrawOp::Circle { center: Point { x: go.x + go.w / 2.0, y: go.y + go.h / 2.0 }, radius: go.w / 2.0, color: if on { tokens.accent } else { tokens.raised_strong } });
+            ops.push(DrawOp::Text { rect: go, text: GLYPH_CHAT.into(), style: icons(11.0), color: if on { on_accent(tokens) } else { tokens.text }, align: Align::Center });
+            hits.insert(0, (go, Hit::GoTo(i)));
+        }
+        hits.push((cell, Hit::Tile(i)));
+        bottom = cell.bottom();
+    }
+    bottom
 }
 
 /// "No automático, primeiro: Windows | WSL", embaixo das origens. Devolve o fim da linha.
@@ -1318,6 +1410,55 @@ mod tests {
         assert_eq!(history_max_scroll(12), 3);
         let v = view(&[], &f, &lines, Page::History { rows: &[], scroll: 0 });
         assert!(texts(&chat_panel(&v, 1.0, &tokens(), &FixedWidthMeasurer).list).contains(&"Nenhuma conversa ainda.".to_string()));
+    }
+
+    #[test]
+    fn header_has_the_library_button() {
+        let l = panel(&[], &Field::default(), 0.0);
+        assert!(has(&l, Hit::Library) && texts(&l.list).contains(&GLYPH_LIBRARY.to_string()));
+        let library = hit_rect(&l, Hit::Library).unwrap();
+        let history = hit_rect(&l, Hit::History).unwrap();
+        assert!(library.right() <= history.x, "ao lado de Conversas antigas, sem encostar");
+    }
+
+    fn tiles(n: usize) -> Vec<LibraryTile> {
+        (0..n).map(|i| LibraryTile { image: (i != 1).then(|| img(300, 200)), generated: i % 2 == 0 }).collect()
+    }
+
+    #[test]
+    fn library_page_is_a_grid_with_tags_and_buttons() {
+        let lines = [Line { start: 0, end: 0 }];
+        let f = Field::default();
+        let all = tiles(11);
+        let v = view(&[], &f, &lines, Page::Library { tiles: &all, scroll: 0 });
+        let l = chat_panel(&v, 1.0, &tokens(), &FixedWidthMeasurer);
+        let t = texts(&l.list);
+        for s in ["Imagens", "Gerada", "Colada", "Abrir pasta", GLYPH_BACK] {
+            assert!(t.contains(&s.to_string()), "falta {s}");
+        }
+        assert!(has(&l, Hit::Back) && has(&l, Hit::OpenFolder) && !has(&l, Hit::Field), "sem campo na biblioteca");
+        let shown = LIBRARY_COLUMNS * LIBRARY_ROWS;
+        assert!(has(&l, Hit::Tile(shown - 1)) && !has(&l, Hit::Tile(shown)), "só {LIBRARY_ROWS} fileiras à vista");
+        let (a, b, d) = (hit_rect(&l, Hit::Tile(0)).unwrap(), hit_rect(&l, Hit::Tile(1)).unwrap(), hit_rect(&l, Hit::Tile(3)).unwrap());
+        assert!(b.x >= a.right() && (b.y - a.y).abs() < 0.5, "3 por fileira");
+        assert!(d.y >= a.bottom() && (d.x - a.x).abs() < 0.5, "a 4ª abre a fileira de baixo");
+        assert!((a.w - a.h).abs() < 0.5, "quadros quadrados");
+        assert_eq!(images(&l).len(), shown - 1, "a que ainda carrega fica sem imagem");
+        assert!(!has(&l, Hit::GoTo(0)), "o botão da conversa só aparece com o mouse em cima");
+        let mut v = view(&[], &f, &lines, Page::Library { tiles: &all, scroll: 0 });
+        v.hover = Some(Hit::Tile(4));
+        let l = chat_panel(&v, 1.0, &tokens(), &FixedWidthMeasurer);
+        let go = hit_rect(&l, Hit::GoTo(4)).unwrap();
+        assert!(hit_rect(&l, Hit::Tile(4)).unwrap().contains(Point { x: go.x + 1.0, y: go.y + 1.0 }), "dentro do quadro");
+        assert_eq!(l.hit(Point { x: go.x + 2.0, y: go.y + 2.0 }), Some(Hit::GoTo(4)), "o botão ganha do quadro");
+        let v = view(&[], &f, &lines, Page::Library { tiles: &all, scroll: 99 });
+        let l = chat_panel(&v, 1.0, &tokens(), &FixedWidthMeasurer);
+        assert!(has(&l, Hit::Tile(10)) && has(&l, Hit::Tile(3)) && !has(&l, Hit::Tile(2)), "rolagem presa no fim");
+        assert_eq!(library_max_scroll(11), 1);
+        assert_eq!(library_max_scroll(9), 0);
+        assert_eq!(library_visible(11, 1), 3..11);
+        let v = view(&[], &f, &lines, Page::Library { tiles: &[], scroll: 0 });
+        assert!(texts(&chat_panel(&v, 1.0, &tokens(), &FixedWidthMeasurer).list).contains(&"Nenhuma imagem ainda.".to_string()));
     }
 
     #[test]

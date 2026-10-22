@@ -98,3 +98,12 @@ campo é desenhado pelo painel. A origem é `[chat] origin` (`auto` = Windows; s
   aviso "Vou usar a skill…" e a resposta final). Os deltas trazem `itemId`; quando o item muda e a
   resposta já tem texto, entra uma linha em branco. Um `agentMessage` de outro item que chega
   inteiro, sem deltas, também é acrescentado (antes ele era descartado).
+- **Biblioteca de imagens** (spec `2026-10-22-biblioteca-de-imagens-do-chat-design.md`): o botão
+  de imagem no cabeçalho abre a página "Imagens", com uma grade de 3 colunas (3 fileiras à vista,
+  a roda rola de fileira em fileira) das imagens de todas as conversas, geradas e coladas, da
+  conversa mais recente para a mais antiga. Não há índice novo: a lista sai dos JSON das conversas
+  ao abrir a página (`history::library`), sem as imagens cujo arquivo sumiu. Só as fileiras à
+  vista e a próxima são decodificadas, a 256 px; a memória das miniaturas guarda o lado em que
+  cada uma foi lida e relê a que está menor que o pedido. Clique abre no visualizador; o botão no
+  canto do quadro (com o mouse em cima) reabre a conversa de origem; "Abrir pasta" abre
+  `chat\imagens`. Apagar uma imagem sozinha ficou de fora.

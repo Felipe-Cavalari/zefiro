@@ -2,7 +2,7 @@
 //! única da primeira versão (`conversa.json`), que vira um arquivo destes.
 
 use crate::agent::Agent;
-use crate::conversation::Conversation;
+use crate::conversation::{Conversation, Role};
 use std::path::{Path, PathBuf};
 
 /// Uma linha da lista de conversas antigas.
@@ -72,6 +72,28 @@ pub fn list(dir: &Path) -> Vec<Summary> {
     out
 }
 
+/// Uma imagem da biblioteca: o id do PNG, a conversa de onde veio e se o agente a gerou (na
+/// resposta) ou o usuário a colou (na pergunta).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LibraryImage { pub id: String, pub conversation: String, pub generated: bool }
+
+/// As imagens de todas as conversas, da conversa mais recente para a mais antiga e, dentro dela,
+/// da última mensagem para a primeira. Imagem cujo arquivo sumiu fica de fora.
+pub fn library(dir: &Path, images: &Path) -> Vec<LibraryImage> {
+    let mut out = Vec::new();
+    for summary in list(dir) {
+        let Some(c) = load(dir, &summary.id) else { continue };
+        for m in c.messages.iter().rev() {
+            for id in m.images.iter().rev() {
+                if image_file(images, id).is_some_and(|p| p.is_file()) {
+                    out.push(LibraryImage { id: id.clone(), conversation: c.id.clone(), generated: m.role == Role::Claude });
+                }
+            }
+        }
+    }
+    out
+}
+
 /// A conversa mais recente (a que o painel mostra ao abrir pela primeira vez).
 pub fn latest(dir: &Path) -> Option<Conversation> {
     list(dir).first().and_then(|s| load(dir, &s.id))
@@ -122,6 +144,29 @@ mod tests {
         delete(&d, &imgs, "b-2").unwrap();
         delete(&d, &imgs, "nao-existe").unwrap();
         assert_eq!(list(&d).len(), 1);
+    }
+
+    #[test]
+    fn library_lists_images_newest_first_with_their_origin() {
+        let dir = tempfile::tempdir().unwrap();
+        let (d, imgs) = (dir.path().join("conversas"), dir.path().join("imagens"));
+        std::fs::create_dir_all(&imgs).unwrap();
+        for id in ["p1", "g1", "p2", "g2", "g3"] {
+            std::fs::write(image_file(&imgs, id).unwrap(), b"png").unwrap();
+        }
+        let mut old = conv("old", Agent::Codex, "", 10);
+        old.ask_with("veja", vec!["p1".into()]);
+        old.add_reply_image("g1".into());
+        save(&d, &old).unwrap();
+        let mut new = conv("new", Agent::Codex, "", 20);
+        new.ask_with("um gato", vec!["p2".into(), "sumiu".into()]);
+        new.add_reply_image("g2".into());
+        new.add_reply_image("g3".into());
+        save(&d, &new).unwrap();
+        let l = library(&d, &imgs);
+        let got: Vec<(&str, &str, bool)> = l.iter().map(|i| (i.id.as_str(), i.conversation.as_str(), i.generated)).collect();
+        assert_eq!(got, [("g3", "new", true), ("g2", "new", true), ("p2", "new", false), ("g1", "old", true), ("p1", "old", false)], "a do arquivo sumido fica de fora");
+        assert!(library(&dir.path().join("nada"), &imgs).is_empty());
     }
 
     #[test]

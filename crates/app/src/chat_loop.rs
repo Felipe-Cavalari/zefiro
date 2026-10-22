@@ -6,12 +6,15 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use windows::core::Result;
-use zefiro_bar::chat::{ChatLayout, ChatView, Edit, Field, Hit, HistoryRow, Key, Line, MessageView, Page, Wrapped, chat_panel, field_text_width, history_max_scroll, plain_text, text_style, text_width, wrap, wrap_text};
+use zefiro_bar::chat::{
+    ChatLayout, ChatView, Edit, Field, Hit, HistoryRow, Key, LIBRARY_COLUMNS, LibraryTile, Line, MessageView, Page, Wrapped, chat_panel, field_text_width, history_max_scroll, library_max_scroll, library_visible, plain_text, text_style,
+    text_width, wrap, wrap_text,
+};
 use zefiro_bar::controller::PanelKind;
 use zefiro_core::config::set_value;
 use zefiro_integration_chat::agent::{Agent, ModelOption, claude_models, effective_model, model_label};
 use zefiro_integration_chat::conversation::{Conversation, Role};
-use zefiro_integration_chat::history::{self, Summary};
+use zefiro_integration_chat::history::{self, LibraryImage, Summary};
 use zefiro_integration_chat::image::{MAX_IMAGES, MAX_SIDE, base64, decode_base64, is_png};
 use zefiro_integration_chat::origin::{Choice, Prefer, parse_choice};
 use zefiro_integration_chat::protocol::{Event, Failure, classify};
@@ -31,6 +34,8 @@ const WHEEL_LINES: f32 = 3.0;
 const THUMB_PX: u32 = 128;
 /// Lado das imagens geradas na tela (px; a largura do balão a 200 %).
 const REPLY_THUMB_PX: u32 = 800;
+/// Lado das miniaturas da biblioteca (px; o quadro de ~130 DIP a 200 %).
+const LIBRARY_THUMB_PX: u32 = 256;
 /// Imagem gerada que não vem em PNG é convertida até este lado (px).
 const GENERATED_MAX_SIDE: u32 = 4096;
 
@@ -41,8 +46,8 @@ struct Attachment { id: String, thumb: Option<Image> }
 enum ImageDone {
     /// Imagem colada convertida e gravada (ou o erro).
     Pasted { id: String, thumb: std::result::Result<Image, String> },
-    /// Miniatura de uma imagem de conversa (`None` se o arquivo sumiu).
-    Thumb { id: String, image: Option<Image> },
+    /// Miniatura de uma imagem de conversa lida com o lado `side` (`None` se o arquivo sumiu).
+    Thumb { id: String, side: u32, image: Option<Image> },
 }
 
 /// Linhas quebradas de uma mensagem, refeitas só quando o texto ou a escala mudam.
@@ -56,6 +61,7 @@ enum ChatPage {
     Origins,
     Models,
     History,
+    Library,
 }
 
 /// O processo vivo: agente, origem (e a preferência, no automático) e (no Claude, que recebe o
@@ -82,6 +88,8 @@ pub struct ChatRuntime {
     attachments: Vec<Attachment>,
     /// Miniaturas das imagens das perguntas, por id, e as que estão sendo lidas.
     thumbs: HashMap<String, Image>,
+    /// Lado (px) em que cada miniatura foi lida: uma menor que a pedida é lida de novo.
+    thumb_side: HashMap<String, u32>,
     loading: HashSet<String>,
     /// Imagens cujo arquivo não abriu (não tenta ler de novo a cada quadro).
     missing: HashSet<String>,
@@ -97,6 +105,9 @@ pub struct ChatRuntime {
     codex_models: Option<Vec<ModelOption>>,
     history: Vec<Summary>,
     history_scroll: usize,
+    /// Biblioteca de imagens (lida ao abrir a página) e a rolagem, em fileiras.
+    library: Vec<LibraryImage>,
+    library_scroll: usize,
     /// Chegou resposta com o painel fechado.
     unread: bool,
     asked_at: Option<Instant>,
@@ -302,6 +313,13 @@ impl Loop {
             })
             .unwrap_or_default();
         self.chat_load_thumbs(wanted);
+        if self.chat.page == ChatPage::Library {
+            // As fileiras à vista e a próxima.
+            let visible = library_visible(self.chat.library.len(), self.chat.library_scroll);
+            let ahead = (visible.end + LIBRARY_COLUMNS).min(self.chat.library.len());
+            let wanted = self.chat.library[visible.start..ahead].iter().map(|e| (e.id.clone(), LIBRARY_THUMB_PX)).collect();
+            self.chat_load_thumbs(wanted);
+        }
         let measure = &self.ctx.text;
         let c = &mut self.chat;
         let Some(conv) = c.conversation.as_ref() else { return DisplayList::default() };
@@ -321,6 +339,12 @@ impl Loop {
         c.field_lines = wrap(&c.field.text, field_text_width(scale), &text_style(scale), measure);
         c.scale = scale;
         let origin_names: Vec<String> = origin_options.iter().map(Choice::label).collect();
+        let library_tiles: Vec<LibraryTile> = if c.page == ChatPage::Library {
+            let visible = library_visible(c.library.len(), c.library_scroll);
+            c.library.iter().enumerate().map(|(i, e)| LibraryTile { image: visible.contains(&i).then(|| c.thumbs.get(&e.id).cloned()).flatten(), generated: e.generated }).collect()
+        } else {
+            Vec::new()
+        };
         let model_names: Vec<String> = models.iter().map(|m| m.name.clone()).collect();
         let origin_title = format!("Origem do {}", agent.label());
         let model_title = format!("Modelo do {}", agent.label());
@@ -341,6 +365,7 @@ impl Loop {
                 prefer: None,
             },
             ChatPage::History => Page::History { rows: &history_rows, scroll: c.history_scroll },
+            ChatPage::Library => Page::Library { tiles: &library_tiles, scroll: c.library_scroll },
         };
         let pictures: Vec<Vec<Option<Image>>> = conv.messages.iter().map(|m| m.images.iter().map(|id| c.thumbs.get(id).cloned()).collect()).collect();
         let attachments: Vec<Option<Image>> = c.attachments.iter().map(|a| a.thumb.clone()).collect();
@@ -410,6 +435,7 @@ impl Loop {
         let chat = &mut self.chat;
         for a in chat.attachments.drain(..) {
             if let Some(thumb) = a.thumb {
+                chat.thumb_side.insert(a.id.clone(), THUMB_PX);
                 chat.thumbs.insert(a.id, thumb);
             }
         }
@@ -531,12 +557,17 @@ impl Loop {
     }
 
     /// Reabre uma conversa antiga com o agente, a origem e o modelo dela.
-    fn chat_open_conversation(&mut self, index: usize) -> Result<()> {
-        let Some(summary) = self.chat.history.get(index).cloned() else { return Ok(()) };
+    fn chat_open_conversation(&mut self, id: &str) -> Result<()> {
+        if self.chat.conversation.as_ref().is_some_and(|c| c.id == id) {
+            // Já é a conversa do painel (da biblioteca): só volta a ela.
+            self.chat.page = ChatPage::Chat;
+            self.chat.scroll = 0.0;
+            return self.redraw_open_panel();
+        }
         if self.chat.conversation.as_ref().is_some_and(|c| c.busy()) {
             return Ok(());
         }
-        let Some(conv) = history::load(&conversations_dir(), &summary.id) else {
+        let Some(conv) = history::load(&conversations_dir(), id) else {
             tracing::warn!("chat: não consegui ler a conversa antiga");
             return Ok(());
         };
@@ -605,6 +636,11 @@ impl Loop {
             }
             // O Codex manda os modelos assim que sobe.
             ChatPage::Models => self.chat_start(),
+            ChatPage::Library => {
+                self.chat_save();
+                self.chat.library = history::library(&conversations_dir(), &images_dir());
+                self.chat.library_scroll = 0;
+            }
             ChatPage::Chat => {}
         }
         self.redraw_open_panel()
@@ -698,6 +734,16 @@ impl Loop {
         if !self.chat_open() {
             return Ok(false);
         }
+        if self.chat.page == ChatPage::Library {
+            let max = library_max_scroll(self.chat.library.len());
+            let c = &mut self.chat;
+            let next = if delta > 0 { c.library_scroll.saturating_sub(1) } else { (c.library_scroll + 1).min(max) };
+            if next != c.library_scroll {
+                c.library_scroll = next;
+                self.redraw_open_panel()?;
+            }
+            return Ok(true);
+        }
         if self.chat.page == ChatPage::History {
             let max = history_max_scroll(self.chat.history.len());
             let c = &mut self.chat;
@@ -770,7 +816,28 @@ impl Loop {
                 _ => {}
             },
             Some(Hit::Prefer(p)) => self.chat_set_prefer(p)?,
-            Some(Hit::Open(i)) => self.chat_open_conversation(i)?,
+            Some(Hit::Open(i)) => {
+                if let Some(id) = self.chat.history.get(i).map(|s| s.id.clone()) {
+                    self.chat_open_conversation(&id)?;
+                }
+            }
+            Some(Hit::Library) => self.chat_show_page(ChatPage::Library)?,
+            Some(Hit::Tile(i)) => {
+                if let Some(id) = self.chat.library.get(i).map(|e| e.id.clone()) {
+                    self.chat_open_image(&id)?;
+                }
+            }
+            Some(Hit::GoTo(i)) => {
+                if let Some(id) = self.chat.library.get(i).map(|e| e.conversation.clone()) {
+                    self.chat_open_conversation(&id)?;
+                }
+            }
+            Some(Hit::OpenFolder) => {
+                let _ = std::fs::create_dir_all(images_dir());
+                tracing::info!("chat: abrindo a pasta das imagens");
+                system::open_folder(&images_dir());
+                self.close_open_panel()?;
+            }
             Some(Hit::Delete(i)) => self.chat_delete_conversation(i)?,
             Some(Hit::Copy(i)) => {
                 if let Some(text) = self.chat.conversation.as_ref().and_then(|c| c.messages.get(i)).map(|m| m.text.clone()) {
@@ -868,7 +935,15 @@ impl Loop {
     /// cima dele).
     fn chat_open_picture(&mut self, message: usize, index: usize) -> Result<()> {
         let id = self.chat.conversation.as_ref().and_then(|c| c.messages.get(message)).and_then(|m| m.images.get(index)).cloned();
-        let Some(path) = id.and_then(|id| history::image_file(&images_dir(), &id)).filter(|p| p.is_file()) else {
+        match id {
+            Some(id) => self.chat_open_image(&id),
+            None => Ok(()),
+        }
+    }
+
+    /// Abre a imagem `id` no visualizador do Windows e fecha o painel.
+    fn chat_open_image(&mut self, id: &str) -> Result<()> {
+        let Some(path) = history::image_file(&images_dir(), id).filter(|p| p.is_file()) else {
             tracing::warn!("chat: a imagem não está mais na pasta");
             return Ok(());
         };
@@ -907,7 +982,7 @@ impl Loop {
                 }
             };
             if let Ok(mut d) = done.lock() {
-                d.push(ImageDone::Thumb { id, image });
+                d.push(ImageDone::Thumb { id, side: REPLY_THUMB_PX, image });
             }
             window::post_user(USER_CHAT_IMAGE);
         });
@@ -921,7 +996,7 @@ impl Loop {
     /// Lê numa thread as imagens da conversa que ainda não estão na memória (`side`: lado em px).
     fn chat_load_thumbs(&mut self, ids: Vec<(String, u32)>) {
         let c = &self.chat;
-        let missing: Vec<(String, u32)> = ids.into_iter().filter(|(id, _)| !c.thumbs.contains_key(id) && !c.loading.contains(id) && !c.missing.contains(id)).collect();
+        let missing: Vec<(String, u32)> = ids.into_iter().filter(|(id, side)| c.thumb_side.get(id).is_none_or(|s| s < side) && !c.loading.contains(id) && !c.missing.contains(id)).collect();
         if missing.is_empty() {
             return;
         }
@@ -931,7 +1006,7 @@ impl Loop {
             for (id, side) in missing {
                 let image = history::image_file(&images_dir(), &id).and_then(|p| std::fs::read(p).ok()).and_then(|b| imaging::decode_bytes(&b, side));
                 if let Ok(mut d) = done.lock() {
-                    d.push(ImageDone::Thumb { id, image });
+                    d.push(ImageDone::Thumb { id, side, image });
                 }
             }
             window::post_user(USER_CHAT_IMAGE);
@@ -957,10 +1032,11 @@ impl Loop {
                         self.chat.attachments.retain(|a| a.id != id);
                     }
                 },
-                ImageDone::Thumb { id, image } => {
+                ImageDone::Thumb { id, side, image } => {
                     self.chat.loading.remove(&id);
                     match image {
                         Some(image) => {
+                            self.chat.thumb_side.insert(id.clone(), side);
                             self.chat.thumbs.insert(id, image);
                         }
                         None => {
