@@ -1,5 +1,6 @@
 //! A conversa do painel: as mensagens, em que pé está a resposta e a gravação em JSON.
 
+use crate::agent::Agent;
 use crate::protocol::{Event, Failure, failure_text};
 use serde::{Deserialize, Serialize};
 
@@ -40,7 +41,12 @@ pub const MAX_PROMPT: usize = 8000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Conversation {
-    /// Id da sessão do `claude`.
+    /// Id do Zefiro (nome do arquivo). Nas conversas da primeira versão, o da sessão.
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub agent: Agent,
+    /// Id da sessão do `claude` ou do `thread` do Codex (vazio até o Codex criar).
     pub session: String,
     /// O `claude` já criou a sessão (então a próxima partida é `--resume`).
     #[serde(default)]
@@ -48,14 +54,34 @@ pub struct Conversation {
     /// Rótulo da origem em que a sessão existe ("Windows", nome da distro).
     #[serde(default)]
     pub origin: String,
+    /// Modelo escolhido (vazio = o padrão).
+    #[serde(default)]
+    pub model: String,
+    /// Última mudança (segundos Unix), para ordenar as conversas antigas.
+    #[serde(default)]
+    pub updated: i64,
     pub messages: Vec<Message>,
     #[serde(skip)]
     stopping: bool,
 }
 
 impl Conversation {
-    pub fn new(session: String) -> Self {
-        Conversation { session, ..Default::default() }
+    /// Conversa nova. No Claude o id do Zefiro é também o da sessão (o Zefiro escolhe); no Codex,
+    /// o `thread` só existe depois do `thread/start`.
+    pub fn new(id: String, agent: Agent) -> Self {
+        let session = if agent == Agent::Claude { id.clone() } else { String::new() };
+        Conversation { id, agent, session, ..Default::default() }
+    }
+
+    /// Título na lista de conversas: a primeira linha da primeira pergunta.
+    pub fn title(&self) -> String {
+        let first = self.messages.iter().find(|m| m.role == Role::User).map_or("", |m| m.text.as_str());
+        let line = first.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("Conversa sem perguntas");
+        let mut t: String = line.chars().take(80).collect();
+        if line.chars().count() > 80 {
+            t.push('…');
+        }
+        t
     }
 
     fn reply_mut(&mut self) -> Option<&mut Message> {
@@ -128,7 +154,7 @@ impl Conversation {
                 }
                 None => false,
             },
-            Event::Assistant(_) | Event::Finished { .. } | Event::Other => false,
+            Event::Assistant(_) | Event::Finished { .. } | Event::Turn(_) | Event::Models(_) | Event::Other => false,
         }
     }
 
@@ -163,7 +189,11 @@ impl Conversation {
     /// Lê a conversa gravada. Uma resposta que estava chegando quando o Zefiro fechou vira parada.
     pub fn from_json(text: &str) -> Option<Self> {
         let mut c: Conversation = serde_json::from_str(text).ok()?;
-        if c.session.is_empty() {
+        if c.id.is_empty() {
+            // Primeira versão: um arquivo só, sem id; o id era o da sessão do Claude.
+            c.id.clone_from(&c.session);
+        }
+        if c.id.is_empty() {
             return None;
         }
         for m in c.messages.iter_mut().filter(|m| m.state.busy()) {
@@ -179,7 +209,7 @@ mod tests {
     use super::*;
 
     fn asked() -> Conversation {
-        let mut c = Conversation::new("s1".into());
+        let mut c = Conversation::new("s1".into(), Agent::Claude);
         assert!(c.ask("Qual a capital do Peru?  \n"));
         c
     }
@@ -198,7 +228,7 @@ mod tests {
     fn cannot_ask_while_busy_or_blank() {
         let mut c = asked();
         assert!(!c.ask("outra"), "com resposta em andamento");
-        let mut fresh = Conversation::new("s".into());
+        let mut fresh = Conversation::new("s".into(), Agent::Claude);
         assert!(!fresh.ask("  \n "));
         assert!(fresh.messages.is_empty());
     }
@@ -274,6 +304,8 @@ mod tests {
         assert_eq!((back.messages[1].text.as_str(), back.messages[1].state), ("Li", State::Stopped), "chegando quando o Zefiro fechou");
         assert!(!back.busy());
         assert_eq!(Conversation::from_json("{}"), None);
+        let old = Conversation::from_json(r#"{"session":"abc","created":true,"origin":"Windows","messages":[]}"#).unwrap();
+        assert_eq!((old.id.as_str(), old.agent), ("abc", Agent::Claude), "arquivo da primeira versão");
         assert_eq!(Conversation::from_json("lixo"), None);
     }
 }

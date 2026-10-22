@@ -30,8 +30,15 @@ seconds = false
 check = true          # procura versão nova no GitHub Releases (1 vez por dia); instalar é pelo menu do Z
 
 [chat]
-origin = "auto"       # auto | windows | wsl | nome da distro: de onde vem o `claude` do chip "chat"
-model  = ""           # vazio = o modelo que o Claude Code usaria; ou "sonnet", "opus"…
+agent = "claude"      # claude | codex: com quem o chip "chat" conversa (o painel troca e grava aqui)
+
+[chat.claude]
+origin = "auto"       # auto | windows | wsl | nome da distro
+model  = ""           # vazio = o padrão do Claude Code; ou opus, sonnet, haiku
+
+[chat.codex]
+origin = "auto"
+model  = ""           # vazio = o padrão da versão instalada do Codex
 "#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -77,16 +84,38 @@ pub struct Config {
     pub chat: ChatConfig,
 }
 
-/// Chat com o Claude (chip `chat`). `origin`: `auto` (o Windows; sem ele, uma distro do WSL rodando
-/// que tenha `claude`), `windows`, `wsl` (a distro padrão) ou o nome de uma distro. `model`: vazio
-/// usa o modelo que o Claude Code usaria.
+/// Chat do chip `chat` (ADR-0020): o agente (`claude` ou `codex`) e, para cada um, a origem e o
+/// modelo. Escrito pelo próprio painel.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
-pub struct ChatConfig { pub origin: String, pub model: String }
+pub struct ChatConfig { pub agent: String, pub claude: ChatAgentConfig, pub codex: ChatAgentConfig }
+
+/// `origin`: `auto` (o Windows; sem ele, uma distro do WSL rodando que tenha o executável),
+/// `windows`, `wsl` (a distro padrão) ou o nome de uma distro. `model`: vazio = o padrão do agente.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct ChatAgentConfig { pub origin: String, pub model: String }
 
 impl Default for ChatConfig {
     fn default() -> Self {
-        ChatConfig { origin: "auto".into(), model: String::new() }
+        ChatConfig { agent: "claude".into(), claude: ChatAgentConfig::default(), codex: ChatAgentConfig::default() }
+    }
+}
+
+impl Default for ChatAgentConfig {
+    fn default() -> Self {
+        ChatAgentConfig { origin: "auto".into(), model: String::new() }
+    }
+}
+
+impl ChatConfig {
+    /// A configuração do agente (`codex` ou o Claude).
+    pub fn of(&self, codex: bool) -> &ChatAgentConfig {
+        if codex { &self.codex } else { &self.claude }
+    }
+
+    pub fn of_mut(&mut self, codex: bool) -> &mut ChatAgentConfig {
+        if codex { &mut self.codex } else { &mut self.claude }
     }
 }
 
@@ -181,9 +210,10 @@ impl BarConfig {
 }
 
 impl Config {
-    /// Só a seção `[terminal]` mudou? O painel do Terminal grava nela e não deve se fechar.
-    pub fn same_except_terminal(&self, other: &Config) -> bool {
-        Config { terminal: other.terminal.clone(), ..self.clone() } == *other
+    /// Só `[terminal]` ou `[chat]` mudaram? Os painéis do Terminal e do chat gravam nelas e não devem
+    /// se fechar.
+    pub fn same_except_panels(&self, other: &Config) -> bool {
+        Config { terminal: other.terminal.clone(), chat: other.chat.clone(), ..self.clone() } == *other
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {

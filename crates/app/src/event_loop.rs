@@ -735,10 +735,12 @@ impl Loop {
             WinEvent::User { code: USER_CONFIG_CHANGED } => {
                 let text = std::fs::read_to_string(&self.ctx.config_path).unwrap_or_default();
                 match zefiro_core::config::parse_config(&text) {
-                    // Só `[terminal]` mudou (o próprio painel gravou): atualiza sem fechar o painel.
-                    Ok(new) if new != self.ctx.config && new.same_except_terminal(&self.ctx.config) => {
+                    // Só `[terminal]` ou `[chat]` mudaram (o próprio painel gravou): atualiza sem
+                    // fechar o painel.
+                    Ok(new) if new != self.ctx.config && new.same_except_panels(&self.ctx.config) => {
                         self.ctx.config = new;
                         self.terminal_config_changed()?;
+                        self.chat_config_changed()?;
                     }
                     Ok(new) if new != self.ctx.config => {
                         let fx = self.controller.handle(PanelInput::ConfigChanged);

@@ -1,0 +1,127 @@
+//! Conversas antigas: uma por arquivo (`<pasta>\<id>.json`), a lista para o painel e a conversa
+//! única da primeira versão (`conversa.json`), que vira um arquivo destes.
+
+use crate::agent::Agent;
+use crate::conversation::Conversation;
+use std::path::{Path, PathBuf};
+
+/// Uma linha da lista de conversas antigas.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Summary { pub id: String, pub agent: Agent, pub origin: String, pub title: String, pub updated: i64 }
+
+/// Só letras, números e `-` no nome do arquivo.
+fn safe(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+pub fn file(dir: &Path, id: &str) -> Option<PathBuf> {
+    safe(id).then(|| dir.join(format!("{id}.json")))
+}
+
+/// Grava a conversa (arquivo temporário e troca). Conversa sem mensagens não é gravada.
+pub fn save(dir: &Path, c: &Conversation) -> std::io::Result<()> {
+    let path = file(dir, &c.id).ok_or_else(|| std::io::Error::other("id de conversa inválido"))?;
+    if c.messages.is_empty() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(dir)?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, c.to_json())?;
+    std::fs::rename(&tmp, path)
+}
+
+pub fn load(dir: &Path, id: &str) -> Option<Conversation> {
+    let text = std::fs::read_to_string(file(dir, id)?).ok()?;
+    Conversation::from_json(&text).filter(|c| c.id == id)
+}
+
+/// Apaga a cópia do Zefiro (a sessão do `claude`/`codex` fica onde está).
+pub fn delete(dir: &Path, id: &str) -> std::io::Result<()> {
+    match file(dir, id).map(std::fs::remove_file) {
+        Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
+}
+
+/// As conversas com alguma pergunta, da mais recente para a mais antiga.
+pub fn list(dir: &Path) -> Vec<Summary> {
+    let mut out: Vec<Summary> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+        .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+        .filter_map(|t| Conversation::from_json(&t))
+        .filter(|c| !c.messages.is_empty() && safe(&c.id))
+        .map(|c| Summary { title: c.title(), id: c.id, agent: c.agent, origin: c.origin, updated: c.updated })
+        .collect();
+    out.sort_by(|a, b| b.updated.cmp(&a.updated).then_with(|| a.id.cmp(&b.id)));
+    out
+}
+
+/// A conversa mais recente (a que o painel mostra ao abrir pela primeira vez).
+pub fn latest(dir: &Path) -> Option<Conversation> {
+    list(dir).first().and_then(|s| load(dir, &s.id))
+}
+
+/// Leva o `conversa.json` da primeira versão para a pasta das conversas e o apaga.
+pub fn migrate(legacy: &Path, dir: &Path) {
+    let Some(c) = std::fs::read_to_string(legacy).ok().and_then(|t| Conversation::from_json(&t)) else { return };
+    if save(dir, &c).is_ok() {
+        let _ = std::fs::remove_file(legacy);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn conv(id: &str, agent: Agent, question: &str, updated: i64) -> Conversation {
+        let mut c = Conversation::new(id.into(), agent);
+        c.origin = "Windows".into();
+        c.updated = updated;
+        if !question.is_empty() {
+            c.ask(question);
+        }
+        c
+    }
+
+    #[test]
+    fn save_list_load_and_delete() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().join("conversas");
+        save(&d, &conv("a-1", Agent::Claude, "Primeira pergunta\nsegunda linha", 10)).unwrap();
+        save(&d, &conv("b-2", Agent::Codex, "Outra", 20)).unwrap();
+        save(&d, &conv("c-3", Agent::Codex, "", 30)).unwrap();
+        let l = list(&d);
+        assert_eq!(l.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["b-2", "a-1"], "mais recente primeiro, sem as vazias");
+        assert_eq!((l[1].title.as_str(), l[1].agent, l[1].origin.as_str()), ("Primeira pergunta", Agent::Claude, "Windows"));
+        assert_eq!(load(&d, "a-1").unwrap().messages.len(), 2);
+        assert_eq!(latest(&d).unwrap().id, "b-2");
+        delete(&d, "b-2").unwrap();
+        delete(&d, "nao-existe").unwrap();
+        assert_eq!(list(&d).len(), 1);
+    }
+
+    #[test]
+    fn ids_cannot_escape_the_folder() {
+        let d = Path::new("x");
+        assert!(file(d, "../config").is_none());
+        assert!(file(d, "").is_none());
+        assert!(file(d, r"a\b").is_none());
+        assert!(file(d, "01a160e0-6e1c-73d2").is_some());
+    }
+
+    #[test]
+    fn first_version_file_moves_into_the_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join("conversa.json");
+        std::fs::write(&legacy, r#"{"session":"s-1","created":true,"origin":"Windows","messages":[{"role":"User","text":"oi","state":"Done"}]}"#).unwrap();
+        let d = dir.path().join("conversas");
+        migrate(&legacy, &d);
+        assert!(!legacy.exists());
+        let c = load(&d, "s-1").unwrap();
+        assert_eq!((c.session.as_str(), c.created, c.agent), ("s-1", true, Agent::Claude));
+        migrate(&legacy, &d);
+    }
+}

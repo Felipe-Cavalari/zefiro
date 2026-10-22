@@ -6,6 +6,48 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Choice { Auto, Windows, WslDefault, Distro(String) }
 
+impl Choice {
+    /// Nome no seletor.
+    pub fn label(&self) -> String {
+        match self {
+            Choice::Auto => "Automático".into(),
+            Choice::Windows => "Windows".into(),
+            Choice::WslDefault => "WSL".into(),
+            Choice::Distro(d) => d.clone(),
+        }
+    }
+
+    /// Valor gravado no `config.toml`.
+    pub fn value(&self) -> String {
+        match self {
+            Choice::Auto => "auto".into(),
+            Choice::Windows => "windows".into(),
+            Choice::WslDefault => "wsl".into(),
+            Choice::Distro(d) => d.clone(),
+        }
+    }
+
+    /// A escolha que leva de volta à origem de uma conversa gravada ("Windows", "WSL", a distro).
+    pub fn from_label(label: &str) -> Choice {
+        match label {
+            "" => Choice::Auto,
+            "Windows" => Choice::Windows,
+            "WSL" => Choice::WslDefault,
+            d => Choice::Distro(d.to_string()),
+        }
+    }
+}
+
+/// As opções do seletor: automático, o Windows (se tem o executável) e as distros encontradas.
+pub fn choices(windows: bool, distros: &[String]) -> Vec<Choice> {
+    let mut out = vec![Choice::Auto];
+    if windows {
+        out.push(Choice::Windows);
+    }
+    out.extend(distros.iter().filter(|d| !ignored_distro(d)).map(|d| Choice::Distro(d.clone())));
+    out
+}
+
 pub fn parse_choice(value: &str) -> Choice {
     match value.trim() {
         "" | "auto" => Choice::Auto,
@@ -59,10 +101,11 @@ pub fn pick(choice: &Choice, windows_exe: Option<PathBuf>, running: &[String], h
     }
 }
 
-pub fn pick_error_text(e: &PickError) -> &'static str {
+pub fn pick_error_text(e: &PickError, agent: crate::agent::Agent) -> String {
+    let bin = agent.binary();
     match e {
-        PickError::NotFound => "Não achei o Claude Code no Windows nem numa distro do WSL rodando. Instale o `claude` ou escolha a origem em [chat] origin.",
-        PickError::WindowsMissing => "Não achei o Claude Code (claude.exe) no Windows.",
+        PickError::NotFound => format!("Não achei o `{bin}` no Windows nem numa distro do WSL rodando. Instale o {} ou escolha outra origem.", agent.label()),
+        PickError::WindowsMissing => format!("Não achei o {bin}.exe no Windows."),
     }
 }
 
@@ -109,6 +152,19 @@ mod tests {
         assert_eq!(pick(&Choice::Windows, None, &[], &mut |_| true), Err(PickError::WindowsMissing));
         assert_eq!(pick(&Choice::WslDefault, Some("c".into()), &[], &mut |_| false), Ok(Origin::Wsl(None)));
         assert_eq!(pick(&Choice::Distro("Arch".into()), None, &[], &mut |_| false), Ok(Origin::Wsl(Some("Arch".into()))), "a distro escolhida não precisa estar rodando");
+    }
+
+    #[test]
+    fn choice_labels_values_and_round_trip() {
+        for c in [Choice::Auto, Choice::Windows, Choice::WslDefault, Choice::Distro("Ubuntu".into())] {
+            assert_eq!(parse_choice(&c.value()), c);
+        }
+        assert_eq!(Choice::Auto.label(), "Automático");
+        assert_eq!(Choice::from_label(&Origin::Wsl(Some("Arch".into())).label()), Choice::Distro("Arch".into()));
+        assert_eq!(Choice::from_label("Windows"), Choice::Windows);
+        assert_eq!(choices(true, &["docker-desktop".into(), "Ubuntu".into()]), [Choice::Auto, Choice::Windows, Choice::Distro("Ubuntu".into())]);
+        assert_eq!(choices(false, &[]), [Choice::Auto]);
+        assert!(pick_error_text(&PickError::NotFound, crate::agent::Agent::Codex).contains("`codex`"));
     }
 
     #[test]

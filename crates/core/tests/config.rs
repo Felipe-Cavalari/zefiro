@@ -153,19 +153,36 @@ fn set_terminal_keeps_comments_and_other_keys() {
 }
 
 #[test]
-fn only_terminal_changed() {
+fn only_panel_sections_changed() {
     let a = Config::default();
     let mut b = a.clone();
     b.terminal.hidden.push("{x}".into());
-    assert!(a.same_except_terminal(&b));
+    b.chat.agent = "codex".into();
+    b.chat.codex.model = "gpt-5.6-sol".into();
+    assert!(a.same_except_panels(&b));
     b.theme = "cobalto".into();
-    assert!(!a.same_except_terminal(&b));
+    assert!(!a.same_except_panels(&b));
 }
 
 #[test]
 fn chat_section_defaults_to_auto_and_is_parsed() {
     let c = parse_config(DEFAULT_CONFIG).unwrap();
-    assert_eq!((c.chat.origin.as_str(), c.chat.model.as_str()), ("auto", ""));
-    let c = parse_config("[chat]\norigin = \"Ubuntu-24.04\"\nmodel = \"sonnet\"\n").unwrap();
-    assert_eq!((c.chat.origin.as_str(), c.chat.model.as_str()), ("Ubuntu-24.04", "sonnet"));
+    assert_eq!(c.chat, ChatConfig::default());
+    assert_eq!((c.chat.agent.as_str(), c.chat.claude.origin.as_str(), c.chat.codex.model.as_str()), ("claude", "auto", ""));
+    let c = parse_config("[chat]\nagent = \"codex\"\n[chat.codex]\norigin = \"Ubuntu-24.04\"\nmodel = \"gpt-5.6-sol\"\n").unwrap();
+    assert_eq!((c.chat.agent.as_str(), c.chat.of(true).origin.as_str(), c.chat.of(true).model.as_str()), ("codex", "Ubuntu-24.04", "gpt-5.6-sol"));
+    assert_eq!(c.chat.of(false), &ChatAgentConfig::default(), "o Claude fica no padrão");
+}
+
+#[test]
+fn chat_choices_are_written_without_touching_the_rest() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, DEFAULT_CONFIG).unwrap();
+    set_value(&path, &["chat", "agent"], "codex").unwrap();
+    set_value(&path, &["chat", "codex", "model"], "gpt-5.6-luna").unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("# completa | compacta"));
+    let c = parse_config(&text).unwrap();
+    assert_eq!((c.chat.agent.as_str(), c.chat.codex.model.as_str(), c.chat.claude.origin.as_str()), ("codex", "gpt-5.6-luna", "auto"));
 }

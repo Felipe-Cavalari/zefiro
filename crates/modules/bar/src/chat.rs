@@ -1,7 +1,9 @@
 //! Painel do chat com o Claude: o campo de texto (edição com cursor, sem o EDIT do Windows), a
 //! quebra de linha, a limpeza do Markdown e o desenho da conversa com rolagem.
 
+use zefiro_integration_chat::agent::Agent;
 use zefiro_integration_chat::conversation::{MAX_PROMPT, Role, State};
+use zefiro_platform::color::Rgba;
 use zefiro_platform::geometry::{Point, Rect, Size};
 use zefiro_platform::text::{Align, Family, FontWeight, TextMeasurer, TextStyle};
 use zefiro_resources::tokens::Tokens;
@@ -329,14 +331,27 @@ const PAD_Y: f32 = 7.0;
 /// Largura máxima do balão do usuário.
 const USER_MAX: f32 = 300.0;
 const FIELD_LINES: usize = 6;
-const AREA_Y: f32 = 50.0;
+/// Topo da área (cabeçalho e seletores acima).
+const AREA_Y: f32 = 78.0;
 const EMPTY_H: f32 = 84.0;
+/// Linha de uma escolha (origem, modelo).
+const PICK_H: f32 = 32.0;
+/// Linha de uma conversa antiga.
+const HISTORY_H: f32 = 46.0;
+/// Conversas antigas visíveis de uma vez (a roda rola).
+pub const HISTORY_VISIBLE: usize = 9;
+/// Título das páginas de escolha e de conversas.
+const PAGE_TITLE_H: f32 = 32.0;
 
 const GLYPH_SEND: &str = "\u{E724}";
 const GLYPH_STOP: &str = "\u{E71A}";
 const GLYPH_COPY: &str = "\u{E8C8}";
 const GLYPH_CHECK: &str = "\u{E73E}";
 const GLYPH_NEW: &str = "\u{E710}";
+const GLYPH_HISTORY: &str = "\u{E81C}";
+const GLYPH_CHEVRON: &str = "\u{E70D}";
+const GLYPH_BACK: &str = "\u{E72B}";
+const GLYPH_DELETE: &str = "\u{E74D}";
 
 pub fn text_style(scale: f32) -> TextStyle {
     TextStyle { size: TEXT * scale, weight: FontWeight::Regular, family: Family::Text }
@@ -356,19 +371,41 @@ pub fn field_text_width(scale: f32) -> f32 {
     (WIDTH - 20.0 - 12.0 - 46.0) * scale
 }
 
+/// Primeira conversa antiga máxima da rolagem.
+pub fn history_max_scroll(count: usize) -> usize {
+    count.saturating_sub(HISTORY_VISIBLE)
+}
+
 /// Uma mensagem como o painel desenha.
 pub struct MessageView<'a> { pub role: Role, pub state: State, pub wrapped: &'a Wrapped, pub note: Option<&'a str> }
 
+/// Uma linha das conversas antigas: o título e "Codex · Ubuntu · 21/10 20:37".
+#[derive(Debug, Clone, PartialEq)]
+pub struct HistoryRow { pub title: String, pub meta: String, pub current: bool }
+
+/// O que a área do painel mostra.
+pub enum Page<'a> {
+    Chat,
+    /// Escolha da origem ou do modelo. `note`: "Procurando distros…", "Carregando modelos…".
+    Picker { title: &'a str, options: &'a [String], selected: Option<usize>, note: Option<&'a str> },
+    History { rows: &'a [HistoryRow], scroll: usize },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Hit { Send, Stop, NewChat, Copy(usize), Field }
+pub enum Hit { Send, Stop, NewChat, History, Back, Agent(Agent), Origins, Models, Pick(usize), Open(usize), Delete(usize), Copy(usize), Field }
 
 pub struct ChatView<'a> {
     pub messages: &'a [MessageView<'a>],
     pub field: &'a Field,
     /// Linhas do campo, quebradas em [`field_text_width`].
     pub field_lines: &'a [Line],
-    /// Ao lado do título: a origem ("Windows", "Ubuntu-24.04") ou o que está acontecendo.
-    pub subtitle: Option<&'a str>,
+    pub agent: Agent,
+    /// Seletores: a origem ("Automático", "Windows", a distro) e o modelo.
+    pub origin: &'a str,
+    pub model: &'a str,
+    /// Depois dos seletores: "iniciando…", "indisponível".
+    pub status: Option<&'a str>,
+    pub page: Page<'a>,
     /// Pixels rolados a partir do fim (0 = acompanhando).
     pub scroll: f32,
     pub hover: Option<Hit>,
@@ -407,7 +444,147 @@ fn message_h(m: &MessageView, scale: f32, note_lines: usize) -> f32 {
     h * scale
 }
 
+/// Cor de texto legível sobre o destaque.
+fn on_accent(tokens: &Tokens) -> Rgba {
+    if tokens.accent.relative_luminance() > 0.5 { Rgba::BLACK } else { Rgba::WHITE }
+}
+
+/// Cabeçalho: Claude | Codex, os botões de conversas antigas e de conversa nova, e embaixo os
+/// seletores de origem e de modelo.
+fn draw_header(ops: &mut Vec<DrawOp>, hits: &mut Vec<(Rect, Hit)>, view: &ChatView, scale: f32, tokens: &Tokens, m: &dyn TextMeasurer) {
+    let px = |v: f32| (v * scale).round();
+    let text = |size: f32, weight: FontWeight| TextStyle { size: size * scale, weight, family: Family::Text };
+    let icons = |size: f32| TextStyle { size: size * scale, weight: FontWeight::Regular, family: Family::Icons };
+    let w = px(WIDTH);
+    let seg = text(12.0, FontWeight::SemiBold);
+    let widths: Vec<f32> = Agent::ALL.iter().map(|a| m.measure(a.label(), &seg).w.ceil() + px(26.0)).collect();
+    let track = Rect::new(px(14.0), px(12.0), widths.iter().sum::<f32>() + px(6.0), px(30.0));
+    ops.push(DrawOp::RoundRect { rect: track, radius: track.h / 2.0, color: tokens.raised });
+    let mut x = track.x + px(3.0);
+    for (agent, sw) in Agent::ALL.iter().zip(&widths) {
+        let r = Rect::new(x, track.y + px(3.0), *sw, track.h - px(6.0));
+        let on = *agent == view.agent;
+        if on {
+            ops.push(DrawOp::RoundRect { rect: r, radius: r.h / 2.0, color: tokens.raised_strong });
+        } else if view.hover == Some(Hit::Agent(*agent)) {
+            ops.push(DrawOp::RoundRect { rect: r, radius: r.h / 2.0, color: tokens.raised });
+        }
+        ops.push(DrawOp::Text { rect: r, text: agent.label().into(), style: seg, color: if on { tokens.text } else { tokens.text_secondary }, align: Align::Center });
+        hits.push((r, Hit::Agent(*agent)));
+        x += sw;
+    }
+    let history_on = matches!(view.page, Page::History { .. });
+    for (i, (glyph, hit)) in [(GLYPH_NEW, Hit::NewChat), (GLYPH_HISTORY, Hit::History)].into_iter().enumerate() {
+        let r = Rect::new(w - px(14.0 + 30.0) - i as f32 * px(36.0), px(12.0), px(30.0), px(30.0));
+        let lit = hit == Hit::History && history_on;
+        let fill = if lit { tokens.accent_soft } else if view.hover == Some(hit) { tokens.raised_strong } else { tokens.raised };
+        ops.push(DrawOp::RoundRect { rect: r, radius: r.h / 2.0, color: fill });
+        ops.push(DrawOp::Text { rect: r, text: glyph.into(), style: icons(12.0), color: if lit { tokens.accent } else { tokens.text_secondary }, align: Align::Center });
+        hits.push((r, hit));
+    }
+    // Seletores.
+    let ls = text(11.5, FontWeight::Regular);
+    let mut x = px(14.0);
+    for (label, hit) in [(view.origin, Hit::Origins), (view.model, Hit::Models)] {
+        let tw = m.measure(label, &ls).w.ceil().min(px(150.0));
+        let r = Rect::new(x, px(48.0), tw + px(32.0), px(24.0));
+        let fill = if view.hover == Some(hit) { tokens.raised_strong } else { tokens.raised };
+        ops.push(DrawOp::RoundRect { rect: r, radius: r.h / 2.0, color: fill });
+        ops.push(DrawOp::Text { rect: Rect::new(r.x + px(10.0), r.y, tw + px(2.0), r.h), text: label.into(), style: ls, color: tokens.text_secondary, align: Align::Leading });
+        ops.push(DrawOp::Text { rect: Rect::new(r.right() - px(20.0), r.y, px(12.0), r.h), text: GLYPH_CHEVRON.into(), style: icons(8.0), color: tokens.text_tertiary, align: Align::Center });
+        hits.push((r, hit));
+        x = r.right() + px(6.0);
+    }
+    if let Some(status) = view.status {
+        ops.push(DrawOp::Text { rect: Rect::new(x + px(4.0), px(48.0), (w - x - px(18.0)).max(0.0), px(24.0)), text: status.into(), style: text(11.0, FontWeight::Regular), color: tokens.text_tertiary, align: Align::Leading });
+    }
+}
+
+/// Título de uma página (com a seta de voltar).
+fn draw_page_title(ops: &mut Vec<DrawOp>, hits: &mut Vec<(Rect, Hit)>, title: &str, hover: bool, scale: f32, tokens: &Tokens) -> f32 {
+    let px = |v: f32| (v * scale).round();
+    let w = px(WIDTH);
+    let r = Rect::new(px(10.0), px(AREA_Y), w - px(20.0), px(PAGE_TITLE_H - 4.0));
+    if hover {
+        ops.push(DrawOp::RoundRect { rect: r, radius: px(8.0), color: tokens.raised });
+    }
+    ops.push(DrawOp::Text { rect: Rect::new(r.x + px(6.0), r.y, px(16.0), r.h), text: GLYPH_BACK.into(), style: TextStyle { size: 11.0 * scale, weight: FontWeight::Regular, family: Family::Icons }, color: tokens.text_secondary, align: Align::Center });
+    ops.push(DrawOp::Text { rect: Rect::new(r.x + px(28.0), r.y, r.w - px(34.0), r.h), text: title.into(), style: TextStyle { size: 12.5 * scale, weight: FontWeight::SemiBold, family: Family::Text }, color: tokens.text, align: Align::Leading });
+    hits.push((r, Hit::Back));
+    px(AREA_Y + PAGE_TITLE_H)
+}
+
 pub fn chat_panel(view: &ChatView, scale: f32, tokens: &Tokens, m: &dyn TextMeasurer) -> ChatLayout {
+    let px = |v: f32| (v * scale).round();
+    let w = px(WIDTH);
+    let mut ops = Vec::new();
+    let mut hits = Vec::new();
+    draw_header(&mut ops, &mut hits, view, scale, tokens, m);
+    let line = LINE * scale;
+    let text = |size: f32, weight: FontWeight| TextStyle { size: size * scale, weight, family: Family::Text };
+    match &view.page {
+        Page::Chat => chat_page(view, ops, hits, scale, tokens, m),
+        Page::Picker { title, options, selected, note } => {
+            let mut y = draw_page_title(&mut ops, &mut hits, title, view.hover == Some(Hit::Back), scale, tokens);
+            for (i, option) in options.iter().enumerate() {
+                let r = Rect::new(px(10.0), y, w - px(20.0), px(PICK_H));
+                if view.hover == Some(Hit::Pick(i)) {
+                    ops.push(DrawOp::RoundRect { rect: r, radius: px(8.0), color: tokens.raised });
+                }
+                let on = *selected == Some(i);
+                if on {
+                    ops.push(DrawOp::Text { rect: Rect::new(r.x + px(6.0), r.y, px(16.0), r.h), text: GLYPH_CHECK.into(), style: TextStyle { size: 11.0 * scale, weight: FontWeight::Regular, family: Family::Icons }, color: tokens.accent, align: Align::Center });
+                }
+                ops.push(DrawOp::Text { rect: Rect::new(r.x + px(28.0), r.y, r.w - px(34.0), r.h), text: option.clone(), style: text(12.5, if on { FontWeight::SemiBold } else { FontWeight::Regular }), color: tokens.text, align: Align::Leading });
+                hits.push((r, Hit::Pick(i)));
+                y += px(PICK_H);
+            }
+            if let Some(note) = note {
+                ops.push(DrawOp::Text { rect: Rect::new(px(38.0), y + px(4.0), w - px(52.0), px(20.0)), text: (*note).into(), style: text(11.0, FontWeight::Regular), color: tokens.text_tertiary, align: Align::Leading });
+                y += px(28.0);
+            }
+            let size = Size { w, h: y + px(10.0) };
+            ChatLayout { list: DisplayList { size, ops }, hits, max_scroll: 0.0, line }
+        }
+        Page::History { rows, scroll } => {
+            let mut y = draw_page_title(&mut ops, &mut hits, "Conversas antigas", view.hover == Some(Hit::Back), scale, tokens);
+            if rows.is_empty() {
+                ops.push(DrawOp::Text { rect: Rect::new(px(38.0), y + px(4.0), w - px(52.0), px(20.0)), text: "Nenhuma conversa ainda.".into(), style: text(12.0, FontWeight::Regular), color: tokens.text_secondary, align: Align::Leading });
+                y += px(32.0);
+            }
+            let scroll = (*scroll).min(history_max_scroll(rows.len()));
+            for (i, row) in rows.iter().enumerate().skip(scroll).take(HISTORY_VISIBLE) {
+                let r = Rect::new(px(10.0), y, w - px(20.0), px(HISTORY_H));
+                let hovered = matches!(view.hover, Some(Hit::Open(j) | Hit::Delete(j)) if j == i);
+                if hovered {
+                    ops.push(DrawOp::RoundRect { rect: r, radius: px(10.0), color: tokens.raised });
+                }
+                if row.current {
+                    ops.push(DrawOp::Circle { center: Point { x: r.x + px(14.0), y: r.y + px(15.0) }, radius: px(3.0), color: tokens.accent });
+                }
+                let text_w = r.w - px(28.0) - px(40.0);
+                ops.push(DrawOp::Text { rect: Rect::new(r.x + px(28.0), r.y + px(5.0), text_w, px(20.0)), text: row.title.clone(), style: text(12.5, FontWeight::SemiBold), color: tokens.text, align: Align::Leading });
+                ops.push(DrawOp::Text { rect: Rect::new(r.x + px(28.0), r.y + px(24.0), text_w, px(16.0)), text: row.meta.clone(), style: text(11.0, FontWeight::Regular), color: tokens.text_tertiary, align: Align::Leading });
+                if hovered {
+                    let d = Rect::new(r.right() - px(36.0), r.y + px(8.0), px(30.0), px(30.0));
+                    if view.hover == Some(Hit::Delete(i)) {
+                        ops.push(DrawOp::RoundRect { rect: d, radius: d.h / 2.0, color: tokens.raised_strong });
+                    }
+                    ops.push(DrawOp::Text { rect: d, text: GLYPH_DELETE.into(), style: TextStyle { size: 12.0 * scale, weight: FontWeight::Regular, family: Family::Icons }, color: tokens.text_secondary, align: Align::Center });
+                }
+                // A lixeira (só aparece com o mouse em cima) ganha da linha.
+                hits.push((Rect::new(r.right() - px(36.0), r.y + px(8.0), px(30.0), px(30.0)), Hit::Delete(i)));
+                hits.push((r, Hit::Open(i)));
+                y += px(HISTORY_H);
+            }
+            let size = Size { w, h: y + px(10.0) };
+            ChatLayout { list: DisplayList { size, ops }, hits, max_scroll: 0.0, line }
+        }
+    }
+}
+
+/// A conversa, com rolagem, e o campo embaixo.
+fn chat_page(view: &ChatView, mut ops: Vec<DrawOp>, mut hits: Vec<(Rect, Hit)>, scale: f32, tokens: &Tokens, m: &dyn TextMeasurer) -> ChatLayout {
     let px = |v: f32| (v * scale).round();
     let text = |size: f32, weight: FontWeight| TextStyle { size: size * scale, weight, family: Family::Text };
     let icons = |size: f32| TextStyle { size: size * scale, weight: FontWeight::Regular, family: Family::Icons };
@@ -415,28 +592,6 @@ pub fn chat_panel(view: &ChatView, scale: f32, tokens: &Tokens, m: &dyn TextMeas
     let note_style = text(11.0, FontWeight::Regular);
     let line = LINE * scale;
     let w = px(WIDTH);
-    let mut ops = Vec::new();
-    let mut hits = Vec::new();
-
-    // Cabeçalho.
-    let title_style = text(13.0, FontWeight::SemiBold);
-    let title_w = m.measure("Claude", &title_style).w.ceil();
-    ops.push(DrawOp::Text { rect: Rect::new(px(20.0), px(14.0), title_w + px(2.0), px(22.0)), text: "Claude".into(), style: title_style, color: tokens.text, align: Align::Leading });
-    if let Some(sub) = view.subtitle {
-        ops.push(DrawOp::Text { rect: Rect::new(px(20.0) + title_w + px(8.0), px(16.0), w - px(170.0) - title_w, px(20.0)), text: sub.into(), style: text(11.0, FontWeight::Regular), color: tokens.text_tertiary, align: Align::Leading });
-    }
-    if !view.messages.is_empty() {
-        let label = "Nova conversa";
-        let ls = text(11.5, FontWeight::SemiBold);
-        let bw = m.measure(label, &ls).w.ceil() + px(36.0);
-        let r = Rect::new(w - px(14.0) - bw, px(12.0), bw, px(28.0));
-        ops.push(DrawOp::RoundRect { rect: r, radius: r.h / 2.0, color: if view.hover == Some(Hit::NewChat) { tokens.raised_strong } else { tokens.raised } });
-        ops.push(DrawOp::Text { rect: Rect::new(r.x + px(10.0), r.y, px(14.0), r.h), text: GLYPH_NEW.into(), style: icons(11.0), color: tokens.text_secondary, align: Align::Center });
-        ops.push(DrawOp::Text { rect: Rect::new(r.x + px(28.0), r.y, r.w - px(34.0), r.h), text: label.into(), style: ls, color: tokens.text_secondary, align: Align::Leading });
-        hits.push((r, Hit::NewChat));
-    }
-
-    // Conversa.
     let note_width = text_width(Role::Claude, scale);
     let notes: Vec<Vec<String>> = view.messages.iter().map(|msg| msg.note.map(|n| wrap_text(n, note_width, &note_style, m).lines).unwrap_or_default()).collect();
     let gap = px(8.0);
@@ -448,7 +603,8 @@ pub fn chat_panel(view: &ChatView, scale: f32, tokens: &Tokens, m: &dyn TextMeas
     let scroll = view.scroll.clamp(0.0, max_scroll);
 
     if view.messages.is_empty() {
-        ops.push(DrawOp::Text { rect: Rect::new(px(20.0), area.y + px(18.0), w - px(40.0), px(20.0)), text: "Pergunte qualquer coisa ao Claude".into(), style: text(13.0, FontWeight::Regular), color: tokens.text_secondary, align: Align::Center });
+        let hint = format!("Pergunte qualquer coisa ao {}", view.agent.label());
+        ops.push(DrawOp::Text { rect: Rect::new(px(20.0), area.y + px(18.0), w - px(40.0), px(20.0)), text: hint, style: text(13.0, FontWeight::Regular), color: tokens.text_secondary, align: Align::Center });
         ops.push(DrawOp::Text { rect: Rect::new(px(20.0), area.y + px(42.0), w - px(40.0), px(18.0)), text: "Enter envia · Shift+Enter quebra a linha".into(), style: text(11.0, FontWeight::Regular), color: tokens.text_tertiary, align: Align::Center });
     } else {
         ops.push(DrawOp::PushClip(area));
@@ -483,7 +639,7 @@ pub fn chat_panel(view: &ChatView, scale: f32, tokens: &Tokens, m: &dyn TextMeas
     let tw = field_text_width(scale);
     let busy = view.messages.last().is_some_and(|m| m.role == Role::Claude && m.state.busy());
     if view.field.text.is_empty() {
-        ops.push(DrawOp::Text { rect: Rect::new(tx, ty, tw, line), text: "Pergunte ao Claude…".into(), style: body, color: tokens.text_tertiary, align: Align::Leading });
+        ops.push(DrawOp::Text { rect: Rect::new(tx, ty, tw, line), text: format!("Pergunte ao {}…", view.agent.label()), style: body, color: tokens.text_tertiary, align: Align::Leading });
     }
     for (row, l) in lines.iter().enumerate().skip(first).take(shown) {
         let y = ty + (row - first) as f32 * line;
@@ -506,7 +662,7 @@ pub fn chat_panel(view: &ChatView, scale: f32, tokens: &Tokens, m: &dyn TextMeas
     let hovered = view.hover == Some(hit);
     let fill = if lit { if hovered { tokens.accent } else { tokens.accent.with_alpha(tokens.accent.a * 0.85) } } else { tokens.raised_strong };
     ops.push(DrawOp::RoundRect { rect: button, radius: button.h / 2.0, color: fill });
-    let fg = if lit { if tokens.accent.relative_luminance() > 0.5 { zefiro_platform::color::Rgba::BLACK } else { zefiro_platform::color::Rgba::WHITE } } else { tokens.text_tertiary };
+    let fg = if lit { on_accent(tokens) } else { tokens.text_tertiary };
     ops.push(DrawOp::Text { rect: button, text: glyph.into(), style: icons(12.0), color: fg, align: Align::Center });
     hits.insert(0, (button, hit));
 
@@ -767,22 +923,80 @@ mod tests {
         wrap_text(s, text_width(Role::Claude, 1.0), &text_style(1.0), &FixedWidthMeasurer)
     }
 
+    fn view<'a>(messages: &'a [MessageView<'a>], field: &'a Field, lines: &'a [Line], page: Page<'a>) -> ChatView<'a> {
+        ChatView { messages, field, field_lines: lines, agent: Agent::Claude, origin: "Windows", model: "Sonnet", status: Some("iniciando…"), page, scroll: 0.0, hover: None, copied: None }
+    }
+
     fn panel(messages: &[MessageView], field: &Field, scroll: f32) -> ChatLayout {
         let lines = wrap(&field.text, field_text_width(1.0), &text_style(1.0), &FixedWidthMeasurer);
-        let view = ChatView { messages, field, field_lines: &lines, subtitle: Some("Windows"), scroll, hover: None, copied: None };
-        chat_panel(&view, 1.0, &tokens(), &FixedWidthMeasurer)
+        let mut v = view(messages, field, &lines, Page::Chat);
+        v.scroll = scroll;
+        chat_panel(&v, 1.0, &tokens(), &FixedWidthMeasurer)
+    }
+
+    fn has(l: &ChatLayout, hit: Hit) -> bool {
+        l.hits.iter().any(|(_, h)| *h == hit)
     }
 
     #[test]
-    fn empty_conversation_shows_the_hint_and_no_new_chat() {
+    fn empty_conversation_shows_the_hint_header_and_pickers() {
         let l = panel(&[], &Field::default(), 0.0);
         let t = texts(&l.list);
-        for s in ["Claude", "Windows", "Pergunte qualquer coisa ao Claude", "Pergunte ao Claude…", GLYPH_SEND] {
+        for s in ["Claude", "Codex", "Windows", "Sonnet", "iniciando…", "Pergunte qualquer coisa ao Claude", "Pergunte ao Claude…", GLYPH_SEND, GLYPH_HISTORY, GLYPH_NEW] {
             assert!(t.contains(&s.to_string()), "falta {s}");
         }
-        assert!(l.hits.iter().all(|(_, h)| *h != Hit::NewChat));
-        assert!(l.hits.iter().any(|(_, h)| *h == Hit::Send));
+        for hit in [Hit::Send, Hit::NewChat, Hit::History, Hit::Origins, Hit::Models, Hit::Agent(Agent::Claude), Hit::Agent(Agent::Codex)] {
+            assert!(has(&l, hit), "falta {hit:?}");
+        }
         assert_eq!(l.list.size.w, WIDTH);
+    }
+
+    #[test]
+    fn codex_hint_uses_its_name() {
+        let lines = wrap("", field_text_width(1.0), &text_style(1.0), &FixedWidthMeasurer);
+        let f = Field::default();
+        let mut v = view(&[], &f, &lines, Page::Chat);
+        v.agent = Agent::Codex;
+        let t = texts(&chat_panel(&v, 1.0, &tokens(), &FixedWidthMeasurer).list);
+        assert!(t.contains(&"Pergunte ao Codex…".to_string()) && t.contains(&"Pergunte qualquer coisa ao Codex".to_string()));
+    }
+
+    #[test]
+    fn picker_page_lists_options_with_a_check_and_no_field() {
+        let lines = [Line { start: 0, end: 0 }];
+        let f = Field::default();
+        let options = vec!["Automático".to_string(), "Windows".to_string(), "Ubuntu-24.04".to_string()];
+        let v = view(&[], &f, &lines, Page::Picker { title: "Origem do Claude", options: &options, selected: Some(2), note: Some("Procurando distros…") });
+        let l = chat_panel(&v, 1.0, &tokens(), &FixedWidthMeasurer);
+        let t = texts(&l.list);
+        for s in ["Origem do Claude", "Ubuntu-24.04", "Procurando distros…", GLYPH_CHECK, GLYPH_BACK] {
+            assert!(t.contains(&s.to_string()), "falta {s}");
+        }
+        assert!(has(&l, Hit::Pick(0)) && has(&l, Hit::Pick(2)) && has(&l, Hit::Back));
+        assert!(!has(&l, Hit::Field) && !has(&l, Hit::Send), "sem campo nas escolhas");
+    }
+
+    #[test]
+    fn history_page_lists_conversations_and_scrolls() {
+        let lines = [Line { start: 0, end: 0 }];
+        let f = Field::default();
+        let rows: Vec<HistoryRow> = (0..12).map(|i| HistoryRow { title: format!("pergunta {i}"), meta: format!("Codex · Windows · {i}"), current: i == 0 }).collect();
+        let v = view(&[], &f, &lines, Page::History { rows: &rows, scroll: 0 });
+        let l = chat_panel(&v, 1.0, &tokens(), &FixedWidthMeasurer);
+        let t = texts(&l.list);
+        assert!(t.contains(&"Conversas antigas".to_string()) && t.contains(&"pergunta 0".to_string()) && t.contains(&"Codex · Windows · 0".to_string()));
+        assert!(!t.contains(&"pergunta 9".to_string()), "só {HISTORY_VISIBLE} por vez");
+        assert!(has(&l, Hit::Open(0)) && has(&l, Hit::Delete(0)));
+        let open = l.hits.iter().find(|(_, h)| *h == Hit::Open(0)).unwrap().0;
+        let trash = l.hits.iter().find(|(_, h)| *h == Hit::Delete(0)).unwrap().0;
+        assert_eq!(l.hit(Point { x: trash.x + 2.0, y: trash.y + 2.0 }), Some(Hit::Delete(0)), "a lixeira ganha da linha");
+        assert_eq!(l.hit(Point { x: open.x + 30.0, y: open.y + 10.0 }), Some(Hit::Open(0)));
+        let v = view(&[], &f, &lines, Page::History { rows: &rows, scroll: 99 });
+        let l = chat_panel(&v, 1.0, &tokens(), &FixedWidthMeasurer);
+        assert!(has(&l, Hit::Open(11)) && !has(&l, Hit::Open(2)), "rolagem presa no fim");
+        assert_eq!(history_max_scroll(12), 3);
+        let v = view(&[], &f, &lines, Page::History { rows: &[], scroll: 0 });
+        assert!(texts(&chat_panel(&v, 1.0, &tokens(), &FixedWidthMeasurer).list).contains(&"Nenhuma conversa ainda.".to_string()));
     }
 
     #[test]
@@ -792,7 +1006,7 @@ mod tests {
         let msgs = [MessageView { role: Role::User, state: State::Done, wrapped: &q, note: None }, MessageView { role: Role::Claude, state: State::Thinking, wrapped: &a, note: None }];
         let l = panel(&msgs, &Field::default(), 0.0);
         let t = texts(&l.list);
-        assert!(t.contains(&"Qual a capital do Peru?".to_string()) && t.contains(&"Pensando…".to_string()) && t.contains(&"Nova conversa".to_string()));
+        assert!(t.contains(&"Qual a capital do Peru?".to_string()) && t.contains(&"Pensando…".to_string()));
         assert!(l.hits.iter().any(|(_, h)| *h == Hit::Stop) && !l.hits.iter().any(|(_, h)| *h == Hit::Send));
         assert!(!l.hits.iter().any(|(_, h)| matches!(h, Hit::Copy(_))), "sem copiar enquanto responde");
     }

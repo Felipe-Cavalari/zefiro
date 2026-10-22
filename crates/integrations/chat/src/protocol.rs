@@ -16,6 +16,10 @@ pub enum Event {
     Assistant(String),
     /// Fim do turno. `error` é o texto do erro (ou o subtipo, sem texto).
     Finished { text: Option<String>, error: Option<String> },
+    /// Codex: o turno começou com este id (para interromper).
+    Turn(String),
+    /// Codex: os modelos que esta versão aceita.
+    Models(Vec<crate::agent::ModelOption>),
     Other,
 }
 
@@ -84,7 +88,7 @@ pub enum Failure {
 /// Classifica o texto de um erro (do `result` ou do stderr).
 pub fn classify(error: &str) -> Failure {
     let lower = error.to_lowercase();
-    if lower.contains("no conversation found") {
+    if lower.contains("no conversation found") || lower.contains("no rollout found") || lower.contains("thread not found") {
         Failure::SessionMissing
     } else if lower.contains("already in use") {
         Failure::SessionInUse
@@ -163,6 +167,8 @@ mod tests {
     #[test]
     fn failures_are_classified() {
         assert_eq!(classify("No conversation found with session ID: x"), Failure::SessionMissing);
+        assert_eq!(classify("no rollout found for thread id 01a1"), Failure::SessionMissing, "Codex");
+        assert_eq!(classify("interrupted"), Failure::Interrupted, "Codex");
         assert_eq!(classify("Error: Session ID x is already in use."), Failure::SessionInUse);
         assert_eq!(classify("Not logged in · Please run /login"), Failure::NotLoggedIn);
         assert_eq!(classify("Claude AI usage limit reached|1792624800"), Failure::UsageLimit);

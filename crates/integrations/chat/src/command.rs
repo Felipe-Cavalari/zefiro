@@ -1,5 +1,6 @@
-//! Argumentos do `claude` do chat e como rodá-lo no Windows e no WSL.
+//! Argumentos do `claude` e do `codex` do chat e como rodá-los no Windows e no WSL.
 
+use crate::agent::Agent;
 use std::path::{Path, PathBuf};
 
 /// Acrescentado ao prompt do Claude Code: o painel é pequeno e não desenha Markdown. Sem aspas
@@ -49,6 +50,11 @@ pub fn claude_args(session: Session, model: &str) -> Vec<String> {
     args
 }
 
+/// Argumentos do Codex: o servidor JSON-RPC por stdio.
+pub fn codex_args() -> Vec<String> {
+    vec!["app-server".into()]
+}
+
 /// Aspas simples do bash: `it's` → `'it'\''s'`.
 pub fn bash_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
@@ -56,9 +62,9 @@ pub fn bash_quote(s: &str) -> String {
 
 /// Argumentos do `wsl.exe`: um shell de login (para achar o `claude` do usuário) na pasta do chat.
 /// `distro` vazio = a distro padrão.
-pub fn wsl_args(distro: Option<&str>, args: &[String]) -> Vec<String> {
+pub fn wsl_args(distro: Option<&str>, binary: &str, args: &[String]) -> Vec<String> {
     let quoted: Vec<String> = args.iter().map(|a| bash_quote(a)).collect();
-    let script = format!("mkdir -p ~/{WSL_DIR} && cd ~/{WSL_DIR} && exec claude {}", quoted.join(" "));
+    let script = format!("mkdir -p ~/{WSL_DIR} && cd ~/{WSL_DIR} && exec {binary} {}", quoted.join(" "));
     let mut out = Vec::new();
     if let Some(d) = distro.filter(|d| !d.is_empty()) {
         out.extend(["-d".to_string(), d.to_string()]);
@@ -67,13 +73,23 @@ pub fn wsl_args(distro: Option<&str>, args: &[String]) -> Vec<String> {
     out
 }
 
-/// Script que diz se a distro tem `claude` (sai com 0 se tem).
-pub const WSL_PROBE: &str = "command -v claude >/dev/null";
+/// Script que diz se a distro tem o executável (sai com 0 se tem).
+pub fn wsl_probe(binary: &str) -> String {
+    format!("command -v {binary} >/dev/null")
+}
 
-/// Onde procurar o `claude.exe` no Windows, na ordem: instalador nativo, npm e cada pasta do `PATH`.
-pub fn windows_candidates(home: &Path, appdata: &Path, path_dirs: &[PathBuf]) -> Vec<PathBuf> {
-    let mut out = vec![home.join(r".local\bin\claude.exe"), appdata.join(r"npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe")];
-    out.extend(path_dirs.iter().map(|d| d.join("claude.exe")));
+/// Pastas do usuário onde os instaladores põem os executáveis.
+pub struct UserDirs<'a> { pub home: &'a Path, pub appdata: &'a Path, pub local_appdata: &'a Path }
+
+/// Onde procurar o executável no Windows, na ordem. Claude: instalador nativo, npm. Codex: o
+/// instalador da OpenAI. Depois, cada pasta do `PATH`.
+pub fn windows_candidates(agent: Agent, dirs: &UserDirs, path_dirs: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out = match agent {
+        Agent::Claude => vec![dirs.home.join(r".local\bin\claude.exe"), dirs.appdata.join(r"npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe")],
+        Agent::Codex => vec![dirs.local_appdata.join(r"Programs\OpenAI\Codex\bin\codex.exe")],
+    };
+    let exe = format!("{}.exe", agent.binary());
+    out.extend(path_dirs.iter().map(|d| d.join(&exe)));
     out
 }
 
@@ -125,18 +141,23 @@ mod tests {
     #[test]
     fn wsl_runs_claude_in_a_login_shell_in_the_chat_folder() {
         let args = vec!["-p".to_string(), "".to_string(), "a b".to_string()];
-        let w = wsl_args(Some("Ubuntu-24.04"), &args);
+        let w = wsl_args(Some("Ubuntu-24.04"), "claude", &args);
         assert_eq!(&w[..5], ["-d", "Ubuntu-24.04", "--", "bash", "-lc"]);
         assert_eq!(w[5], "mkdir -p ~/.cache/zefiro-chat && cd ~/.cache/zefiro-chat && exec claude '-p' '' 'a b'");
-        let default = wsl_args(None, &args);
+        let default = wsl_args(None, "codex", &codex_args());
         assert_eq!(&default[..3], ["--", "bash", "-lc"]);
-        assert_eq!(wsl_args(Some(""), &args)[0], "--");
+        assert!(default[3].ends_with("exec codex 'app-server'"));
+        assert_eq!(wsl_args(Some(""), "claude", &args)[0], "--");
+        assert_eq!(wsl_probe("codex"), "command -v codex >/dev/null");
     }
 
     #[test]
     fn windows_candidates_in_order() {
-        let (home, appdata, bin) = (Path::new(r"C:\Users\x"), Path::new(r"C:\Users\x\AppData\Roaming"), PathBuf::from(r"C:\bin"));
-        let c = windows_candidates(home, appdata, std::slice::from_ref(&bin));
+        let (home, appdata, local, bin) = (Path::new(r"C:\Users\x"), Path::new(r"C:\Users\x\AppData\Roaming"), Path::new(r"C:\Users\x\AppData\Local"), PathBuf::from(r"C:\bin"));
+        let dirs = UserDirs { home, appdata, local_appdata: local };
+        let c = windows_candidates(Agent::Claude, &dirs, std::slice::from_ref(&bin));
         assert_eq!(c, [home.join(r".local\bin\claude.exe"), appdata.join(r"npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe"), bin.join("claude.exe")]);
+        let c = windows_candidates(Agent::Codex, &dirs, std::slice::from_ref(&bin));
+        assert_eq!(c, [local.join(r"Programs\OpenAI\Codex\bin\codex.exe"), bin.join("codex.exe")]);
     }
 }

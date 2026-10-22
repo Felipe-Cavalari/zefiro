@@ -56,3 +56,20 @@ campo é desenhado pelo painel. A origem é `[chat] origin` (`auto` = Windows; s
 - Sem seleção com o mouse nem Markdown rico: o prompt pede texto simples e `plain_text` limpa o que
   escapar. Ctrl+A, Ctrl+C (sem seleção, copia a última resposta) e o ícone de copiar cobrem o uso.
 - O cursor do campo não pisca: nada é redesenhado por timer (ADR-0007).
+
+## Adendo (2026-10-21): Codex, seletores e conversas antigas
+
+- **Codex pelo `codex app-server`**, não pelo `codex exec --json`: o `exec` só entrega a resposta
+  inteira no fim; o `app-server` (JSON-RPC por linhas) manda `item/agentMessage/delta`, aceita
+  `turn/interrupt`, retoma por `thread/resume` e lista os modelos. Sonda `chat_probe` com
+  `ZEFIRO_CHAT_AGENT=codex`: Windows (0.149) e WSL (0.163) responderam, pararam e lembraram o
+  contexto num processo novo.
+- O modelo do Codex vai sempre explícito: o `config.toml` do Codex do usuário pede `gpt-6.1-sol`,
+  que o 0.149 do Windows recusa. O serviço guarda o padrão do `model/list` e o usa quando a
+  interface ainda não escolheu.
+- Uma conversa por arquivo em `%LOCALAPPDATA%\zefiro\chat\conversas\<id>.json` (id do Zefiro; a
+  sessão do agente fica dentro); o `conversa.json` antigo é migrado. A lista de conversas antigas
+  mostra só as do chat da barra (escolha do usuário).
+- Agente, origem e modelo ficam em `[chat] agent` e `[chat.claude]`/`[chat.codex]`, gravados pelo
+  painel sem fechá-lo (`Config::same_except_panels`). Trocar de agente ou de origem começa outra
+  conversa; trocar de modelo, não (o Claude reinicia com `--resume --model`).

@@ -1,6 +1,7 @@
-//! Processo do chat: o `claude -p` do Windows ou do WSL com stdin e stdout em pipes. Uma thread
-//! (`zefiro-chat`) escolhe a origem, inicia, escreve e encerra; outras duas leem a saída do processo.
-//! Os sinais vão para uma fila e acordam a interface com um único `post_user` até ela ler a fila.
+//! Processo do chat: o `claude -p` (stream-json) ou o `codex app-server` (JSON-RPC), do Windows ou
+//! do WSL, com stdin e stdout em pipes. Uma thread (`zefiro-chat`) escolhe a origem, inicia,
+//! escreve, conduz o JSON-RPC do Codex e encerra; outras leem a saída do processo. Os sinais vão
+//! para uma fila e acordam a interface com um único `post_user` até ela ler a fila.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -10,14 +11,16 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use windows::Win32::System::Com::CoCreateGuid;
-use zefiro_integration_chat::command::{Session, WSL_PROBE, claude_args, windows_candidates, wsl_args};
-use zefiro_integration_chat::origin::{Choice, Origin, pick, pick_error_text};
-use zefiro_integration_chat::protocol::{Event, interrupt_line, parse_line};
+use zefiro_integration_chat::agent::Agent;
+use zefiro_integration_chat::codex::{self, Incoming};
+use zefiro_integration_chat::command::{Session, UserDirs, claude_args, codex_args, windows_candidates, wsl_args, wsl_probe};
+use zefiro_integration_chat::origin::{Choice, Origin, choices, pick, pick_error_text};
+use zefiro_integration_chat::protocol::{Event, interrupt_line, parse_line, user_line};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-/// Fim do stderr guardado para explicar uma saída sem `result`.
+/// Fim do stderr guardado para explicar uma saída sem resposta.
 const STDERR_TAIL: usize = 2000;
-/// Ao encerrar: tempo para o `claude` sair sozinho depois do fim do stdin.
+/// Ao encerrar: tempo para o processo sair sozinho depois do fim do stdin.
 const EXIT_GRACE: Duration = Duration::from_millis(1500);
 
 /// O que o processo conta à interface.
@@ -28,23 +31,34 @@ pub enum Signal {
     Event(Event),
     /// O processo terminou (sozinho ou caiu). `stderr`: o fim do que ele escreveu lá.
     Exited { stderr: String },
-    /// Não deu para iniciar (sem `claude`, distro inexistente…). Texto para o painel.
+    /// Não deu para iniciar (sem executável, distro inexistente…). Texto para o painel.
     Failed(String),
+    /// Origens possíveis para o seletor do agente.
+    Origins { agent: Agent, choices: Vec<Choice> },
 }
 
 /// O que a interface pede para a partida.
 #[derive(Debug, Clone)]
 pub struct Start {
+    pub agent: Agent,
     pub choice: Choice,
     pub model: String,
+    /// Sessão do Claude ou `thread` do Codex (vazio = conversa nova no Codex).
     pub session: String,
-    /// `--resume` (a sessão já existe nesta origem) ou `--session-id`.
+    /// A sessão já existe nesta origem: retoma.
     pub resume: bool,
     /// Pasta do chat no Windows (`%LOCALAPPDATA%\zefiro\chat`).
     pub windows_dir: PathBuf,
 }
 
-enum Request { Start(Start), Send(String), Interrupt, Stop }
+enum Request {
+    Start(Start),
+    Send { text: String, model: String },
+    Interrupt,
+    Stop,
+    /// Uma linha do `codex app-server`, do processo `generation`.
+    Server(u64, Incoming),
+}
 
 struct Inbox {
     queue: Mutex<Vec<Signal>>,
@@ -55,15 +69,18 @@ struct Inbox {
 }
 
 impl Inbox {
-    fn push(&self, generation: u64, signal: Signal) {
-        if generation != self.generation.load(Ordering::SeqCst) {
-            return;
-        }
+    fn push_any(&self, signal: Signal) {
         if let Ok(mut q) = self.queue.lock() {
             q.push(signal);
         }
         if !self.posted.swap(true, Ordering::SeqCst) {
             crate::window::post_user(self.code);
+        }
+    }
+
+    fn push(&self, generation: u64, signal: Signal) {
+        if generation == self.generation.load(Ordering::SeqCst) {
+            self.push_any(signal);
         }
     }
 }
@@ -75,8 +92,8 @@ impl ChatService {
     pub fn new(code: u32) -> std::io::Result<ChatService> {
         let inbox = Arc::new(Inbox { queue: Mutex::new(Vec::new()), posted: AtomicBool::new(false), generation: AtomicU64::new(0), code });
         let (tx, rx) = channel();
-        let worker = inbox.clone();
-        std::thread::Builder::new().name("zefiro-chat".into()).spawn(move || run(rx, worker))?;
+        let (worker, back) = (inbox.clone(), tx.clone());
+        std::thread::Builder::new().name("zefiro-chat".into()).spawn(move || run(rx, back, worker))?;
         Ok(ChatService { tx, inbox })
     }
 
@@ -85,9 +102,9 @@ impl ChatService {
         let _ = self.tx.send(Request::Start(start));
     }
 
-    /// Uma linha do protocolo (uma pergunta).
-    pub fn send(&self, line: String) {
-        let _ = self.tx.send(Request::Send(line));
+    /// Uma pergunta. `model`: o do Codex neste turno (o Claude recebe o modelo na partida).
+    pub fn send(&self, text: String, model: String) {
+        let _ = self.tx.send(Request::Send { text, model });
     }
 
     /// Para a resposta em andamento; o processo continua.
@@ -98,6 +115,19 @@ impl ChatService {
     /// Encerra o processo (fim do stdin e, se ele não sair, `kill`).
     pub fn stop(&self) {
         let _ = self.tx.send(Request::Stop);
+    }
+
+    /// Procura as origens do agente numa thread própria (consulta o WSL); chega como `Origins`.
+    pub fn discover(&self, agent: Agent) {
+        let inbox = self.inbox.clone();
+        let spawned = std::thread::Builder::new().name("zefiro-chat-origins".into()).spawn(move || {
+            let windows = find_exe(agent).is_some();
+            let found: Vec<String> = crate::wsl::running_distros().into_iter().filter(|d| wsl_has(d, agent.binary())).collect();
+            inbox.push_any(Signal::Origins { agent, choices: choices(windows, &found) });
+        });
+        if let Err(e) = spawned {
+            tracing::warn!("chat: não consegui procurar as origens: {e}");
+        }
     }
 
     /// Os sinais que chegaram desde a última leitura.
@@ -113,51 +143,120 @@ impl Drop for ChatService {
     }
 }
 
-struct Running { child: Child, stdin: Option<ChildStdin>, origin: String }
+/// O JSON-RPC do Codex: ids, a conversa (`thread`), o turno e as perguntas esperando o `thread`.
+#[derive(Default)]
+struct CodexState {
+    next: u64,
+    thread: Option<String>,
+    turn: Option<String>,
+    /// Pedido de `thread/start` ou `thread/resume` em andamento.
+    opening: Option<u64>,
+    models: u64,
+    /// O padrão do `model/list`: vale quando a interface ainda não sabia os modelos (o do
+    /// `config.toml` do Codex pode não existir nesta versão).
+    default_model: Option<String>,
+    queued: Vec<(String, String)>,
+}
 
-fn run(rx: Receiver<Request>, inbox: Arc<Inbox>) {
+impl CodexState {
+    fn id(&mut self) -> u64 {
+        self.next += 1;
+        self.next
+    }
+
+    fn turn(&mut self, thread: &str, text: &str, model: &str) -> String {
+        let model = if model.is_empty() { self.default_model.clone().unwrap_or_default() } else { model.to_string() };
+        let id = self.id();
+        codex::turn_start(id, thread, text, &model)
+    }
+}
+
+enum Backend { Claude, Codex(CodexState) }
+
+struct Running { child: Child, stdin: Option<ChildStdin>, origin: String, generation: u64, backend: Backend }
+
+impl Running {
+    fn write(&mut self, line: &str) {
+        if let Some(stdin) = &mut self.stdin
+            && let Err(e) = writeln!(stdin, "{line}").and_then(|_| stdin.flush())
+        {
+            // A saída do processo avisa a interface (Exited).
+            tracing::warn!("chat: não consegui escrever para o processo: {e}");
+        }
+    }
+}
+
+fn run(rx: Receiver<Request>, back: Sender<Request>, inbox: Arc<Inbox>) {
     let mut running: Option<Running> = None;
     let mut interrupts = 0u32;
-    while let Ok(cmd) = rx.recv() {
+    while let Ok(req) = rx.recv() {
         // O processo pode ter saído sozinho (caiu, ou a sessão não existia).
         if let Some(r) = &mut running
             && matches!(r.child.try_wait(), Ok(Some(_)))
         {
             running = None;
         }
-        match cmd {
+        match req {
             Request::Start(start) => {
                 if running.is_some() {
                     continue;
                 }
                 let generation = inbox.generation.fetch_add(1, Ordering::SeqCst) + 1;
-                match spawn(&start, generation, &inbox) {
+                match spawn(&start, generation, &inbox, &back) {
                     Ok(r) => {
-                        tracing::info!(origem = %r.origin, retomando = start.resume, "chat: processo do Claude iniciado");
+                        tracing::info!(agente = start.agent.label(), origem = %r.origin, retomando = start.resume, "chat: processo iniciado");
                         inbox.push(generation, Signal::Ready { origin: r.origin.clone() });
                         running = Some(r);
                     }
                     Err(text) => {
-                        tracing::warn!("chat: não consegui iniciar o Claude: {text}");
+                        tracing::warn!("chat: não consegui iniciar o {}: {text}", start.agent.label());
                         inbox.push(generation, Signal::Failed(text));
                     }
                 }
             }
-            Request::Send(line) => {
-                if let Some(r) = &mut running
-                    && let Some(stdin) = &mut r.stdin
-                    && let Err(e) = writeln!(stdin, "{line}").and_then(|_| stdin.flush())
-                {
-                    // A saída do processo avisa a interface (Exited).
-                    tracing::warn!("chat: não consegui escrever para o Claude: {e}");
+            Request::Send { text, model } => {
+                let Some(r) = &mut running else { continue };
+                match &mut r.backend {
+                    Backend::Claude => r.write(&user_line(&text)),
+                    Backend::Codex(c) => {
+                        let line = match (c.thread.clone(), c.opening) {
+                            (Some(thread), _) => Some(c.turn(&thread, &text, &model)),
+                            (None, Some(_)) => {
+                                c.queued.push((text, model));
+                                None
+                            }
+                            (None, None) => {
+                                c.queued.push((text, model));
+                                let id = c.id();
+                                c.opening = Some(id);
+                                Some(codex::thread_start(id))
+                            }
+                        };
+                        if let Some(line) = line {
+                            r.write(&line);
+                        }
+                    }
                 }
             }
             Request::Interrupt => {
+                let Some(r) = &mut running else { continue };
+                interrupts += 1;
+                let line = match &mut r.backend {
+                    Backend::Claude => Some(interrupt_line(&format!("zefiro-{interrupts}"))),
+                    Backend::Codex(c) => match (c.thread.clone(), c.turn.clone()) {
+                        (Some(thread), Some(turn)) => Some(codex::turn_interrupt(c.id(), &thread, &turn)),
+                        _ => None,
+                    },
+                };
+                if let Some(line) = line {
+                    r.write(&line);
+                }
+            }
+            Request::Server(generation, incoming) => {
                 if let Some(r) = &mut running
-                    && let Some(stdin) = &mut r.stdin
+                    && r.generation == generation
                 {
-                    interrupts += 1;
-                    let _ = writeln!(stdin, "{}", interrupt_line(&format!("zefiro-{interrupts}"))).and_then(|_| stdin.flush());
+                    codex_incoming(r, incoming, &inbox);
                 }
             }
             Request::Stop => {
@@ -174,40 +273,121 @@ fn run(rx: Receiver<Request>, inbox: Arc<Inbox>) {
     }
 }
 
+/// Uma linha do `codex app-server`: abre a conversa, manda as perguntas que esperavam, guarda o
+/// turno (para parar) e repassa o resto à interface.
+fn codex_incoming(r: &mut Running, incoming: Incoming, inbox: &Inbox) {
+    let generation = r.generation;
+    let Backend::Codex(c) = &mut r.backend else { return };
+    let mut lines = Vec::new();
+    match incoming {
+        Incoming::Response { id, result } if Some(id) == c.opening => {
+            c.opening = None;
+            match codex::thread_id(&result) {
+                Some(thread) => {
+                    inbox.push(generation, Signal::Event(Event::Started { session: thread.clone() }));
+                    for (text, model) in std::mem::take(&mut c.queued) {
+                        lines.push(c.turn(&thread, &text, &model));
+                    }
+                    c.thread = Some(thread);
+                }
+                None => inbox.push(generation, Signal::Event(Event::Finished { text: None, error: Some("O Codex não abriu a conversa.".into()) })),
+            }
+        }
+        Incoming::Response { id, result } if id == c.models => {
+            let models = codex::models(&result);
+            c.default_model = models.iter().find(|m| m.default).map(|m| m.id.clone());
+            inbox.push(generation, Signal::Event(Event::Models(models)));
+        }
+        Incoming::Response { .. } => {}
+        Incoming::Failure { id, message } => {
+            if Some(id) == c.opening {
+                c.opening = None;
+                c.queued.clear();
+            }
+            if id != c.models {
+                inbox.push(generation, Signal::Event(Event::Finished { text: None, error: Some(message) }));
+            }
+        }
+        Incoming::Event(Event::Turn(turn)) => c.turn = Some(turn),
+        Incoming::Event(e) => {
+            if matches!(e, Event::Finished { .. }) {
+                c.turn = None;
+            }
+            inbox.push(generation, Signal::Event(e));
+        }
+        Incoming::ServerRequest { id } => lines.push(codex::reject(&id)),
+        Incoming::Other => {}
+    }
+    for line in lines {
+        r.write(&line);
+    }
+}
+
 fn finish(mut r: Running) {
     drop(r.stdin.take());
     let started = Instant::now();
     while started.elapsed() < EXIT_GRACE {
         if matches!(r.child.try_wait(), Ok(Some(_))) {
-            tracing::info!(origem = %r.origin, "chat: processo do Claude encerrado");
+            tracing::info!(origem = %r.origin, "chat: processo encerrado");
             return;
         }
         std::thread::sleep(Duration::from_millis(30));
     }
     let _ = r.child.kill();
     let _ = r.child.wait();
-    tracing::info!(origem = %r.origin, "chat: processo do Claude encerrado à força");
+    tracing::info!(origem = %r.origin, "chat: processo encerrado à força");
 }
 
-/// O `claude.exe` do Windows: instalador nativo, npm ou `PATH`.
-pub fn find_claude_exe() -> Option<PathBuf> {
+/// O executável do agente no Windows: os instaladores e o `PATH`.
+pub fn find_exe(agent: Agent) -> Option<PathBuf> {
     let env = |name: &str| PathBuf::from(std::env::var_os(name).unwrap_or_default());
     let path: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
-    windows_candidates(&env("USERPROFILE"), &env("APPDATA"), &path).into_iter().find(|p| p.is_file())
+    let (home, appdata, local_appdata) = (env("USERPROFILE"), env("APPDATA"), env("LOCALAPPDATA"));
+    windows_candidates(agent, &UserDirs { home: &home, appdata: &appdata, local_appdata: &local_appdata }, &path).into_iter().find(|p| p.is_file())
 }
 
-/// A distro (rodando) tem `claude` no shell de login?
-fn wsl_has_claude(distro: &str) -> bool {
-    crate::system::hidden_output("wsl.exe", &["-d", distro, "--", "bash", "-lc", WSL_PROBE], Duration::from_secs(8)).is_some()
+/// A distro (rodando) tem o executável no shell de login?
+fn wsl_has(distro: &str, binary: &str) -> bool {
+    crate::system::hidden_output("wsl.exe", &["-d", distro, "--", "bash", "-lc", &wsl_probe(binary)], Duration::from_secs(8)).is_some()
 }
 
-fn spawn(start: &Start, generation: u64, inbox: &Arc<Inbox>) -> Result<Running, String> {
+/// Guarda o fim do stderr numa thread.
+fn tail_stderr(stderr: Option<std::process::ChildStderr>, tail: Arc<Mutex<String>>) -> Option<std::thread::JoinHandle<()>> {
+    let mut s = stderr?;
+    std::thread::Builder::new()
+        .name("zefiro-chat-err".into())
+        .spawn(move || {
+            let mut buf = [0u8; 1024];
+            while let Ok(n) = s.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                if let Ok(mut t) = tail.lock() {
+                    t.push_str(&String::from_utf8_lossy(&buf[..n]));
+                    if t.len() > STDERR_TAIL {
+                        let cut = t.len() - STDERR_TAIL;
+                        let cut = (cut..t.len()).find(|&i| t.is_char_boundary(i)).unwrap_or(t.len());
+                        t.drain(..cut);
+                    }
+                }
+            }
+        })
+        .ok()
+}
+
+fn spawn(start: &Start, generation: u64, inbox: &Arc<Inbox>, back: &Sender<Request>) -> Result<Running, String> {
     use std::os::windows::process::CommandExt;
-    let windows_exe = if matches!(start.choice, Choice::Auto | Choice::Windows) { find_claude_exe() } else { None };
+    let agent = start.agent;
+    let windows_exe = if matches!(start.choice, Choice::Auto | Choice::Windows) { find_exe(agent) } else { None };
     let running = if start.choice == Choice::Auto && windows_exe.is_none() { crate::wsl::running_distros() } else { Vec::new() };
-    let origin = pick(&start.choice, windows_exe, &running, &mut |d| wsl_has_claude(d)).map_err(|e| pick_error_text(&e).to_string())?;
-    let session = if start.resume { Session::Resume(&start.session) } else { Session::New(&start.session) };
-    let args = claude_args(session, &start.model);
+    let origin = pick(&start.choice, windows_exe, &running, &mut |d| wsl_has(d, agent.binary())).map_err(|e| pick_error_text(&e, agent))?;
+    let args = match agent {
+        Agent::Claude => {
+            let session = if start.resume { Session::Resume(&start.session) } else { Session::New(&start.session) };
+            claude_args(session, &start.model)
+        }
+        Agent::Codex => codex_args(),
+    };
     let mut command = match &origin {
         Origin::Windows(exe) => {
             std::fs::create_dir_all(&start.windows_dir).map_err(|e| format!("Não consegui criar a pasta do chat: {e}"))?;
@@ -217,7 +397,7 @@ fn spawn(start: &Start, generation: u64, inbox: &Arc<Inbox>) -> Result<Running, 
         }
         Origin::Wsl(distro) => {
             let mut c = Command::new("wsl.exe");
-            c.args(wsl_args(distro.as_deref(), &args));
+            c.args(wsl_args(distro.as_deref(), agent.binary(), &args));
             c
         }
     };
@@ -227,41 +407,27 @@ fn spawn(start: &Start, generation: u64, inbox: &Arc<Inbox>) -> Result<Running, 
         .stderr(Stdio::piped())
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
-        .map_err(|e| format!("Não consegui iniciar o Claude Code ({}): {e}", origin.label()))?;
+        .map_err(|e| format!("Não consegui iniciar o {} ({}): {e}", agent.label(), origin.label()))?;
     let stdin = child.stdin.take();
     let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
     let tail = Arc::new(Mutex::new(String::new()));
-    let err_thread = stderr.and_then(|mut s| {
-        let tail = tail.clone();
-        std::thread::Builder::new()
-            .name("zefiro-chat-err".into())
-            .spawn(move || {
-                let mut buf = [0u8; 1024];
-                while let Ok(n) = s.read(&mut buf) {
-                    if n == 0 {
-                        break;
-                    }
-                    if let Ok(mut t) = tail.lock() {
-                        t.push_str(&String::from_utf8_lossy(&buf[..n]));
-                        if t.len() > STDERR_TAIL {
-                            let cut = t.len() - STDERR_TAIL;
-                            let cut = (cut..t.len()).find(|&i| t.is_char_boundary(i)).unwrap_or(t.len());
-                            t.drain(..cut);
-                        }
-                    }
-                }
-            })
-            .ok()
-    });
+    let err_thread = tail_stderr(child.stderr.take(), tail.clone());
     if let Some(out) = stdout {
-        let inbox = inbox.clone();
+        let (inbox, back) = (inbox.clone(), back.clone());
         let spawned = std::thread::Builder::new().name("zefiro-chat-out".into()).spawn(move || {
             for line in BufReader::new(out).lines() {
                 let Ok(line) = line else { break };
-                match parse_line(&line) {
-                    Event::Other => {}
-                    e => inbox.push(generation, Signal::Event(e)),
+                match agent {
+                    Agent::Claude => match parse_line(&line) {
+                        Event::Other => {}
+                        e => inbox.push(generation, Signal::Event(e)),
+                    },
+                    Agent::Codex => match codex::parse(&line) {
+                        Incoming::Other => {}
+                        i => {
+                            let _ = back.send(Request::Server(generation, i));
+                        }
+                    },
                 }
             }
             if let Some(t) = err_thread {
@@ -272,14 +438,32 @@ fn spawn(start: &Start, generation: u64, inbox: &Arc<Inbox>) -> Result<Running, 
         });
         if let Err(e) = spawned {
             let _ = child.kill();
-            return Err(format!("Não consegui ler o Claude Code: {e}"));
+            return Err(format!("Não consegui ler o {}: {e}", agent.label()));
         }
     }
-    Ok(Running { child, stdin, origin: origin.label() })
+    let backend = match agent {
+        Agent::Claude => Backend::Claude,
+        Agent::Codex => Backend::Codex(CodexState::default()),
+    };
+    let mut r = Running { child, stdin, origin: origin.label(), generation, backend };
+    if let Backend::Codex(c) = &mut r.backend {
+        let mut lines = vec![codex::initialize(c.id(), env!("CARGO_PKG_VERSION")), codex::initialized()];
+        c.models = c.id();
+        lines.push(codex::model_list(c.models));
+        if start.resume && !start.session.is_empty() {
+            let id = c.id();
+            c.opening = Some(id);
+            lines.push(codex::thread_resume(id, &start.session));
+        }
+        for line in lines {
+            r.write(&line);
+        }
+    }
+    Ok(r)
 }
 
-/// Id novo de sessão (UUID v4 do Windows).
-pub fn new_session_id() -> String {
+/// Id novo (UUID v4 do Windows): o das conversas e o das sessões do Claude.
+pub fn new_id() -> String {
     // SAFETY: CoCreateGuid só preenche o GUID devolvido.
     let g = unsafe { CoCreateGuid() }.unwrap_or_default();
     let d = g.data4;
@@ -289,4 +473,9 @@ pub fn new_session_id() -> String {
 /// Pasta do chat no Windows: `%LOCALAPPDATA%\zefiro\chat`.
 pub fn windows_dir() -> PathBuf {
     Path::new(&std::env::var_os("LOCALAPPDATA").unwrap_or_default()).join(r"zefiro\chat")
+}
+
+/// Pasta das conversas: `%LOCALAPPDATA%\zefiro\chat\conversas`.
+pub fn conversations_dir() -> PathBuf {
+    windows_dir().join("conversas")
 }
