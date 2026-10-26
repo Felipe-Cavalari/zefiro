@@ -1,7 +1,7 @@
 //! Preferências do Windows que a barra respeita.
 
 use std::path::{Path, PathBuf};
-use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
+use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HWND};
 use windows::Win32::System::Registry::*;
 use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::Shell::ShellExecuteW;
@@ -101,25 +101,48 @@ pub fn foreground_description() -> String {
     }
 }
 
-/// A janela em primeiro plano está em tela cheia em `monitor`?
-pub fn foreground_fullscreen_on(monitor: Rect) -> bool {
+/// O que a janela em primeiro plano diz sobre a barra de `monitor`: `Some(true)` esconde (app em
+/// tela cheia nele), `Some(false)` mostra (outra janela nele) e `None` não decide: a janela está em
+/// outro monitor, minimizada ou é do próprio Zefiro. Sem isso, clicar no Discord do outro monitor
+/// trazia a barra de volta por cima do jogo, e nada a escondia quando o jogo voltava ao foco.
+pub fn fullscreen_verdict(class: &str, window: Rect, monitor: Rect) -> Option<bool> {
+    if class.starts_with("Zefiro") {
+        return None;
+    }
+    let center = zefiro_platform::geometry::Point { x: window.x + window.w / 2.0, y: window.y + window.h / 2.0 };
+    monitor.contains(center).then(|| is_fullscreen(class, window, monitor))
+}
+
+/// Classe e retângulo de `hwnd`; `None` se a janela sumiu ou está escondida.
+fn class_and_rect(hwnd: HWND) -> Option<(String, Rect)> {
     use windows::Win32::Foundation::RECT;
     // SAFETY: buffers locais; a janela pode sumir entre as chamadas, e aí as funções falham.
     unsafe {
-        let hwnd = GetForegroundWindow();
-        if hwnd.is_invalid() {
-            return false;
+        if hwnd.is_invalid() || !IsWindowVisible(hwnd).as_bool() {
+            return None;
         }
         let mut buf = [0u16; 128];
         let n = GetClassNameW(hwnd, &mut buf);
         let class = String::from_utf16_lossy(&buf[..n.max(0) as usize]);
         let mut r = RECT::default();
-        if GetWindowRect(hwnd, &mut r).is_err() {
-            return false;
-        }
-        let rect = Rect::new(r.left as f32, r.top as f32, (r.right - r.left) as f32, (r.bottom - r.top) as f32);
-        is_fullscreen(&class, rect, monitor)
+        GetWindowRect(hwnd, &mut r).ok()?;
+        Some((class, Rect::new(r.left as f32, r.top as f32, (r.right - r.left) as f32, (r.bottom - r.top) as f32)))
     }
+}
+
+/// A janela em primeiro plano e o que ela diz sobre a barra de `monitor` (`fullscreen_verdict`).
+pub fn foreground_verdict(monitor: Rect) -> (isize, Option<bool>) {
+    // SAFETY: sem parâmetros.
+    let hwnd = unsafe { GetForegroundWindow() };
+    let verdict = class_and_rect(hwnd).and_then(|(class, rect)| fullscreen_verdict(&class, rect, monitor));
+    (hwnd.0 as isize, verdict)
+}
+
+/// `hwnd` ainda existe e cobre `monitor` inteiro (não fechou, não minimizou, não saiu da tela cheia)?
+pub fn window_fullscreen_on(hwnd: isize, monitor: Rect) -> bool {
+    // SAFETY: só consulta o estado; um handle morto faz IsIconic devolver false e o resto falhar.
+    let minimized = unsafe { IsIconic(HWND(hwnd as *mut _)) }.as_bool();
+    !minimized && class_and_rect(HWND(hwnd as *mut _)).is_some_and(|(class, rect)| is_fullscreen(&class, rect, monitor))
 }
 
 /// `true` se esta é a única instância (o mutex vive até o processo terminar).
@@ -171,17 +194,44 @@ pub fn taskbar_dark() -> bool {
     reg_dword(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "SystemUsesLightTheme").unwrap_or(0) == 0
 }
 
+/// Saída de um processo sem janela, se ele terminar com sucesso dentro de `timeout`; senão ele é
+/// encerrado e volta `None`. Só para saídas curtas (o pipe não é lido enquanto o processo roda).
+pub fn hidden_output(exe: &str, args: &[&str], timeout: std::time::Duration) -> Option<Vec<u8>> {
+    use std::io::Read;
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut child = std::process::Command::new(exe)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .ok()?;
+    let start = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if start.elapsed() < timeout => std::thread::sleep(std::time::Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    };
+    let mut out = Vec::new();
+    child.stdout.take()?.read_to_end(&mut out).ok()?;
+    status.success().then_some(out)
+}
+
 /// Distros do WSL que já estão rodando (minúsculas). Consultar `\\wsl.localhost` de uma distro
 /// parada a liga, então só se confere caminho nas desta lista. Sem WSL, lista vazia.
 pub fn wsl_running_distros() -> Vec<String> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let Ok(out) = std::process::Command::new("wsl.exe").args(["--list", "--running", "--quiet"]).creation_flags(CREATE_NO_WINDOW).output() else { return Vec::new() };
-    if !out.status.success() {
-        return Vec::new();
-    }
+    // Com o serviço do WSL emperrado (depois de hibernar, por exemplo), o `wsl.exe` não volta.
+    let Some(stdout) = hidden_output("wsl.exe", &["--list", "--running", "--quiet"], std::time::Duration::from_secs(3)) else { return Vec::new() };
     // O wsl.exe escreve em UTF-16LE.
-    let wide: Vec<u16> = out.stdout.as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes(*b)).collect();
+    let wide: Vec<u16> = stdout.as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes(*b)).collect();
     String::from_utf16_lossy(&wide).lines().map(|l| l.trim().trim_matches('\0').to_lowercase()).filter(|l| !l.is_empty()).collect()
 }
 
@@ -200,6 +250,20 @@ pub fn find_code_exe() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hidden_output_returns_stdout() {
+        let out = hidden_output("cmd.exe", &["/c", "echo oi"], std::time::Duration::from_secs(5)).expect("saída");
+        assert!(String::from_utf8_lossy(&out).contains("oi"));
+    }
+
+    #[test]
+    fn hidden_output_gives_up_on_a_stuck_process() {
+        // Um `wsl.exe` preso (serviço do WSL emperrado) não pode prender a thread do uso.
+        let t = std::time::Instant::now();
+        assert_eq!(hidden_output("cmd.exe", &["/c", "ping -n 6 127.0.0.1 >nul"], std::time::Duration::from_millis(500)), None);
+        assert!(t.elapsed() < std::time::Duration::from_secs(2), "{:?}", t.elapsed());
+    }
 
     #[test]
     fn reads_system_preferences_without_failing() {
@@ -224,6 +288,17 @@ mod tests {
         for ours in ["ZefiroInput", "ZefiroPanel", "ZefiroBar"] {
             assert!(!is_fullscreen(ours, mon, mon), "{ours} é do próprio Zefiro");
         }
+    }
+
+    #[test]
+    fn only_a_window_on_the_monitor_decides_its_bar() {
+        let mon = Rect::new(0.0, 0.0, 1920.0, 1080.0);
+        assert_eq!(fullscreen_verdict("W2ViewportClass", mon, mon), Some(true), "jogo sem bordas em foco");
+        assert_eq!(fullscreen_verdict("Chrome_WidgetWin_1", Rect::new(100.0, 100.0, 800.0, 600.0), mon), Some(false), "janela comum neste monitor");
+        assert_eq!(fullscreen_verdict("Progman", mon, mon), Some(false), "área de trabalho deste monitor");
+        assert_eq!(fullscreen_verdict("Chrome_WidgetWin_1", Rect::new(1920.0, 0.0, 1920.0, 1080.0), mon), None, "Discord no outro monitor não decide");
+        assert_eq!(fullscreen_verdict("Chrome_WidgetWin_1", Rect::new(-32000.0, -32000.0, 160.0, 28.0), mon), None, "minimizada");
+        assert_eq!(fullscreen_verdict("ZefiroInput", mon, mon), None, "painel do próprio Zefiro");
     }
 
     #[test]

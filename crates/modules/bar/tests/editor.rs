@@ -93,6 +93,23 @@ fn gallery_rejects_capacity_overflow_without_mutating_existing_unknown_items() {
     assert_eq!(editor.draft, config);
 }
 
+#[test]
+fn clean_bar_options_go_into_the_patch_only_when_changed() {
+    use zefiro_core::config::{BarDisplay, parse_config};
+    let base = zefiro_core::config::DEFAULT_CONFIG;
+    let mut editor = EditorSession::new(Config::default(), base.into());
+    assert!(editor.patch().is_empty());
+    editor.toggle_autohide();
+    editor.toggle_primary_only();
+    let config = parse_config(&editor.patch().apply(base, base, &[]).unwrap()).unwrap();
+    assert!(config.bar.autohide);
+    assert_eq!(config.bar.display, BarDisplay::Principal);
+    // Voltar como estava não grava nada.
+    editor.toggle_autohide();
+    editor.toggle_primary_only();
+    assert!(editor.patch().is_empty());
+}
+
 /// Reaplica como o app faz (`reapply_editor`) e depois conclui como `EditorAction::Save`.
 fn reapply_then_save(editor: &mut EditorSession) -> String {
     let merged = editor.patch().apply(&editor.original_text, &editor.latest_text, &[]).unwrap();

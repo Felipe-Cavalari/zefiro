@@ -53,10 +53,10 @@ Seis chips nativos no catálogo: `claude`, `codex`, `vscode`, `notifications`, `
 ### Decisões de comportamento
 
 - **Serviços só com o chip na barra** (correção da revisão). O token do Claude não é lido nem enviado e a pasta do Codex não é varrida sem o chip. Tudo é reavaliado ao salvar o arquivo e ao concluir o modo de edição.
-- **Claude:**
+- **Claude** (contas do Windows e do WSL e HTTP sem cache: ver [ADR-0019](0019-uso-em-varias-origens.md)):
   - O arquivo de credenciais é relido a cada consulta. O Zefiro nunca renova nem grava o token, porque isso derrubaria o login do Claude Code. Sem login ou com token vencido, o painel explica em duas linhas.
   - O serviço avisa a cada consulta, para o "Atualizado há" não envelhecer; a barra só é refeita quando o número muda. Numa falha de rede, o chip mantém o último valor bom.
-- **Codex:**
+- **Codex** (Windows e WSL: ver [ADR-0019](0019-uso-em-varias-origens.md)):
   - Lê o fim do `.jsonl` mais novo de `~/.codex/sessions` e não abre credenciais.
   - Janela já reiniciada conta 0 % e aparece como "reiniciada". O rodapé mostra o último uso no fuso local.
 - **Chips de uso com largura fixa.** Reservam "100%"; sem dado, mostram "—" apagado na mesma largura (ADR-0010).

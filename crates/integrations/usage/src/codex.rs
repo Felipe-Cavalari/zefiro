@@ -5,6 +5,9 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use crate::format::parse_iso_utc;
+use crate::origins::{Account, Discover, Origin, OriginKind, is_stopped, sort_accounts};
+
 /// Só o fim de cada arquivo é lido: o último `rate_limits` está perto do fim.
 const TAIL_BYTES: u64 = 256 * 1024;
 /// Sessão recém-aberta ainda sem `rate_limits`: tenta as anteriores, até este limite.
@@ -62,6 +65,105 @@ fn collect(dir: &Path, out: &mut Vec<(SystemTime, PathBuf)>) {
     }
 }
 
+/// Os `limit` `.jsonl` mais modificados, do mais novo para o mais velho. A árvore é percorrida
+/// inteira: `codex resume` continua gravando no arquivo da pasta do dia em que a sessão começou.
+pub fn recent_sessions(sessions_dir: &Path, limit: usize) -> Vec<(SystemTime, PathBuf)> {
+    let mut files = Vec::new();
+    collect(sessions_dir, &mut files);
+    files.sort_by_key(|f| std::cmp::Reverse(f.0));
+    files.truncate(limit);
+    files
+}
+
+/// A conta da sessão: `payload.creator_account_id` do `session_meta` (1ª linha).
+pub fn session_account(first_line: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(first_line.trim()).ok()?;
+    v.get("payload")?.get("creator_account_id")?.as_str().filter(|s| !s.is_empty()).map(str::to_string)
+}
+
+fn first_line(path: &Path) -> Option<String> {
+    use std::io::BufRead;
+    let mut line = String::new();
+    std::io::BufReader::new(std::fs::File::open(path).ok()?).read_line(&mut line).ok()?;
+    Some(line)
+}
+
+/// O uso lido de uma sessão e a conta dela.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodexRead { pub account: Option<String>, pub modified: SystemTime, pub usage: CodexUsage }
+
+/// O uso mais recente de cada conta entre os `MAX_FILES` arquivos mais novos. Sessão sem conta (Codex
+/// antigo) entra na conta da sessão mais nova que tem uma.
+pub fn read_codex_accounts(sessions_dir: &Path) -> Vec<CodexRead> {
+    let files: Vec<(SystemTime, PathBuf, Option<String>)> = recent_sessions(sessions_dir, MAX_FILES)
+        .into_iter()
+        .take(MAX_FILES)
+        .map(|(modified, path)| {
+            let account = first_line(&path).as_deref().and_then(session_account);
+            (modified, path, account)
+        })
+        .collect();
+    let known = files.iter().find_map(|f| f.2.clone());
+    let mut reads: Vec<CodexRead> = Vec::new();
+    for (modified, path, account) in files {
+        let account = account.or_else(|| known.clone());
+        if reads.iter().any(|r| r.account == account) {
+            continue;
+        }
+        if let Some(usage) = tail(&path).as_deref().and_then(parse_codex_tail) {
+            reads.push(CodexRead { account, modified, usage });
+        }
+    }
+    reads
+}
+
+/// Uma conta do Codex: o uso mais recente e quando o arquivo dele mudou.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodexEntry { pub modified: SystemTime, pub usage: CodexUsage }
+
+/// O que o serviço publica.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CodexSnapshot { pub accounts: Vec<Account<CodexEntry>>, pub wsl_stopped: bool }
+
+fn event_time(entry: &CodexEntry) -> (Option<i64>, SystemTime) {
+    (entry.usage.event_at.as_deref().and_then(parse_iso_utc), entry.modified)
+}
+
+/// Junta as origens da mesma conta, ficando com o evento mais recente entre elas.
+pub fn merge_codex(per_origin: Vec<(OriginKind, Vec<CodexRead>)>) -> Vec<Account<CodexEntry>> {
+    let mut accounts: Vec<Account<CodexEntry>> = Vec::new();
+    for (kind, reads) in per_origin {
+        for read in reads {
+            let key = read.account.unwrap_or_else(|| format!("origem:{kind:?}"));
+            let entry = CodexEntry { modified: read.modified, usage: read.usage };
+            match accounts.iter_mut().find(|a| a.key == key) {
+                Some(a) => {
+                    if !a.origins.contains(&kind) {
+                        a.origins.push(kind.clone());
+                        a.origins.sort();
+                    }
+                    if event_time(&entry) > event_time(&a.data) {
+                        a.data = entry;
+                    }
+                }
+                None => accounts.push(Account { key, origins: vec![kind.clone()], stopped: false, data: entry }),
+            }
+        }
+    }
+    sort_accounts(&mut accounts);
+    accounts
+}
+
+/// % do chip com várias contas: a maior janela primária (0 % se já reiniciou).
+pub fn codex_chip_percent(accounts: &[Account<CodexEntry>], now_unix: i64) -> Option<f32> {
+    accounts.iter().filter_map(|a| a.data.usage.primary.map(|w| effective_percent(&w, now_unix))).reduce(f32::max)
+}
+
+/// O próximo reinício de janela entre as contas: a UI refaz o chip nessa hora.
+pub fn next_reset(accounts: &[Account<CodexEntry>], now_unix: i64) -> Option<i64> {
+    accounts.iter().flat_map(|a| [a.data.usage.primary, a.data.usage.secondary]).flatten().map(|w| w.resets_at).filter(|t| *t > now_unix).min()
+}
+
 /// Os últimos `TAIL_BYTES` do arquivo.
 fn tail(path: &Path) -> Option<String> {
     let mut file = std::fs::File::open(path).ok()?;
@@ -74,17 +176,12 @@ fn tail(path: &Path) -> Option<String> {
 
 /// O `.jsonl` mais recente (recursivo) e quando foi modificado.
 pub fn newest_session(sessions_dir: &Path) -> Option<(SystemTime, PathBuf)> {
-    let mut files = Vec::new();
-    collect(sessions_dir, &mut files);
-    files.into_iter().max_by(|a, b| a.0.cmp(&b.0))
+    recent_sessions(sessions_dir, 1).into_iter().next()
 }
 
 /// O uso mais recente: do arquivo mais novo para o mais velho, até `MAX_FILES`.
 pub fn read_codex(sessions_dir: &Path) -> Option<(PathBuf, SystemTime, CodexUsage)> {
-    let mut files = Vec::new();
-    collect(sessions_dir, &mut files);
-    files.sort_by_key(|f| std::cmp::Reverse(f.0));
-    files.into_iter().take(MAX_FILES).find_map(|(modified, path)| {
+    recent_sessions(sessions_dir, MAX_FILES).into_iter().take(MAX_FILES).find_map(|(modified, path)| {
         let usage = parse_codex_tail(&tail(&path)?)?;
         Some((path, modified, usage))
     })
@@ -106,70 +203,104 @@ pub fn window_name(minutes: u32) -> String {
     }
 }
 
-/// Ritmo da leitura: só um `stat` do arquivo mais novo; relê quando ele muda.
+/// Ritmo da leitura: só um `stat` do arquivo mais novo de cada origem; relê quando algum muda.
 const INTERVAL: std::time::Duration = std::time::Duration::from_secs(120);
 
 enum Wake { Refresh, Stop }
 
-type Shared = std::sync::Arc<std::sync::Mutex<Option<(SystemTime, CodexUsage)>>>;
+type Shared = std::sync::Arc<std::sync::Mutex<Option<CodexSnapshot>>>;
+/// O que a última leitura viu: origens, arquivo mais novo de cada uma e WSL parado.
+type Seen = (Vec<OriginKind>, Vec<Option<(SystemTime, PathBuf)>>, bool);
 
-/// Thread `zefiro-codex`: lê ao iniciar, a cada 120 s e quando pedem (`refresh`), e avisa
-/// `notify` (em outra thread) quando o uso muda.
+fn now_unix() -> i64 {
+    SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
+}
+
+/// Thread `zefiro-codex`: a cada 120 s, quando pedem (`refresh`) e logo depois do reinício de uma
+/// janela, descobre as origens (`discover`), relê as que mudaram e avisa `notify` (em outra thread)
+/// quando o uso muda, uma janela reinicia ou o painel pediu (`refresh`).
 pub struct CodexService {
     tx: std::sync::mpsc::Sender<Wake>,
     state: Shared,
-    thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl CodexService {
-    pub fn start(sessions_dir: PathBuf, notify: std::sync::Arc<dyn Fn() + Send + Sync>) -> std::io::Result<CodexService> {
+    pub fn start(discover: Discover, notify: std::sync::Arc<dyn Fn() + Send + Sync>) -> std::io::Result<CodexService> {
         let (tx, rx) = std::sync::mpsc::channel();
         let state: Shared = Default::default();
         let shared = state.clone();
-        let thread = std::thread::Builder::new().name("zefiro-codex".into()).spawn(move || {
-            let mut seen: Option<(SystemTime, PathBuf)> = None;
+        std::thread::Builder::new().name("zefiro-codex".into()).spawn(move || {
+            let mut seen: Option<Seen> = None;
+            let mut reset_due: Option<i64> = None;
+            // Leituras do ciclo anterior: as de uma distro que parou continuam valendo.
+            let mut last_reads: Vec<(OriginKind, Vec<CodexRead>)> = Vec::new();
+            // Pedido do painel (abrir ou o botão de atualizar): responde mesmo sem mudança.
+            let mut asked = false;
             loop {
-                let newest = newest_session(&sessions_dir);
-                if newest != seen {
-                    seen = newest;
-                    let usage = read_codex(&sessions_dir).map(|(_, modified, usage)| (modified, usage));
-                    let changed = shared.lock().map(|mut s| std::mem::replace(&mut *s, usage.clone()) != usage).unwrap_or(false);
-                    if changed {
-                        notify();
+                let mut told = false;
+                let found = discover();
+                let origins: Vec<&Origin> = found.origins.iter().filter(|o| o.home.join(".codex").join("sessions").is_dir()).collect();
+                let newest: Vec<Option<(SystemTime, PathBuf)>> = origins.iter().map(|o| newest_session(&o.home.join(".codex").join("sessions"))).collect();
+                let key = (origins.iter().map(|o| o.kind.clone()).collect::<Vec<_>>(), newest, found.wsl_stopped);
+                let reset_passed = reset_due.is_some_and(|t| t <= now_unix());
+                if seen.as_ref() != Some(&key) {
+                    seen = Some(key);
+                    let mut per_origin: Vec<(OriginKind, Vec<CodexRead>)> = origins.iter().map(|o| (o.kind.clone(), read_codex_accounts(&o.home.join(".codex").join("sessions")))).collect();
+                    for (kind, reads) in std::mem::take(&mut last_reads) {
+                        if is_stopped(&kind, &found.running) && !per_origin.iter().any(|(k, _)| *k == kind) {
+                            per_origin.push((kind, reads));
+                        }
                     }
+                    last_reads = per_origin.clone();
+                    let mut accounts = merge_codex(per_origin);
+                    for account in &mut accounts {
+                        account.stopped = account.origins.iter().all(|k| is_stopped(k, &found.running));
+                    }
+                    let snapshot = CodexSnapshot { accounts, wsl_stopped: found.wsl_stopped };
+                    reset_due = next_reset(&snapshot.accounts, now_unix());
+                    let changed = shared.lock().map(|mut s| s.replace(snapshot.clone()).as_ref() != Some(&snapshot)).unwrap_or(false);
+                    told = changed || reset_passed;
+                } else if reset_passed {
+                    reset_due = shared.lock().ok().and_then(|s| s.as_ref().and_then(|s| next_reset(&s.accounts, now_unix())));
+                    told = true;
                 }
-                match rx.recv_timeout(INTERVAL) {
-                    Ok(Wake::Refresh) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                if told || asked {
+                    notify();
+                }
+                let wait = reset_due.map_or(INTERVAL, |t| INTERVAL.min(std::time::Duration::from_secs((t - now_unix()).max(0) as u64 + 1)));
+                asked = match rx.recv_timeout(wait) {
+                    Ok(Wake::Refresh) => true,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => false,
                     Ok(Wake::Stop) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                }
+                };
             }
         })?;
-        Ok(CodexService { tx, state, thread: Some(thread) })
+        Ok(CodexService { tx, state })
     }
 
-    /// O último uso lido e quando o arquivo dele foi modificado.
-    pub fn latest(&self) -> Option<(SystemTime, CodexUsage)> {
+    /// As contas lidas e se há WSL parado.
+    pub fn latest(&self) -> Option<CodexSnapshot> {
         self.state.lock().ok().and_then(|s| s.clone())
     }
 
-    /// Confere o arquivo agora (ao abrir o painel).
+    /// Confere os arquivos agora (ao abrir o painel).
     pub fn refresh(&self) {
         let _ = self.tx.send(Wake::Refresh);
     }
 }
 
+/// Não espera a thread: ela pode estar presa num `wsl.exe`, num `\\wsl.localhost` ou num HTTP, e
+/// quem solta o serviço é a thread da UI. A thread sai sozinha ao ver o `Stop`.
 impl Drop for CodexService {
     fn drop(&mut self) {
         let _ = self.tx.send(Wake::Stop);
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::origins::Discovery;
 
     const SESSION: &str = include_str!("../tests/fixtures/codex_session.jsonl");
 
@@ -226,22 +357,244 @@ mod tests {
         assert_eq!(window_name(2880), "2 dias");
         assert_eq!(window_name(120), "2 horas");
     }
+    /// Sessão mínima: `session_meta` (com a conta, se houver) e um evento com `rate_limits`.
+    fn session(account: Option<&str>, used: f32, event_at: &str) -> String {
+        let meta = match account {
+            Some(a) => format!(r#"{{"type": "session_meta", "payload": {{"creator_account_id": "{a}"}}}}"#),
+            None => r#"{"type": "session_meta", "payload": {"cwd": "C:\\"}}"#.to_string(),
+        };
+        format!("{meta}\n{{\"timestamp\": \"{event_at}\", \"payload\": {{\"rate_limits\": {{\"plan_type\": \"plus\", \"primary\": {{\"used_percent\": {used}, \"window_minutes\": 300, \"resets_at\": 4102444800}}}}}}}}\n")
+    }
+
+    /// Grava `text` em `dir/rel` com a data de modificação `secs` depois de 2026-01-01.
+    fn put(dir: &Path, rel: &str, text: &str, secs: u64) -> PathBuf {
+        let path = dir.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, text).unwrap();
+        let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_767_225_600 + secs);
+        std::fs::File::options().write(true).open(&path).unwrap().set_modified(at).unwrap();
+        path
+    }
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("zefiro-codex-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    fn read(account: Option<&str>, used: f32, event_at: &str) -> CodexRead {
+        CodexRead { account: account.map(String::from), modified: SystemTime::UNIX_EPOCH, usage: parse_codex_tail(&session(None, used, event_at)).unwrap() }
+    }
+
+    #[test]
+    fn session_account_from_meta() {
+        assert_eq!(session_account(r#"{"type": "session_meta", "payload": {"creator_account_id": "c1"}}"#).as_deref(), Some("c1"));
+        assert_eq!(session_account(r#"{"type": "session_meta", "payload": {}}"#), None);
+        assert_eq!(session_account("cortada"), None);
+    }
+
+    #[test]
+    fn recent_sessions_are_newest_first() {
+        let dir = temp("days");
+        let a = put(&dir, "2026/10/20/a.jsonl", "", 10);
+        let b = put(&dir, "2026/10/21/b.jsonl", "", 20);
+        let old = put(&dir, "2025/01/01/velho.jsonl", "", 30);
+        let found: Vec<PathBuf> = recent_sessions(&dir, 3).into_iter().map(|(_, p)| p).collect();
+        assert_eq!(found, [old, b.clone(), a]);
+        assert_eq!(recent_sessions(&dir, 1).len(), 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn resumed_session_in_old_day_folder_is_found() {
+        // `codex resume` continua gravando no arquivo da pasta do dia em que a sessão começou.
+        let dir = temp("resumed");
+        let resumed = put(&dir, "2026/10/18/retomada.jsonl", "", 100);
+        put(&dir, "2026/10/20/a.jsonl", "", 10);
+        put(&dir, "2026/10/21/b.jsonl", "", 20);
+        assert_eq!(recent_sessions(&dir, 1)[0].1, resumed);
+        assert_eq!(newest_session(&dir).map(|(_, p)| p), Some(resumed));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn session_from_yesterday_modified_today_is_found() {
+        let dir = temp("midnight");
+        let a = put(&dir, "2026/10/20/a.jsonl", "", 50);
+        put(&dir, "2026/10/21/b.jsonl", "", 20);
+        assert_eq!(recent_sessions(&dir, 1)[0].1, a);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn two_accounts_in_one_origin() {
+        let dir = temp("two");
+        put(&dir, "2026/10/20/velho.jsonl", &session(Some("c1"), 80.0, "2026-10-20T10:00:00Z"), 10);
+        put(&dir, "2026/10/21/novo.jsonl", &session(Some("c2"), 42.0, "2026-10-21T10:00:00Z"), 20);
+        let mut reads = read_codex_accounts(&dir);
+        reads.sort_by(|a, b| a.account.cmp(&b.account));
+        assert_eq!(reads.iter().map(|r| (r.account.as_deref(), r.usage.primary.unwrap().used_percent)).collect::<Vec<_>>(), [(Some("c1"), 80.0), (Some("c2"), 42.0)]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn file_without_account_joins_newest_known() {
+        let dir = temp("anon");
+        put(&dir, "2026/10/20/conta.jsonl", &session(Some("c1"), 80.0, "2026-10-20T10:00:00Z"), 10);
+        put(&dir, "2026/10/21/sem.jsonl", &session(None, 12.0, "2026-10-21T10:00:00Z"), 20);
+        let reads = read_codex_accounts(&dir);
+        assert_eq!(reads.len(), 1);
+        assert_eq!(reads[0].account.as_deref(), Some("c1"));
+        assert_eq!(reads[0].usage.primary.unwrap().used_percent, 12.0);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn same_account_across_origins_keeps_newest_event() {
+        let wsl = OriginKind::Wsl("Ubuntu".into());
+        let merged = merge_codex(vec![
+            (wsl.clone(), vec![read(Some("c1"), 12.0, "2026-10-21T10:00:00Z")]),
+            (OriginKind::Windows, vec![read(Some("c1"), 80.0, "2026-10-16T02:56:30Z")]),
+        ]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].origins, vec![OriginKind::Windows, wsl.clone()]);
+        assert_eq!(merged[0].data.usage.primary.unwrap().used_percent, 12.0);
+        let two = merge_codex(vec![(OriginKind::Windows, vec![read(Some("c1"), 1.0, "2026-10-21T10:00:00Z")]), (wsl, vec![read(Some("c2"), 2.0, "2026-10-21T10:00:00Z")])]);
+        assert_eq!(two.len(), 2);
+    }
+
+    #[test]
+    fn chip_and_next_reset() {
+        let now = 1000;
+        let entry = |used: f32, resets_at: i64| Account {
+            key: format!("{used}"),
+            origins: vec![OriginKind::Windows],
+            stopped: false,
+            data: CodexEntry { modified: SystemTime::UNIX_EPOCH, usage: CodexUsage { primary: Some(Window { used_percent: used, window_minutes: 300, resets_at }), ..Default::default() } },
+        };
+        let accounts = [entry(80.0, now + 100), entry(30.0, now + 500)];
+        assert_eq!(codex_chip_percent(&accounts, now), Some(80.0));
+        assert_eq!(next_reset(&accounts, now), Some(now + 100));
+        assert_eq!(codex_chip_percent(&[entry(80.0, now), entry(30.0, now + 500)], now), Some(30.0));
+        assert_eq!(codex_chip_percent(&[], now), None);
+    }
+
+    /// `Discover` de teste: devolve o que estiver no `Mutex` na hora.
+    fn discover(d: Discovery) -> (std::sync::Arc<std::sync::Mutex<Discovery>>, crate::origins::Discover) {
+        let shared = std::sync::Arc::new(std::sync::Mutex::new(d));
+        let inner = shared.clone();
+        (shared, std::sync::Arc::new(move || inner.lock().unwrap().clone()))
+    }
+
+    fn start(d: Discovery) -> (CodexService, std::sync::mpsc::Receiver<()>, std::sync::Arc<std::sync::Mutex<Discovery>>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (shared, discover) = discover(d);
+        let svc = CodexService::start(discover, std::sync::Arc::new(move || { let _ = tx.send(()); })).unwrap();
+        (svc, rx, shared)
+    }
+
+    fn windows_home(name: &str) -> (PathBuf, Discovery) {
+        let home = temp(name);
+        let d = Discovery { origins: vec![Origin { kind: OriginKind::Windows, home: home.clone() }], ..Default::default() };
+        (home, d)
+    }
+
     #[test]
     fn service_reads_on_start_and_rereads_on_refresh() {
-        let dir = std::env::temp_dir().join(format!("zefiro-codex-svc-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("a.jsonl"), SESSION).unwrap();
-        let (tx, rx) = std::sync::mpsc::channel();
-        let svc = CodexService::start(dir.clone(), std::sync::Arc::new(move || { let _ = tx.send(()); })).unwrap();
+        let (home, d) = windows_home("svc");
+        put(&home, ".codex/sessions/a.jsonl", SESSION, 10);
+        let (svc, rx, _) = start(d);
         rx.recv_timeout(std::time::Duration::from_secs(3)).expect("aviso inicial");
-        assert_eq!(svc.latest().unwrap().1.primary.unwrap().used_percent, 80.0);
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert_eq!(svc.latest().unwrap().accounts[0].data.usage.primary.unwrap().used_percent, 80.0);
         let newer = SESSION.replace("\"used_percent\": 80.0", "\"used_percent\": 42.0");
-        std::fs::write(dir.join("b.jsonl"), newer).unwrap();
+        put(&home, ".codex/sessions/b.jsonl", &newer, 20);
         svc.refresh();
         rx.recv_timeout(std::time::Duration::from_secs(3)).expect("aviso depois do refresh");
-        assert_eq!(svc.latest().unwrap().1.primary.unwrap().used_percent, 42.0);
+        assert_eq!(svc.latest().unwrap().accounts[0].data.usage.primary.unwrap().used_percent, 42.0);
         drop(svc);
-        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn refresh_always_answers_even_without_changes() {
+        // O botão de atualizar põe o painel em "atualizando": sem resposta, ele ficaria preso.
+        let (home, d) = windows_home("answer");
+        put(&home, ".codex/sessions/a.jsonl", SESSION, 10);
+        let (svc, rx, _) = start(d);
+        rx.recv_timeout(std::time::Duration::from_secs(3)).expect("aviso inicial");
+        svc.refresh();
+        rx.recv_timeout(std::time::Duration::from_secs(3)).expect("resposta ao refresh sem mudança");
+        drop(svc);
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn service_notifies_at_reset_without_new_file() {
+        let (home, d) = windows_home("reset");
+        let soon = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 2;
+        put(&home, ".codex/sessions/a.jsonl", &session(Some("c1"), 80.0, "2026-10-21T10:00:00Z").replace("4102444800", &soon.to_string()), 10);
+        let (svc, rx, _) = start(d);
+        rx.recv_timeout(std::time::Duration::from_secs(3)).expect("aviso inicial");
+        rx.recv_timeout(std::time::Duration::from_secs(5)).expect("aviso no reinício da janela");
+        drop(svc);
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn service_keeps_wsl_event_of_merged_account_when_distro_stops() {
+        let (windows, wsl_home) = (temp("merged-win"), temp("merged-wsl"));
+        put(&windows, ".codex/sessions/a.jsonl", &session(Some("c1"), 80.0, "2026-10-16T02:56:30Z"), 10);
+        put(&wsl_home, ".codex/sessions/b.jsonl", &session(Some("c1"), 45.0, "2026-10-21T10:00:00Z"), 20);
+        let wsl = OriginKind::Wsl("U".into());
+        let both = vec![Origin { kind: OriginKind::Windows, home: windows.clone() }, Origin { kind: wsl.clone(), home: wsl_home.clone() }];
+        let (svc, rx, shared) = start(Discovery { origins: both.clone(), running: vec!["U".into()], wsl_stopped: false });
+        rx.recv_timeout(std::time::Duration::from_secs(3)).expect("aviso inicial");
+        assert_eq!(svc.latest().unwrap().accounts[0].data.usage.primary.unwrap().used_percent, 45.0);
+        *shared.lock().unwrap() = Discovery { origins: vec![both[0].clone()], running: Vec::new(), wsl_stopped: true };
+        svc.refresh();
+        // Responde ao refresh; o evento do WSL continua valendo.
+        let _ = rx.recv_timeout(std::time::Duration::from_millis(500));
+        let snap = svc.latest().unwrap();
+        assert_eq!(snap.accounts.len(), 1);
+        assert_eq!(snap.accounts[0].data.usage.primary.unwrap().used_percent, 45.0);
+        assert_eq!(snap.accounts[0].origins, vec![OriginKind::Windows, wsl]);
+        assert!(!snap.accounts[0].stopped, "a conta continua no Windows");
+        drop(svc);
+        std::fs::remove_dir_all(&windows).unwrap();
+        std::fs::remove_dir_all(&wsl_home).unwrap();
+    }
+
+    #[test]
+    fn dropping_the_service_does_not_wait_for_a_slow_cycle() {
+        // `discover` preso (um `wsl.exe` ou um `\\wsl.localhost` lento): soltar o serviço na thread
+        // da UI não pode esperar por ele.
+        let slow: crate::origins::Discover = std::sync::Arc::new(|| {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            Discovery::default()
+        });
+        let svc = CodexService::start(slow, std::sync::Arc::new(|| {})).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let t = std::time::Instant::now();
+        drop(svc);
+        assert!(t.elapsed() < std::time::Duration::from_millis(500), "{:?}", t.elapsed());
+    }
+
+    #[test]
+    fn service_keeps_stopped_wsl_account() {
+        let home = temp("stopped");
+        put(&home, ".codex/sessions/a.jsonl", &session(Some("c1"), 80.0, "2026-10-21T10:00:00Z"), 10);
+        let wsl = OriginKind::Wsl("U".into());
+        let (svc, rx, shared) = start(Discovery { origins: vec![Origin { kind: wsl.clone(), home: home.clone() }], running: vec!["U".into()], wsl_stopped: false });
+        rx.recv_timeout(std::time::Duration::from_secs(3)).expect("aviso inicial");
+        *shared.lock().unwrap() = Discovery { origins: Vec::new(), running: Vec::new(), wsl_stopped: true };
+        svc.refresh();
+        rx.recv_timeout(std::time::Duration::from_secs(3)).expect("aviso com a distro parada");
+        let snap = svc.latest().unwrap();
+        assert!(snap.wsl_stopped);
+        assert_eq!(snap.accounts.len(), 1);
+        assert!(snap.accounts[0].stopped);
+        assert_eq!(snap.accounts[0].origins, vec![wsl]);
+        drop(svc);
+        std::fs::remove_dir_all(&home).unwrap();
     }
 }

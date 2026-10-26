@@ -352,7 +352,7 @@ impl Loop {
 
     /// Captura do som só com mídia tocando e a ilha ou um player visível.
     fn island_capture(&mut self) {
-        let visible = self.bars.iter().any(|b| b.shows_media() && !b.is_hidden());
+        let visible = self.bars.iter().any(|b| b.shows_media() && b.is_visible());
         let needed = self.media_wanted() && self.ctx.island.playing() && visible;
         if needed && self.island.capture.is_none() {
             let waveform = self.island.waveform.clone();
@@ -391,7 +391,7 @@ impl Loop {
             return Ok(());
         }
         let wave = self.island.waveform.lock().map(|w| w.clone()).ok();
-        for b in self.bars.iter().filter(|b| b.shows_media() && !b.is_hidden()) {
+        for b in self.bars.iter().filter(|b| b.shows_media() && b.is_visible()) {
             b.set_visualizer(wave.as_ref())?;
         }
         Ok(())

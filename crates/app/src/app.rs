@@ -45,22 +45,47 @@ pub struct SystemState {
     pub notifications: usize,
     /// Não perturbe ativo.
     pub dnd: bool,
+    /// Ponto no chip do chat: o Claude está respondendo ou há resposta não lida.
+    pub chat_badge: bool,
 }
 
-/// O que os chips de uso mostram: o último uso do Codex lido e quando o arquivo mudou.
+/// O que os chips de uso mostram: as contas do Claude e do Codex no Windows e no WSL.
 #[derive(Debug, Clone, Default)]
 pub struct UsageState {
-    /// Último resultado do Claude e quando chegou.
-    pub claude: Option<(std::time::Instant, Result<zefiro_integration_usage::claude::ClaudeUsage, zefiro_integration_usage::claude::UsageError>)>,
-    /// Último uso do Claude lido com sucesso: o chip continua com ele numa falha de rede.
-    pub claude_last_ok: Option<zefiro_integration_usage::claude::ClaudeUsage>,
-    pub codex: Option<(std::time::SystemTime, zefiro_integration_usage::codex::CodexUsage)>,
+    /// As contas do Claude e quando terminou a última consulta.
+    pub claude: Option<zefiro_integration_usage::claude::ClaudeSnapshot>,
+    pub codex: Option<zefiro_integration_usage::codex::CodexSnapshot>,
+    /// O número de cada chip na última vez que o dado chegou: a barra só é refeita se ele mudou.
+    /// Comparar com o snapshot antigo recalculado agora não serve: depois do `resets_at`, ele já dá
+    /// 0 % também, e o chip ficaria com o número velho.
+    claude_shown: Option<f32>,
+    codex_shown: Option<f32>,
 }
 
 impl UsageState {
-    /// % do chip do Claude (o último valor bom numa falha passageira).
+    /// % do chip do Claude: a maior janela de 5 h entre as contas (o último valor bom numa falha
+    /// passageira).
     pub fn claude_chip(&self) -> Option<f32> {
-        self.claude.as_ref().and_then(|(_, r)| zefiro_integration_usage::claude::chip_percent(r, self.claude_last_ok.as_ref()))
+        self.claude.as_ref().and_then(|s| zefiro_integration_usage::claude::chip_percent_accounts(&s.accounts, crate::usage_loop::now_unix()))
+    }
+
+    /// Guarda as contas do Claude; `true` se o número do chip mudou.
+    pub fn set_claude(&mut self, snapshot: Option<zefiro_integration_usage::claude::ClaudeSnapshot>, now_unix: i64) -> bool {
+        self.claude = snapshot;
+        let shown = self.claude.as_ref().and_then(|s| zefiro_integration_usage::claude::chip_percent_accounts(&s.accounts, now_unix));
+        std::mem::replace(&mut self.claude_shown, shown) != shown
+    }
+
+    /// Guarda as contas do Codex; `true` se o número do chip mudou.
+    pub fn set_codex(&mut self, snapshot: Option<zefiro_integration_usage::codex::CodexSnapshot>, now_unix: i64) -> bool {
+        self.codex = snapshot;
+        let shown = self.codex.as_ref().and_then(|s| zefiro_integration_usage::codex::codex_chip_percent(&s.accounts, now_unix));
+        std::mem::replace(&mut self.codex_shown, shown) != shown
+    }
+
+    /// % do chip do Codex: a maior janela primária entre as contas.
+    pub fn codex_chip(&self) -> Option<f32> {
+        self.codex.as_ref().and_then(|s| zefiro_integration_usage::codex::codex_chip_percent(&s.accounts, crate::usage_loop::now_unix()))
     }
 }
 
@@ -76,5 +101,25 @@ pub struct DeviceState {
 impl DeviceState {
     pub fn brightness_of(&self, device: &str) -> Option<u32> {
         self.brightness.iter().find(|m| m.device == device).and_then(|m| m.percent)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zefiro_integration_usage::codex::{CodexEntry, CodexSnapshot, CodexUsage, Window};
+    use zefiro_integration_usage::origins::{Account, OriginKind};
+
+    #[test]
+    fn codex_chip_redraws_when_window_resets() {
+        let t = 1_792_000_000;
+        let usage = CodexUsage { primary: Some(Window { used_percent: 80.0, window_minutes: 300, resets_at: t }), ..Default::default() };
+        let account = Account { key: "c1".into(), origins: vec![OriginKind::Windows], stopped: false, data: CodexEntry { modified: std::time::SystemTime::UNIX_EPOCH, usage } };
+        let snapshot = CodexSnapshot { accounts: vec![account], wsl_stopped: false };
+        let mut state = UsageState::default();
+        assert!(state.set_codex(Some(snapshot.clone()), t - 10), "1º valor");
+        assert!(!state.set_codex(Some(snapshot.clone()), t - 5), "mesmo número");
+        // O mesmo snapshot depois do `resets_at`: o chip desenhado (80 %) tem que virar 0 %.
+        assert!(state.set_codex(Some(snapshot), t + 1), "janela reiniciou");
     }
 }

@@ -65,6 +65,16 @@ pub struct BarView {
     /// Mouse em cima do player desta barra (espia só ele).
     player_hover: bool,
     hidden: bool,
+    /// O app em tela cheia que escondeu a barra (o HWND); ela volta quando ele sai, mesmo com o foco em outro monitor.
+    fullscreen_window: isize,
+    /// Ocultar automaticamente: a regra (quando desce e quando sobe) e se ela está recolhida agora.
+    pub auto: zefiro_ui::autohide::AutoHide,
+    retracted: bool,
+    /// Deslocamento vertical da barra inteira (recolhida = altura da janela para cima).
+    slide: windows::UI::Composition::CompositionPropertySet,
+    window_h: f32,
+    /// Cada recolher/descer novo invalida o "esconde a janela quando a mola assentar" do anterior.
+    slide_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// Áreas clicáveis sem a ilha (a ilha muda de tamanho sem refazer o layout inteiro).
     interactive_base: Vec<Rect>,
 }
@@ -112,6 +122,7 @@ fn icon_glyph(id: &str) -> &'static str {
         "vscode" => "\u{E8B7}",
         "hardware" => "\u{E950}",
         "terminal" => "\u{E756}",
+        "chat" => "\u{E8F2}",
         _ => "\u{E7E8}",
     }
 }
@@ -142,13 +153,14 @@ fn chip_content(ctx: &AppCtx, id: &str, device: &str, height: BarHeight, chip_h:
             level_chip(Level { glyph: ICON_BRIGHTNESS, text: "", dim: p.is_none() }, chip_h, font_px, scale, t, &ctx.text)
         }
         // Claude, Codex e VS Code: o ícone da marca (SVG) no lugar do glifo.
-        "codex" => with_svg_icon(zefiro_bar::usage::usage_chip(crate::usage_loop::CODEX_GLYPH, ctx.usage.codex.as_ref().and_then(|(_, u)| crate::usage_loop::codex_percent(u)), chip_h, font_px, scale, t, &ctx.text), icons::CODEX),
+        "codex" => with_svg_icon(zefiro_bar::usage::usage_chip(crate::usage_loop::CODEX_GLYPH, ctx.usage.codex_chip(), chip_h, font_px, scale, t, &ctx.text), icons::CODEX),
         "claude" => with_svg_icon(zefiro_bar::usage::usage_chip(crate::usage_loop::CLAUDE_GLYPH, ctx.usage.claude_chip(), chip_h, font_px, scale, t, &ctx.text), icons::CLAUDE_CODE),
         "vscode" => with_svg_icon(level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text), icons::VSCODE),
         "notifications" => zefiro_bar::chips::bell_chip(ctx.system.notifications, chip_h, font_px, scale, t, &ctx.text),
         "dnd" => zefiro_bar::chips::dnd_chip(ctx.system.dnd, chip_h, font_px, t),
         "weather" => weather_chip(ctx.island.weather.as_ref().map(|w| (zefiro_island::weather::icon(w.code), w.temp_c, w.city.as_str())), chip_h, font_px, scale, t, &ctx.text),
         "hardware" | "power" | "terminal" => level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text),
+        "chat" => zefiro_bar::chat::chat_chip(level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text), ctx.system.chat_badge, chip_h, scale, t),
         _ => clock_chip("⋯", chip_h, font_px, t, &ctx.text),
     }
 }
@@ -164,8 +176,9 @@ impl BarView {
         let strip = MorphShape::new(&ctx.comp, &root, &ctx.theme.morph_style(scale, SurfaceKind::Strip))?;
         let divider = ctx.comp.compositor.CreateSpriteVisual()?;
         root.Children()?.InsertAtTop(&divider)?;
+        let slide = ctx.comp.spring_offset(&root.cast::<Visual>()?, 0.0, 0.0)?;
         let groups = Vec::new();
-        let mut view = BarView { hwnd, monitor: monitor.clone(), scale, _target: target, root, strip, divider, groups, rails: Vec::new(), chips: Vec::new(), layout: None, appbar: false, hover: None, active: None, guides: None, drag_ghost: None, drag_marker: None, island: None, player: None, player_hover: false, hidden: false, interactive_base: Vec::new() };
+        let mut view = BarView { hwnd, monitor: monitor.clone(), scale, _target: target, root, strip, divider, groups, rails: Vec::new(), chips: Vec::new(), layout: None, appbar: false, hover: None, active: None, guides: None, drag_ghost: None, drag_marker: None, island: None, player: None, player_hover: false, hidden: false, fullscreen_window: 0, auto: Default::default(), retracted: false, slide, window_h: h, slide_generation: Default::default(), interactive_base: Vec::new() };
         view.apply(ctx, false)?;
         window::set_bounds(hwnd, bounds, true);
         Ok(view)
@@ -454,12 +467,35 @@ impl BarView {
         Ok(())
     }
 
-    pub fn register_appbar(&mut self, _ctx: &AppCtx) {
+    /// Reserva a faixa no topo (AppBar). Com ocultar automaticamente não há reserva: as janelas
+    /// maximizadas vão até o topo, e a barra desce por cima delas.
+    pub fn register_appbar(&mut self, ctx: &AppCtx) {
+        if ctx.config.autohide() {
+            return;
+        }
         if let Some(l) = &self.layout {
             appbar::register(self.hwnd, self.monitor.rect, l.band.h as i32);
             self.appbar = true;
             island_zorder::raise_island();
         }
+    }
+
+    /// Ocultar automaticamente ligou ou desligou: tira ou devolve a reserva da AppBar.
+    pub fn sync_appbar(&mut self, ctx: &AppCtx) {
+        match (ctx.config.autohide(), self.appbar) {
+            (true, true) => {
+                appbar::unregister(self.hwnd);
+                self.appbar = false;
+            }
+            (false, false) => self.register_appbar(ctx),
+            _ => {}
+        }
+    }
+
+    /// Faixa da barra na tela (onde o cursor a mantém aberta).
+    pub fn band_on_screen(&self) -> Rect {
+        let h = self.layout.as_ref().map_or(self.window_h, |l| l.band.bottom());
+        Rect::new(self.monitor.rect.x, self.monitor.rect.y, self.monitor.rect.w, h)
     }
 
     /// Outra AppBar mudou de lugar: só reposiciona (sem registrar de novo).
@@ -704,9 +740,62 @@ impl BarView {
         self.hidden = hidden;
         if hidden {
             window::hide(self.hwnd);
-        } else {
+        } else if !self.retracted {
             window::show(self.hwnd);
         }
+    }
+
+    /// Visível agora: nem escondida por tela cheia, nem recolhida (ocultar automaticamente).
+    pub fn is_visible(&self) -> bool {
+        !self.hidden && !self.retracted
+    }
+
+    pub fn is_retracted(&self) -> bool {
+        self.retracted
+    }
+
+    /// Ocultar automaticamente: recolhe (sobe para fora da tela e a janela some quando a mola
+    /// assenta, levando junto as áreas de clique) ou desce (a janela volta e a barra desliza até o lugar).
+    pub fn set_retracted(&mut self, ctx: &AppCtx, retracted: bool, animate: bool) -> Result<()> {
+        use std::sync::atomic::Ordering;
+        if self.retracted == retracted {
+            return Ok(());
+        }
+        self.retracted = retracted;
+        let generation = self.slide_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let animate = animate && ctx.theme.animations;
+        let spring = animate.then(|| ctx.theme.spring(SpringParams::SETTLE));
+        if !retracted {
+            if !self.hidden {
+                window::show(self.hwnd);
+            }
+            return ctx.comp.move_offset(&self.slide, 0.0, 0.0, spring);
+        }
+        if !animate {
+            ctx.comp.move_offset(&self.slide, 0.0, -self.window_h, None)?;
+            window::hide(self.hwnd);
+            return Ok(());
+        }
+        let (raw, current) = (self.hwnd.0 as isize, self.slide_generation.clone()); // HWND não é Send
+        let batch = ctx.comp.on_settled(move || {
+            if current.load(Ordering::SeqCst) == generation {
+                window::hide(HWND(raw as *mut _));
+            }
+        })?;
+        ctx.comp.move_offset(&self.slide, 0.0, -self.window_h, spring)?;
+        batch.End()
+    }
+
+    /// Esconde por causa do app em tela cheia `window` (ver `fullscreen_window`).
+    pub fn hide_for_fullscreen(&mut self, window: isize) {
+        self.fullscreen_window = window;
+        if !self.hidden {
+            self.set_hidden(true);
+        }
+    }
+
+    pub fn fullscreen_window(&self) -> isize {
+        self.fullscreen_window
     }
 
     pub fn destroy(self) {

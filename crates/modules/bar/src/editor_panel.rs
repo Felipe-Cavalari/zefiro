@@ -2,7 +2,7 @@
 //! barra de ferramentas" do Mac), prateleira com os itens fora da barra e botões com hover e aperto.
 //! Arrastar um chip entre as seções (ou para a prateleira) só muda o rascunho ao soltar.
 
-use zefiro_core::config::LayoutMode;
+use zefiro_core::config::{BarDisplay, LayoutMode};
 use zefiro_platform::color::Rgba;
 use zefiro_platform::geometry::{Point, Rect, Size};
 use zefiro_platform::text::{Align, Family, FontWeight, TextMeasurer, TextStyle};
@@ -15,6 +15,9 @@ pub enum EditorAction {
     Monitor(usize), ToggleMode, SelectItem(String), Add(String), Remove,
     MoveSection(Section), MoveBefore, MoveAfter, Options, Back,
     ToggleSeconds, EditFormat, SystemFormat, Reload, Reapply, ResolveFile, ResolveDraft,
+    ToggleAutohide, TogglePrimaryOnly,
+    /// "‹ Editar barra": como o Cancelar, e o menu do Z abre no lugar.
+    BackToMenu,
     Cancel, Save,
 }
 
@@ -30,7 +33,8 @@ pub enum Zone { Section(Section), Shelf }
 pub enum Target { Button(EditorAction), Chip(String) }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ButtonKind { Plain, Primary, Segment { selected: bool }, Row }
+/// `Back`: o título "‹ Editar barra", que só ganha fundo sob o mouse ou o foco.
+pub enum ButtonKind { Plain, Primary, Segment { selected: bool }, Row, Switch { on: bool }, Back }
 
 #[derive(Debug, Clone)]
 pub struct Button { pub action: EditorAction, pub rect: Rect, pub label: String, pub enabled: bool, pub kind: ButtonKind }
@@ -103,17 +107,21 @@ impl EditorPanel {
         let inner = cx.width - s(2.0 * PAD);
         let enabled = !session.saving;
         let mut out = EditorLayout { size: Size { w: cx.width, h: 0.0 }, buttons: Vec::new(), zones: Vec::new(), chips: Vec::new(), labels: Vec::new(), empty_shelf: None, center_locked: cx.island_locked, scale: cx.scale };
+        // O título volta ao menu do Z, como o "‹ Tema" e o "‹ Configurações".
+        out.buttons.push(Button { action: EditorAction::BackToMenu, rect: Rect::new(s(PAD - 8.0), s(4.0), s(150.0), s(28.0)), label: "‹ Editar barra".into(), enabled, kind: ButtonKind::Back });
         let mut y = s(54.0);
 
         if cx.monitors.len() > 1 {
+            // Só no principal: os outros monitores não têm barra, escolher monitor ou layout não faz efeito.
+            let per_monitor = enabled && session.draft.bar.display == BarDisplay::Todos;
             let segments_w = inner * 0.62;
             let each = segments_w / cx.monitors.len() as f32;
             for (i, name) in cx.monitors.iter().enumerate() {
-                out.buttons.push(Button { action: EditorAction::Monitor(i), rect: Rect::new(s(PAD) + each * i as f32, y, each, s(CHIP_H)), label: name.clone(), enabled, kind: ButtonKind::Segment { selected: i == cx.monitor } });
+                out.buttons.push(Button { action: EditorAction::Monitor(i), rect: Rect::new(s(PAD) + each * i as f32, y, each, s(CHIP_H)), label: name.clone(), enabled: per_monitor, kind: ButtonKind::Segment { selected: i == cx.monitor } });
             }
             let shared = session.draft.bar.layout_mode == LayoutMode::Shared;
             let x = s(PAD) + segments_w + s(8.0);
-            out.buttons.push(Button { action: EditorAction::ToggleMode, rect: Rect::new(x, y, cx.width - s(PAD) - x, s(CHIP_H)), label: if shared { "Mesmo layout em todos" } else { "Layout próprio" }.into(), enabled, kind: ButtonKind::Plain });
+            out.buttons.push(Button { action: EditorAction::ToggleMode, rect: Rect::new(x, y, cx.width - s(PAD) - x, s(CHIP_H)), label: if shared { "Mesmo layout em todos" } else { "Layout próprio" }.into(), enabled: per_monitor, kind: ButtonKind::Plain });
             y += s(CHIP_H + 14.0);
         }
 
@@ -191,7 +199,23 @@ impl EditorPanel {
             y = out.buttons.last().map_or(y, |b| b.rect.bottom());
         }
 
-        y += s(18.0);
+        // Onde e quando a barra aparece: valem ao concluir, como o resto.
+        y += s(14.0);
+        let external = session.draft.island.external();
+        let autohide_label = if external { "Ocultar automaticamente · indisponível com a ilha externa" } else { "Ocultar automaticamente" };
+        let mut switches = vec![(EditorAction::ToggleAutohide, autohide_label, session.draft.bar.autohide && !external, enabled && !external)];
+        // Com a opção ligada só existe a barra do principal (um monitor na lista): a chave continua
+        // para dar para desligar.
+        let primary_only = session.confirmed.bar.display == BarDisplay::Principal || session.draft.bar.display == BarDisplay::Principal;
+        if cx.monitors.len() > 1 || primary_only {
+            switches.push((EditorAction::TogglePrimaryOnly, "Só no monitor principal", session.draft.bar.display == BarDisplay::Principal, enabled));
+        }
+        for (action, label, on, enabled) in switches {
+            out.buttons.push(Button { action, rect: Rect::new(s(PAD), y, inner, s(BUTTON_H)), label: label.into(), enabled, kind: ButtonKind::Switch { on } });
+            y += s(BUTTON_H + 4.0);
+        }
+
+        y += s(14.0);
         let half = (inner - s(8.0)) / 2.0;
         out.buttons.push(Button { action: EditorAction::Cancel, rect: Rect::new(s(PAD), y, half, s(BUTTON_H)), label: "Cancelar".into(), enabled, kind: ButtonKind::Plain });
         out.buttons.push(Button { action: EditorAction::Save, rect: Rect::new(s(PAD) + half + s(8.0), y, half, s(BUTTON_H)), label: if session.saving { "Gravando…" } else { "Concluir" }.into(), enabled: enabled && !session.conflict, kind: ButtonKind::Primary });
@@ -259,7 +283,6 @@ impl EditorPanel {
         let mut list = DisplayList::new(layout.size);
         let inner = layout.size.w - s(2.0 * PAD);
         let text = |size: f32, weight: FontWeight| TextStyle { size: s(size), weight, family: Family::Text };
-        list.push(DrawOp::Text { rect: Rect::new(s(PAD), s(12.0), inner, s(20.0)), text: "Editar barra".into(), style: text(14.0, FontWeight::SemiBold), color: tokens.text, align: Align::Leading });
         let message = if session.conflict && self.message.is_empty() { "A configuração mudou fora do editor" } else if self.message.is_empty() { "Arraste os itens entre as seções" } else { &self.message };
         list.push(DrawOp::Text { rect: Rect::new(s(PAD), s(32.0), inner, s(16.0)), text: message.into(), style: text(11.0, FontWeight::Regular), color: tokens.text_secondary, align: Align::Leading });
         for (rect, label) in &layout.labels {
@@ -352,12 +375,24 @@ impl EditorPanel {
                     }
                     color = on_accent(tokens.accent);
                 }
+                ButtonKind::Back => {
+                    if lit || pressed {
+                        list.push(DrawOp::RoundRect { rect, radius: s(10.0), color: tokens.raised });
+                    }
+                    list.push(DrawOp::Text { rect: rect.inset(s(8.0), 0.0), text: b.label.clone(), style: text(14.0, FontWeight::SemiBold), color: tokens.text, align: Align::Leading });
+                    continue;
+                }
+                ButtonKind::Switch { on } => {
+                    let fill = if lit || pressed { tokens.raised_strong } else { tokens.raised };
+                    list.push(DrawOp::RoundRect { rect, radius, color: fill });
+                    crate::menu::switch(&mut list, rect.inset(s(4.0), 0.0), on && b.enabled, layout.scale, tokens);
+                }
                 _ => {
                     let fill = if lit || pressed { tokens.raised_strong } else { tokens.raised };
                     list.push(DrawOp::RoundRect { rect, radius, color: fill });
                 }
             }
-            let (label_rect, align) = if b.kind == ButtonKind::Row { (rect.inset(s(14.0), 0.0), Align::Leading) } else { (rect.inset(s(8.0), 0.0), Align::Center) };
+            let (label_rect, align) = if matches!(b.kind, ButtonKind::Row | ButtonKind::Switch { .. }) { (rect.inset(s(14.0), 0.0), Align::Leading) } else { (rect.inset(s(8.0), 0.0), Align::Center) };
             let weight = if b.kind == ButtonKind::Primary { FontWeight::SemiBold } else { FontWeight::Regular };
             list.push(DrawOp::Text { rect: label_rect, text: b.label.clone(), style: TextStyle { weight, ..body }, color, align });
         }

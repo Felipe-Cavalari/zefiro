@@ -1,7 +1,7 @@
 //! Painel "VS Code · recentes": uma linha por projeto (nome, data, onde fica e um selo para WSL,
 //! remoto ou workspace), com busca no topo e rolagem pela roda.
 
-use zefiro_platform::geometry::{Rect, Size};
+use zefiro_platform::geometry::{Point, Rect, Size};
 use zefiro_platform::text::{Align, Family, FontWeight, TextMeasurer, TextStyle};
 use zefiro_resources::tokens::Tokens;
 use zefiro_ui::paint::{DisplayList, DrawOp};
@@ -71,6 +71,12 @@ pub fn edit_query(query: &mut String, code: u32, paste: Option<&str>) -> bool {
         },
         _ => false,
     }
+}
+
+/// Linha sob o mouse (o índice em `items` que o `vscode_panel` devolveu nas áreas de clique). O
+/// mouse leva o mesmo destaque das setas, como no menu do Z: sem isso o painel parecia parado.
+pub fn hovered_row(hits: &[(Rect, usize)], p: Point) -> Option<usize> {
+    hits.iter().find(|(r, _)| r.contains(p)).map(|(_, i)| *i)
 }
 
 /// Desenho, as áreas de clique (retângulo, índice do projeto) e a caixa de busca. `message` aparece
@@ -221,6 +227,18 @@ mod tests {
         // A rolagem não passa do fim.
         assert_eq!(max_scroll(20), 8);
         assert_eq!(max_scroll(5), 0);
+    }
+
+    #[test]
+    fn the_row_under_the_mouse_takes_the_highlight() {
+        let items: Vec<RecentRow> = (0..20).map(row).collect();
+        // Rolado em 1: as áreas de clique dizem a posição na lista mostrada.
+        let (_, hits, search_box) = vscode_panel(&items, 1, None, &search("", None), 1.0, &tokens());
+        let over = |r: Rect| Point { x: r.center_x(), y: r.y + r.h / 2.0 };
+        assert_eq!(hovered_row(&hits, over(hits[2].0)), Some(3), "terceira linha visível = projeto 3");
+        assert_eq!(hovered_row(&hits, over(search_box)), None, "a busca não é linha");
+        let (list, _, _) = vscode_panel(&items, 1, None, &search("", hovered_row(&hits, over(hits[0].0))), 1.0, &tokens());
+        assert!(list.ops.iter().any(|o| matches!(o, DrawOp::RoundRect { rect, .. } if *rect == hits[0].0)), "a linha sob o mouse ganha o fundo");
     }
 
     #[test]

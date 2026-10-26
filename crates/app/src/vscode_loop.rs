@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use windows::core::Result;
 use zefiro_bar::controller::PanelKind;
-use zefiro_bar::vscode::{RecentRow, Search, VISIBLE, edit_query, matches, max_scroll, vscode_panel};
+use zefiro_bar::vscode::{RecentRow, Search, VISIBLE, edit_query, hovered_row, matches, max_scroll, vscode_panel};
 use zefiro_integration_usage::format::format_short;
 use zefiro_integration_vscode::{Kind, Recent, open_args, read_recents, wsl_distro};
 use zefiro_platform::geometry::{Point, Rect};
@@ -29,6 +29,8 @@ pub struct VsCodeRuntime {
     scroll: usize,
     /// Área de clique de cada linha e o índice do projeto em `recents`.
     hits: Vec<(Rect, usize)>,
+    /// As mesmas áreas com a posição em `shown` (para o hover escolher a linha).
+    rows: Vec<(Rect, usize)>,
     query: String,
     /// Projetos que passam na busca (índices em `recents`), na ordem mostrada.
     shown: Vec<usize>,
@@ -119,8 +121,25 @@ impl Loop {
         let lit = (v.navigated || !v.query.is_empty()).then_some(v.selected);
         let search = Search { query: &v.query, selected: lit, measure: &self.ctx.text };
         let (list, hits, _) = vscode_panel(&rows, v.scroll, message, &search, scale, &self.ctx.theme.tokens);
-        v.hits = hits.into_iter().map(|(r, i)| (r, v.shown[i])).collect();
+        v.hits = hits.iter().map(|&(r, i)| (r, v.shown[i])).collect();
+        v.rows = hits;
         list
+    }
+
+    /// Mouse sobre o painel: a linha sob ele ganha o destaque (só redesenha quando muda).
+    pub fn vscode_move(&mut self, p: Point) -> Result<()> {
+        if !self.controller.open().is_some_and(|o| o.kind == PanelKind::VsCode) {
+            return Ok(());
+        }
+        let v = &mut self.vscode;
+        if let Some(row) = hovered_row(&v.rows, p)
+            && (row != v.selected || !v.navigated)
+        {
+            v.selected = row;
+            v.navigated = true;
+            self.redraw_open_panel()?;
+        }
+        Ok(())
     }
 
     /// Tecla digitada com o painel aberto: edita a busca, filtra e volta ao primeiro resultado.

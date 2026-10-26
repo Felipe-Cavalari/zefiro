@@ -1,36 +1,25 @@
-//! Sonda: confere o endpoint de uso do Claude. Imprime só o status HTTP e os NOMES dos campos da
-//! resposta; o token nunca é impresso.
+//! Sonda: as contas do Claude que o Zefiro acha (Windows e WSL rodando) e o uso de cada uma. Imprime
+//! a origem, o plano, se há e-mail e o status; nunca o token, o e-mail ou o identificador da conta.
+use std::sync::Arc;
+use std::sync::mpsc;
 use std::time::Duration;
-
-fn names(v: &serde_json::Value, prefix: &str) {
-    match v {
-        serde_json::Value::Object(map) => {
-            for (k, child) in map {
-                let kind = match child { serde_json::Value::Object(_) => "objeto", serde_json::Value::Array(_) => "lista", serde_json::Value::Number(_) => "número", serde_json::Value::String(_) => "texto", serde_json::Value::Bool(_) => "booleano", serde_json::Value::Null => "nulo" };
-                println!("{prefix}{k}: {kind}");
-                names(child, &format!("{prefix}{k}."));
-            }
-        }
-        serde_json::Value::Array(items) => {
-            if let Some(first) = items.first() {
-                names(first, &format!("{prefix}[0]."));
-            }
-        }
-        _ => {}
-    }
-}
+use zefiro_platform_windows::{claude::ClaudeService, wsl};
 
 fn main() {
-    let path = std::path::PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default()).join(".claude").join(".credentials.json");
-    let text = std::fs::read_to_string(&path).expect("credenciais do Claude Code");
-    let json: serde_json::Value = serde_json::from_str(&text).expect("JSON das credenciais");
-    let token = json["claudeAiOauth"]["accessToken"].as_str().expect("claudeAiOauth.accessToken").to_string();
-    let beta = std::env::args().nth(1).unwrap_or_else(|| "oauth-2025-04-20".into());
-    let auth = format!("Bearer {token}");
-    let (status, body) = zefiro_platform_windows::http::get_with("https://api.anthropic.com/api/oauth/usage", &[("Authorization", &auth), ("anthropic-beta", &beta)], Duration::from_secs(15)).expect("requisição");
-    println!("status: {status}");
-    match serde_json::from_str::<serde_json::Value>(&body) {
-        Ok(v) => names(&v, ""),
-        Err(_) => println!("corpo não é JSON ({} bytes)", body.len()),
+    let home = std::path::PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default());
+    let (tx, rx) = mpsc::channel();
+    let svc = ClaudeService::start(Arc::new(move || wsl::discover(&home)), Arc::new(move || { let _ = tx.send(()); })).expect("serviço");
+    rx.recv_timeout(Duration::from_secs(30)).expect("primeira consulta");
+    let snap = svc.latest().expect("snapshot");
+    let many = zefiro_integration_usage::origins::many_distros(&snap.accounts);
+    for a in &snap.accounts {
+        let status = match &a.data.result {
+            Some(Ok(u)) => format!("Ok 5h={:?} 7d={:?}", u.five_hour.map(|l| l.percent), u.seven_day.map(|l| l.percent)),
+            Some(Err(e)) => format!("{e:?}"),
+            None => "sem consulta".into(),
+        };
+        let origins = zefiro_integration_usage::origins::origins_label(&a.origins, many);
+        println!("{origins}: plano={:?} tem e-mail={} {status}", a.data.plan, a.data.email.is_some());
     }
+    println!("WSL parado: {}", snap.wsl_stopped);
 }

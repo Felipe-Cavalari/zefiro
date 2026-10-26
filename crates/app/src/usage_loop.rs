@@ -5,13 +5,15 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use windows::core::Result;
 use zefiro_bar::controller::PanelKind;
-use zefiro_bar::usage::{UsageRow, usage_panel};
+use zefiro_bar::usage::{RefreshButton, UsageBlock, UsageRow, refresh_button_rect, usage_panel};
 use zefiro_integration_clock::windows::utc_offset_seconds;
-use zefiro_integration_usage::claude::{Limit, UsageError};
-use zefiro_integration_usage::codex::{CodexService, CodexUsage, Window, effective_percent, window_name};
-use zefiro_integration_usage::format::{format_absolute, format_relative, format_short, parse_iso_utc};
+use zefiro_integration_usage::claude::{ClaudeSnapshot, Limit, UsageError, can_refresh};
+use zefiro_integration_usage::codex::{CodexService, CodexSnapshot, Window, effective_percent, window_name};
+use zefiro_integration_usage::origins::{OriginKind, many_distros, origins_label};
+use zefiro_integration_usage::format::{format_absolute, format_clock, format_relative, format_short, parse_iso_utc};
 use zefiro_platform_windows::claude::ClaudeService;
-use zefiro_platform_windows::window;
+use zefiro_platform_windows::{window, wsl};
+use zefiro_platform::geometry::Point;
 use zefiro_ui::paint::DisplayList;
 
 use crate::event_loop::{Loop, USER_CLAUDE, USER_CODEX};
@@ -23,20 +25,26 @@ pub const CLAUDE_GLYPH: &str = "\u{E945}";
 pub struct UsageRuntime {
     codex: Option<CodexService>,
     claude: Option<ClaudeService>,
+    /// O botão de atualizar foi tocado e a resposta ainda não chegou.
+    claude_refreshing: bool,
+    codex_refreshing: bool,
+    /// O mouse está sobre o botão de atualizar do painel aberto.
+    refresh_hover: bool,
 }
 
 pub fn now_unix() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
 }
 
-fn home() -> PathBuf {
-    std::env::var_os("USERPROFILE").map(PathBuf::from).unwrap_or_default()
+/// A pasta pessoal do Windows. `ZEFIRO_USAGE_WINDOWS_HOME` troca por outra só para testes (simular
+/// um tester que só usa o WSL).
+fn windows_home() -> PathBuf {
+    std::env::var_os("ZEFIRO_USAGE_WINDOWS_HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from).unwrap_or_default()
 }
 
-/// % da janela primária, 0 se ela já reiniciou.
-pub fn codex_percent(u: &CodexUsage) -> Option<f32> {
-    u.primary.map(|w| effective_percent(&w, now_unix()))
-}
+const WSL_STOPPED: &str = "WSL desligado.\nAbra o WSL para ver o uso de lá.";
+const STOPPED_SUFFIX: &str = " · WSL desligado";
+
 
 /// "reinicia em 2 h 14 min" para janelas de até um dia; "reinicia qui 22 out, 11:08" para as
 /// maiores; "reiniciada" se já passou.
@@ -55,13 +63,30 @@ fn claude_row(label: String, limit: &Limit, window_minutes: u32, now: i64, offse
     UsageRow { label, percent: Some(limit.percent), detail }
 }
 
-fn claude_message(e: UsageError) -> String {
+/// `origin`: "Windows" ou "WSL", onde abrir o Claude Code para renovar o login.
+fn claude_message(e: UsageError, origin: &str) -> String {
     match e {
-        UsageError::Expired => "Login do Claude Code expirado.\nAbra o Claude Code para renovar.".into(),
+        UsageError::Expired => format!("Login expirado no {origin}.\nAbra o Claude Code no {origin} para renovar."),
         UsageError::Missing => "Faça login no Claude Code".into(),
-        UsageError::Network => "Sem conexão.\nTento de novo em 2 min.".into(),
+        UsageError::Network => "Sem conexão.\nTento de novo em 5 min.".into(),
         UsageError::UnknownFormat => "Formato de resposta desconhecido".into(),
-        UsageError::Http(status) => format!("O serviço respondeu {status}.\nTento de novo em 2 min."),
+        UsageError::Http(status) => format!("O serviço respondeu {status}.\nTento de novo em 5 min."),
+    }
+}
+
+/// A pausa mais curta entre as contas que receberam 429 e ainda não voltaram.
+fn paused_until(s: &ClaudeSnapshot, now: i64) -> Option<i64> {
+    s.accounts.iter().filter_map(|a| a.data.retry_at).filter(|t| *t > now).min()
+}
+
+/// Rodapé do painel do Claude: atualizando, em pausa depois de um 429 ou "Atualizado há".
+fn claude_footer(s: &ClaudeSnapshot, now: i64, offset: i32, refreshing: bool) -> String {
+    if refreshing {
+        return "Atualizando…".into();
+    }
+    match paused_until(s, now) {
+        Some(t) => format!("Muitas consultas. Tento de novo às {}.", format_clock(t, offset)),
+        None => s.at.map(updated_ago).unwrap_or_default(),
     }
 }
 
@@ -74,6 +99,89 @@ fn updated_ago(at: std::time::Instant) -> String {
 
 fn codex_row(w: &Window, now: i64, offset: i32) -> UsageRow {
     UsageRow { label: window_name(w.window_minutes), percent: Some(effective_percent(w, now)), detail: reset_detail(w.resets_at, w.window_minutes, now, offset) }
+}
+
+fn block(title: String, subtitle: String, rows: Vec<UsageRow>, message: Option<String>) -> UsageBlock {
+    UsageBlock { title, subtitle, rows, message }
+}
+
+/// Um bloco por conta do Claude; sem contas, um bloco com o motivo.
+fn claude_blocks(s: &ClaudeSnapshot, now: i64, offset: i32) -> Vec<UsageBlock> {
+    if s.accounts.is_empty() {
+        let message = if s.wsl_stopped { WSL_STOPPED } else { "Faça login no Claude Code" };
+        return vec![block("Claude".into(), String::new(), Vec::new(), Some(message.into()))];
+    }
+    let many = many_distros(&s.accounts);
+    s.accounts
+        .iter()
+        .map(|a| {
+            let title = a.data.plan.as_deref().map_or("Claude".to_string(), |p| format!("Claude · {p}"));
+            let origins = origins_label(&a.origins, many);
+            let mut subtitle = a.data.email.as_deref().map_or(origins.clone(), |e| format!("{e} · {origins}"));
+            if a.stopped {
+                subtitle.push_str(STOPPED_SUFFIX);
+            }
+            let renew_at = if a.origins.contains(&OriginKind::Windows) { "Windows" } else { "WSL" };
+            // Conta lembrada de uma distro parada, ou em pausa depois de um 429: o último valor bom,
+            // sem mensagem de erro (o rodapé diz quando tenta de novo).
+            let usage = match &a.data.result {
+                Some(Ok(u)) => Ok(Some(u)),
+                Some(Err(e)) if (a.stopped || *e == UsageError::Http(429)) && a.data.last_ok.is_some() => Ok(a.data.last_ok.as_ref()),
+                Some(Err(UsageError::Http(429))) if a.data.retry_at.is_some_and(|t| t > now) => {
+                    Err(format!("Muitas consultas.\nTento de novo às {}.", a.data.retry_at.map(|t| format_clock(t, offset)).unwrap_or_default()))
+                }
+                Some(Err(e)) => Err(claude_message(*e, renew_at)),
+                None => Ok(None),
+            };
+            match usage {
+                Err(message) => block(title, subtitle, Vec::new(), Some(message)),
+                Ok(None) => block(title, subtitle, Vec::new(), Some("Carregando…".into())),
+                Ok(Some(u)) => {
+                    let mut rows = Vec::new();
+                    if let Some(l) = &u.five_hour {
+                        rows.push(claude_row("5 horas".into(), l, 300, now, offset));
+                    }
+                    if let Some(l) = &u.seven_day {
+                        rows.push(claude_row("7 dias".into(), l, 10080, now, offset));
+                    }
+                    for (name, l) in &u.extra {
+                        rows.push(claude_row(format!("{name} (7 dias)"), l, 10080, now, offset));
+                    }
+                    block(title, subtitle, rows, None)
+                }
+            }
+        })
+        .collect()
+}
+
+/// Um bloco por conta do Codex; com mais de uma conta, o título diz a origem.
+fn codex_blocks(s: &CodexSnapshot, now: i64, offset: i32) -> Vec<UsageBlock> {
+    if s.accounts.is_empty() {
+        let message = if s.wsl_stopped { WSL_STOPPED } else { "Nenhum uso do Codex encontrado" };
+        return vec![block("Codex".into(), String::new(), Vec::new(), Some(message.into()))];
+    }
+    let many = many_distros(&s.accounts);
+    s.accounts
+        .iter()
+        .map(|a| {
+            let u = &a.data.usage;
+            let mut title = u.plan.as_deref().map_or("Codex".to_string(), |p| format!("Codex · {}", capitalized(p)));
+            if s.accounts.len() > 1 {
+                title = format!("{title} · {}", origins_label(&a.origins, many));
+            }
+            let mut subtitle = u.event_at.as_deref().and_then(parse_iso_utc).map(|t| format!("Último uso do Codex: {}", format_short(t, offset))).unwrap_or_default();
+            // Com uma conta só, o título não diz de onde veio o uso.
+            if s.accounts.len() == 1 {
+                let origins = origins_label(&a.origins, many);
+                subtitle = if subtitle.is_empty() { origins } else { format!("{subtitle} · {origins}") };
+            }
+            if a.stopped {
+                subtitle.push_str(STOPPED_SUFFIX);
+            }
+            let rows = [u.primary, u.secondary].iter().flatten().map(|w| codex_row(w, now, offset)).collect();
+            block(title, subtitle, rows, None)
+        })
+        .collect()
 }
 
 fn capitalized(s: &str) -> String {
@@ -89,28 +197,30 @@ impl Loop {
         match (claude, self.usage.claude.is_some()) {
             (true, false) => {
                 tracing::info!("uso do Claude: serviço ligado");
-                self.usage.claude = ClaudeService::start(home().join(".claude").join(".credentials.json"), Arc::new(|| window::post_user(USER_CLAUDE)))
+                let home = windows_home();
+                self.usage.claude = ClaudeService::start(Arc::new(move || wsl::discover(&home)), Arc::new(|| window::post_user(USER_CLAUDE)))
                     .map_err(|e| tracing::warn!("uso do Claude indisponível: {e}"))
                     .ok();
             }
             (false, true) => {
                 tracing::info!("uso do Claude: serviço desligado (chip fora da barra)");
                 self.usage.claude = None;
-                self.ctx.usage.claude = None;
+                self.ctx.usage.set_claude(None, now_unix());
             }
             _ => {}
         }
         match (codex, self.usage.codex.is_some()) {
             (true, false) => {
                 tracing::info!("uso do Codex: serviço ligado");
-                self.usage.codex = CodexService::start(home().join(".codex").join("sessions"), Arc::new(|| window::post_user(USER_CODEX)))
+                let home = windows_home();
+                self.usage.codex = CodexService::start(Arc::new(move || wsl::discover(&home)), Arc::new(|| window::post_user(USER_CODEX)))
                     .map_err(|e| tracing::warn!("uso do Codex indisponível: {e}"))
                     .ok();
             }
             (false, true) => {
                 tracing::info!("uso do Codex: serviço desligado (chip fora da barra)");
                 self.usage.codex = None;
-                self.ctx.usage.codex = None;
+                self.ctx.usage.set_codex(None, now_unix());
             }
             _ => {}
         }
@@ -120,24 +230,25 @@ impl Loop {
         self.controller.open().is_some_and(|o| o.kind == kind)
     }
 
+    /// Chega quando o uso muda ou uma janela reinicia: a barra só é refeita se o número do chip mudou.
     pub fn usage_codex_changed(&mut self) -> Result<()> {
-        self.ctx.usage.codex = self.usage.codex.as_ref().and_then(CodexService::latest);
-        self.apply_bars(true)?;
+        self.usage.codex_refreshing = false;
+        let latest = self.usage.codex.as_ref().and_then(CodexService::latest);
+        if self.ctx.usage.set_codex(latest, now_unix()) {
+            self.apply_bars(true)?;
+        }
         if self.usage_panel_open(PanelKind::Codex) {
             self.redraw_open_panel()?;
         }
         Ok(())
     }
 
-    /// Chega a cada consulta (a cada 2 min): a barra só é refeita se o número do chip mudou; o
-    /// painel aberto é redesenhado sempre (rodapé "Atualizado há").
+    /// Chega a cada consulta (a cada 5 min, ao abrir o painel e no botão de atualizar): a barra só é
+    /// refeita se o número do chip mudou; o painel aberto é redesenhado sempre (rodapé).
     pub fn usage_claude_changed(&mut self) -> Result<()> {
-        let before = self.ctx.usage.claude_chip();
-        self.ctx.usage.claude = self.usage.claude.as_ref().and_then(ClaudeService::latest);
-        if let Some((_, Ok(u))) = &self.ctx.usage.claude {
-            self.ctx.usage.claude_last_ok = Some(u.clone());
-        }
-        if self.ctx.usage.claude_chip() != before {
+        self.usage.claude_refreshing = false;
+        let latest = self.usage.claude.as_ref().and_then(ClaudeService::latest);
+        if self.ctx.usage.set_claude(latest, now_unix()) {
             self.apply_bars(true)?;
         }
         if self.usage_panel_open(PanelKind::Claude) {
@@ -147,7 +258,8 @@ impl Loop {
     }
 
     /// Ao abrir o painel: confere o dado agora.
-    pub fn usage_prepare(&self, kind: PanelKind) {
+    pub fn usage_prepare(&mut self, kind: PanelKind) {
+        self.usage.refresh_hover = false;
         if kind == PanelKind::Codex
             && let Some(s) = &self.usage.codex
         {
@@ -160,36 +272,209 @@ impl Loop {
         }
     }
 
+    /// Botão de atualizar dos painéis do Claude e do Codex. `true` se o clique foi nele.
+    pub fn usage_click(&mut self, p: Point, scale: f32) -> Result<bool> {
+        if !refresh_button_rect(scale).contains(p) {
+            return Ok(false);
+        }
+        if self.usage_panel_open(PanelKind::Claude) {
+            if self.claude_refresh_enabled()
+                && let Some(service) = &self.usage.claude
+            {
+                service.refresh_now();
+                self.usage.claude_refreshing = true;
+                self.redraw_open_panel()?;
+            }
+            return Ok(true);
+        }
+        if self.usage_panel_open(PanelKind::Codex) {
+            // O Codex lê arquivos locais: sem limite de consultas, o botão só espera a resposta.
+            if !self.usage.codex_refreshing
+                && let Some(service) = &self.usage.codex
+            {
+                service.refresh();
+                self.usage.codex_refreshing = true;
+                self.redraw_open_panel()?;
+            }
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// Mouse sobre o painel do Claude ou do Codex: o botão de atualizar acende sob ele (só redesenha quando muda).
+    pub fn usage_move(&mut self, p: Point, scale: f32) -> Result<()> {
+        if !(self.usage_panel_open(PanelKind::Claude) || self.usage_panel_open(PanelKind::Codex)) {
+            return Ok(());
+        }
+        self.usage_hover(refresh_button_rect(scale).contains(p))
+    }
+
+    /// O mouse saiu do painel: o botão apaga.
+    pub fn usage_leave(&mut self) -> Result<()> {
+        self.usage_hover(false)
+    }
+
+    fn usage_hover(&mut self, over: bool) -> Result<()> {
+        if over == self.usage.refresh_hover {
+            return Ok(());
+        }
+        self.usage.refresh_hover = over;
+        if self.usage_panel_open(PanelKind::Claude) || self.usage_panel_open(PanelKind::Codex) {
+            self.redraw_open_panel()?;
+        }
+        Ok(())
+    }
+
+    fn claude_refresh_enabled(&self) -> bool {
+        !self.usage.claude_refreshing && self.ctx.usage.claude.as_ref().is_some_and(|s| can_refresh(s, now_unix()))
+    }
+
     pub fn usage_panel_list(&self, kind: PanelKind, scale: f32) -> DisplayList {
-        let tokens = &self.ctx.theme.tokens;
+        let (tokens, text) = (&self.ctx.theme.tokens, &self.ctx.text);
         let (now, offset) = (now_unix(), utc_offset_seconds());
+        let hovered = self.usage.refresh_hover;
         if kind == PanelKind::Claude {
+            let refresh = Some(RefreshButton { enabled: self.claude_refresh_enabled(), hovered });
             return match &self.ctx.usage.claude {
-                None => usage_panel("Claude", &[], Some("Carregando…"), "", scale, tokens),
-                Some((at, Err(e))) => usage_panel("Claude", &[], Some(&claude_message(*e)), &updated_ago(*at), scale, tokens),
-                Some((at, Ok(u))) => {
-                    let mut rows = Vec::new();
-                    if let Some(l) = &u.five_hour {
-                        rows.push(claude_row("5 horas".into(), l, 300, now, offset));
-                    }
-                    if let Some(l) = &u.seven_day {
-                        rows.push(claude_row("7 dias".into(), l, 10080, now, offset));
-                    }
-                    for (name, l) in &u.extra {
-                        rows.push(claude_row(format!("{name} (7 dias)"), l, 10080, now, offset));
-                    }
-                    usage_panel("Claude", &rows, None, &updated_ago(*at), scale, tokens)
-                }
+                None => usage_panel(&[block("Claude".into(), String::new(), Vec::new(), Some("Carregando…".into()))], "", refresh, scale, tokens, text),
+                Some(s) => usage_panel(&claude_blocks(s, now, offset), &claude_footer(s, now, offset, self.usage.claude_refreshing), refresh, scale, tokens, text),
             };
         }
-        match &self.ctx.usage.codex {
-            Some((_, u)) => {
-                let title = u.plan.as_deref().map_or("Codex".to_string(), |p| format!("Codex · {}", capitalized(p)));
-                let rows: Vec<UsageRow> = [u.primary, u.secondary].iter().flatten().map(|w| codex_row(w, now, offset)).collect();
-                let footer = u.event_at.as_deref().and_then(parse_iso_utc).map(|t| format!("Último uso do Codex: {}", format_short(t, offset))).unwrap_or_default();
-                usage_panel(&title, &rows, None, &footer, scale, tokens)
-            }
-            None => usage_panel("Codex", &[], Some("Nenhum uso do Codex encontrado"), "", scale, tokens),
-        }
+        let blocks = codex_blocks(self.ctx.usage.codex.as_ref().unwrap_or(&CodexSnapshot::default()), now, offset);
+        usage_panel(&blocks, "", Some(RefreshButton { enabled: !self.usage.codex_refreshing, hovered }), scale, tokens, text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::SystemTime;
+    use zefiro_integration_usage::claude::{ClaudeEntry, ClaudeSnapshot, ClaudeUsage};
+    use zefiro_integration_usage::codex::{CodexEntry, CodexSnapshot, CodexUsage};
+    use zefiro_integration_usage::origins::Account;
+
+    const NOW: i64 = 1_792_000_000;
+
+    fn claude(origins: Vec<OriginKind>, result: std::result::Result<ClaudeUsage, UsageError>, email: Option<&str>, stopped: bool) -> Account<ClaudeEntry> {
+        let data = ClaudeEntry { email: email.map(String::from), plan: Some("Pro".into()), result: Some(result), ..Default::default() };
+        Account { key: format!("{origins:?}"), origins, stopped, data }
+    }
+
+    fn usage(five: f32, seven: f32) -> ClaudeUsage {
+        ClaudeUsage { five_hour: Some(Limit { percent: five, resets_at: Some(NOW + 3600) }), seven_day: Some(Limit { percent: seven, resets_at: Some(NOW + 86_400) }), extra: Vec::new() }
+    }
+
+    fn claude_snapshot(accounts: Vec<Account<ClaudeEntry>>, wsl_stopped: bool) -> ClaudeSnapshot {
+        ClaudeSnapshot { accounts, wsl_stopped, at: None }
+    }
+
+    fn codex(origins: Vec<OriginKind>, stopped: bool) -> Account<CodexEntry> {
+        let window = Window { used_percent: 10.0, window_minutes: 300, resets_at: NOW + 60 };
+        let u = CodexUsage { primary: Some(window), secondary: None, plan: Some("plus".into()), event_at: Some("2026-10-21T10:00:00Z".into()) };
+        Account { key: format!("{origins:?}"), origins, stopped, data: CodexEntry { modified: SystemTime::UNIX_EPOCH, usage: u } }
+    }
+
+    fn wsl() -> OriginKind {
+        OriginKind::Wsl("Ubuntu-24.04".into())
+    }
+
+    #[test]
+    fn claude_single_account_block() {
+        let s = claude_snapshot(vec![claude(vec![OriginKind::Windows], Ok(usage(9.0, 18.0)), Some("a@b.c"), false)], false);
+        let blocks = claude_blocks(&s, NOW, 0);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].title, "Claude · Pro");
+        assert_eq!(blocks[0].subtitle, "a@b.c · Windows");
+        assert_eq!(blocks[0].rows.len(), 2);
+        assert_eq!(blocks[0].message, None);
+    }
+
+    #[test]
+    fn claude_expired_wsl_message() {
+        let s = claude_snapshot(vec![claude(vec![wsl()], Err(UsageError::Expired), None, false)], false);
+        let blocks = claude_blocks(&s, NOW, 0);
+        assert_eq!(blocks[0].message.as_deref(), Some("Login expirado no WSL.\nAbra o Claude Code no WSL para renovar."));
+        assert_eq!(blocks[0].subtitle, "WSL");
+    }
+
+    #[test]
+    fn claude_no_accounts_with_wsl_stopped() {
+        let stopped = claude_blocks(&claude_snapshot(Vec::new(), true), NOW, 0);
+        assert_eq!(stopped[0].title, "Claude");
+        assert_eq!(stopped[0].message.as_deref(), Some("WSL desligado.\nAbra o WSL para ver o uso de lá."));
+        let none = claude_blocks(&claude_snapshot(Vec::new(), false), NOW, 0);
+        assert_eq!(none[0].message.as_deref(), Some("Faça login no Claude Code"));
+    }
+
+    #[test]
+    fn codex_two_accounts_titles() {
+        let s = CodexSnapshot { accounts: vec![codex(vec![OriginKind::Windows], false), codex(vec![wsl()], false)], wsl_stopped: false };
+        let titles: Vec<String> = codex_blocks(&s, NOW, 0).into_iter().map(|b| b.title).collect();
+        assert_eq!(titles, ["Codex · Plus · Windows", "Codex · Plus · WSL"]);
+        let one = CodexSnapshot { accounts: vec![codex(vec![OriginKind::Windows, wsl()], false)], wsl_stopped: false };
+        assert_eq!(codex_blocks(&one, NOW, 0)[0].title, "Codex · Plus");
+    }
+
+    #[test]
+    fn codex_no_accounts_messages() {
+        let stopped = codex_blocks(&CodexSnapshot { accounts: Vec::new(), wsl_stopped: true }, NOW, 0);
+        assert_eq!(stopped[0].message.as_deref(), Some("WSL desligado.\nAbra o WSL para ver o uso de lá."));
+        let none = codex_blocks(&CodexSnapshot::default(), NOW, 0);
+        assert_eq!(none[0].message.as_deref(), Some("Nenhum uso do Codex encontrado"));
+    }
+
+    #[test]
+    fn stopped_account_without_good_value_shows_its_error() {
+        // O caso do usuário: token do WSL vencido e a distro para; nunca houve valor bom.
+        let s = claude_snapshot(vec![claude(vec![wsl()], Err(UsageError::Expired), Some("a@b.c"), true)], true);
+        let b = &claude_blocks(&s, NOW, 0)[0];
+        assert_eq!(b.message.as_deref(), Some("Login expirado no WSL.
+Abra o Claude Code no WSL para renovar."));
+        assert_eq!(b.subtitle, "a@b.c · WSL · WSL desligado");
+    }
+
+    fn limited(last_ok: Option<ClaudeUsage>) -> Account<ClaudeEntry> {
+        let mut a = claude(vec![OriginKind::Windows], Err(UsageError::Http(429)), Some("a@b.c"), false);
+        a.data.last_ok = last_ok;
+        a.data.retry_at = Some(NOW + 600);
+        a
+    }
+
+    #[test]
+    fn rate_limited_account_keeps_last_values() {
+        let b = &claude_blocks(&claude_snapshot(vec![limited(Some(usage(9.0, 18.0)))], false), NOW, 0)[0];
+        assert_eq!(b.message, None);
+        assert_eq!(b.rows.len(), 2);
+    }
+
+    #[test]
+    fn rate_limited_without_values_says_when() {
+        let b = &claude_blocks(&claude_snapshot(vec![limited(None)], false), NOW, 0)[0];
+        assert_eq!(b.message.as_deref(), Some(format!("Muitas consultas.\nTento de novo às {}.", format_clock(NOW + 600, 0)).as_str()));
+    }
+
+    #[test]
+    fn claude_footer_rules() {
+        let at = Some(std::time::Instant::now());
+        let ok = ClaudeSnapshot { at, ..claude_snapshot(vec![claude(vec![OriginKind::Windows], Ok(usage(9.0, 18.0)), None, false)], false) };
+        assert_eq!(claude_footer(&ok, NOW, 0, false), "Atualizado agora");
+        assert_eq!(claude_footer(&ok, NOW, 0, true), "Atualizando…");
+        let paused = ClaudeSnapshot { at, ..claude_snapshot(vec![limited(None)], false) };
+        assert_eq!(claude_footer(&paused, NOW, 0, false), format!("Muitas consultas. Tento de novo às {}.", format_clock(NOW + 600, 0)));
+        assert_eq!(claude_footer(&claude_snapshot(Vec::new(), false), NOW, 0, false), "");
+    }
+
+    #[test]
+    fn codex_single_account_shows_its_origins() {
+        let one = CodexSnapshot { accounts: vec![codex(vec![OriginKind::Windows, wsl()], false)], wsl_stopped: false };
+        assert!(codex_blocks(&one, NOW, 0)[0].subtitle.ends_with(" · Windows · WSL"), "{}", codex_blocks(&one, NOW, 0)[0].subtitle);
+    }
+
+    #[test]
+    fn stopped_suffix() {
+        let c = claude_snapshot(vec![claude(vec![wsl()], Ok(usage(9.0, 18.0)), Some("a@b.c"), true)], true);
+        assert_eq!(claude_blocks(&c, NOW, 0)[0].subtitle, "a@b.c · WSL · WSL desligado");
+        let x = CodexSnapshot { accounts: vec![codex(vec![wsl()], true)], wsl_stopped: true };
+        assert!(codex_blocks(&x, NOW, 0)[0].subtitle.ends_with(" · WSL desligado"));
     }
 }

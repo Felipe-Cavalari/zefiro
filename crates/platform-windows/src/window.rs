@@ -18,6 +18,10 @@ pub const WM_USER_BASE: u32 = WM_APP + 0x100;
 const WM_APPBAR: u32 = WM_APP + 1;
 /// Cliques no ícone da bandeja (`tray`); `lParam` é a mensagem de mouse.
 pub const WM_TRAY: u32 = WM_APP + 3;
+/// Outro app ganhou o foco (`ForegroundHook`).
+const WM_FOREGROUND: u32 = WM_APP + 4;
+/// O cursor entrou ou saiu do topo ou da faixa de uma barra que se oculta (`bar_context`).
+const WM_AUTOHIDE: u32 = WM_APP + 5;
 /// Em `Win32::UI::Controls` na crate windows; definida aqui para não puxar a feature inteira.
 const WM_MOUSELEAVE: u32 = 0x02A3;
 
@@ -56,6 +60,10 @@ pub enum WinEvent {
     /// Ícone da bandeja: `mouse` é WM_LBUTTONUP, WM_RBUTTONUP etc.
     Tray { mouse: u32 },
     TaskbarCreated,
+    /// Uma janela de outro processo veio para o primeiro plano (`ForegroundHook`).
+    ForegroundChanged,
+    /// O cursor mudou em relação ao topo ou à faixa de uma barra que se oculta (`bar_context::autohide_cursor`).
+    AutoHideCursor,
     SettingChanged,
     User { code: u32 },
     /// Pedido de fechar a janela (Alt+F4, `taskkill` sem /f): o app decide o que fechar.
@@ -214,6 +222,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         WM_CLOSE => push(WinEvent::Close { hwnd: h }),
         m if m == WM_APPBAR => push(WinEvent::AppBar { hwnd: h, notification: wp.0 as u32, param: lp.0 }),
         m if m == WM_TRAY => push(WinEvent::Tray { mouse: (lp.0 & 0xFFFF) as u32 }),
+        m if m == WM_FOREGROUND => push(WinEvent::ForegroundChanged),
+        m if m == WM_AUTOHIDE => push(WinEvent::AutoHideCursor),
         m if (WM_USER_BASE..WM_USER_BASE + 0x100).contains(&m) => push(WinEvent::User { code: m - WM_USER_BASE }),
         m if Some(&m) == TASKBAR_CREATED.get() => push(WinEvent::TaskbarCreated),
         m if Some(&m) == ISLAND_GEOMETRY.get() => push(WinEvent::IslandGeometryChanged),
@@ -302,6 +312,39 @@ pub fn post_user(code: u32) {
     }
 }
 
+/// Avisa a janela de mensagens a cada troca do primeiro plano. O aviso de tela cheia do Windows
+/// (`ABN_FULLSCREENAPP`) chega uma vez só: sem isto, a barra que voltou quando o foco saiu do jogo
+/// ficava por cima dele quando o jogo voltava ao foco.
+pub struct ForegroundHook(windows::Win32::UI::Accessibility::HWINEVENTHOOK);
+
+impl ForegroundHook {
+    pub fn install() -> Option<Self> {
+        use windows::Win32::UI::Accessibility::SetWinEventHook;
+        // SAFETY: gancho fora do processo; o callback roda nesta thread, que bombeia mensagens.
+        let hook = unsafe { SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, None, Some(on_foreground), 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS) };
+        (!hook.is_invalid()).then_some(Self(hook))
+    }
+}
+
+impl Drop for ForegroundHook {
+    fn drop(&mut self) {
+        // SAFETY: handle instalado por esta thread.
+        let _ = unsafe { windows::Win32::UI::Accessibility::UnhookWinEvent(self.0) };
+    }
+}
+
+unsafe extern "system" fn on_foreground(_: windows::Win32::UI::Accessibility::HWINEVENTHOOK, _: u32, _: HWND, _: i32, _: i32, _: u32, _: u32) {
+    // Só posta: o laço trata depois do GetMessage, com os outros eventos.
+    // SAFETY: PostMessage sem ponteiros para a janela de mensagens, que vive até o fim do app.
+    let _ = unsafe { PostMessageW(Some(message_window()), WM_FOREGROUND, WPARAM(0), LPARAM(0)) };
+}
+
+/// Acorda o laço com `WinEvent::AutoHideCursor` (o hook de mouse roda dentro do `GetMessage`).
+pub(crate) fn post_autohide() {
+    // SAFETY: PostMessage sem ponteiros para a janela de mensagens, que vive até o fim do app.
+    let _ = unsafe { PostMessageW(Some(message_window()), WM_AUTOHIDE, WPARAM(0), LPARAM(0)) };
+}
+
 /// A janela de mensagens (temporizadores, avisos do sistema).
 pub fn message_window() -> HWND {
     HWND(MESSAGE_HWND.load(Ordering::SeqCst) as *mut _)
@@ -326,7 +369,14 @@ pub fn show(hwnd: HWND) {
     let flags = SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW;
     for h in std::iter::once(hwnd).chain(input_window(hwnd)) {
         // SAFETY: hwnd válido.
-        let _ = unsafe { SetWindowPos(h, Some(HWND_TOPMOST), 0, 0, 0, 0, flags) };
+        unsafe {
+            // Minimizada por outro programa (vira um retângulo de 160×28 no canto): SWP_SHOWWINDOW
+            // não restaura, e a barra ficava presa lá.
+            if IsIconic(h).as_bool() {
+                let _ = ShowWindow(h, SW_SHOWNOACTIVATE);
+            }
+            let _ = SetWindowPos(h, Some(HWND_TOPMOST), 0, 0, 0, 0, flags);
+        }
     }
 }
 
@@ -340,6 +390,7 @@ pub fn hide(hwnd: HWND) {
 /// Destrói a janela e a de entrada dela (barras e painéis recriados quando os monitores mudam).
 pub fn destroy(hwnd: HWND) {
     crate::bar_context::remove_zone(hwnd);
+    crate::bar_context::unwatch_autohide(hwnd);
     if has_capture(hwnd) { release_capture(); }
     let h = hwnd.0 as isize;
     if let Some(input) = INPUTS.with(|m| m.borrow_mut().remove(&h)) {
@@ -489,6 +540,28 @@ mod tests {
             }
         }
         assert!(seen);
+    }
+
+    #[test]
+    fn show_brings_back_a_bar_minimized_by_another_program() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        register_classes().unwrap();
+        create(WindowKind::Message, Rect::default()).unwrap();
+        let hwnd = create(WindowKind::Bar, Rect::new(-4000.0, -4000.0, 200.0, 50.0)).unwrap();
+        let input = input_window(hwnd).unwrap();
+        // SAFETY: janelas recém-criadas por este teste.
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_SHOWMINNOACTIVE);
+            let _ = ShowWindow(input, SW_SHOWMINNOACTIVE);
+            assert!(IsIconic(hwnd).as_bool());
+        }
+        show(hwnd);
+        // SAFETY: só consulta o estado.
+        unsafe {
+            assert!(!IsIconic(hwnd).as_bool() && !IsIconic(input).as_bool(), "restaurada, não um retângulo no canto");
+            assert!(IsWindowVisible(hwnd).as_bool());
+        }
+        destroy(hwnd);
     }
 
     #[test]

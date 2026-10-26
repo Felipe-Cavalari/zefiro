@@ -11,6 +11,8 @@ theme = "obsidian"
 [bar]
 height = "completa"   # completa | compacta
 format = "faixa"      # faixa | pilulas | ilhas | fluent | vidro
+# autohide = true     # a barra só aparece com o mouse no topo da tela (Editar barra)
+# display = "principal" # todos | principal: só o monitor principal tem barra (Editar barra)
 
 [bar.sections]
 start  = ["zefiro"]
@@ -28,6 +30,19 @@ seconds = false
 
 [update]
 check = true          # procura versão nova no GitHub Releases (1 vez por dia); instalar é pelo menu do Z
+
+[chat]
+agent = "claude"      # claude | codex: com quem o chip "chat" conversa (o painel troca e grava aqui)
+
+[chat.claude]
+origin = "auto"       # auto | windows | wsl | nome da distro
+prefer = "windows"    # windows | wsl: o que o automático tenta primeiro
+model  = ""           # vazio = o padrão do Claude Code; ou opus, sonnet, haiku
+
+[chat.codex]
+origin = "auto"
+prefer = "windows"
+model  = ""           # vazio = o padrão da versão instalada do Codex
 "#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -70,6 +85,43 @@ pub struct Config {
     pub clock: ClockConfig,
     pub update: UpdateConfig,
     pub terminal: TerminalConfig,
+    pub chat: ChatConfig,
+}
+
+/// Chat do chip `chat` (ADR-0020): o agente (`claude` ou `codex`) e, para cada um, a origem e o
+/// modelo. Escrito pelo próprio painel.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct ChatConfig { pub agent: String, pub claude: ChatAgentConfig, pub codex: ChatAgentConfig }
+
+/// `origin`: `auto`, `windows`, `wsl` (a distro padrão) ou o nome de uma distro. `prefer`: o que o
+/// automático tenta primeiro, `windows` (padrão) ou `wsl` (uma distro rodando que tenha o
+/// executável). `model`: vazio = o padrão do agente.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct ChatAgentConfig { pub origin: String, pub prefer: String, pub model: String }
+
+impl Default for ChatConfig {
+    fn default() -> Self {
+        ChatConfig { agent: "claude".into(), claude: ChatAgentConfig::default(), codex: ChatAgentConfig::default() }
+    }
+}
+
+impl Default for ChatAgentConfig {
+    fn default() -> Self {
+        ChatAgentConfig { origin: "auto".into(), prefer: "windows".into(), model: String::new() }
+    }
+}
+
+impl ChatConfig {
+    /// A configuração do agente (`codex` ou o Claude).
+    pub fn of(&self, codex: bool) -> &ChatAgentConfig {
+        if codex { &self.codex } else { &self.claude }
+    }
+
+    pub fn of_mut(&mut self, codex: bool) -> &mut ChatAgentConfig {
+        if codex { &mut self.codex } else { &mut self.claude }
+    }
 }
 
 /// Perfis do Windows Terminal no painel do chip `terminal`, por `guid`: os visíveis nesta ordem (os
@@ -97,11 +149,30 @@ pub struct BarConfig {
     pub sections: Sections,
     pub layout_mode: LayoutMode,
     pub monitors: BTreeMap<String, MonitorConfig>,
+    /// A barra só aparece com o mouse no topo do monitor (Editar barra). Ver `Config::autohide`.
+    pub autohide: bool,
+    /// Em que monitores há barra (Editar barra). Não é `monitors`: esse nome são os layouts próprios.
+    pub display: BarDisplay,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LayoutMode { #[default] Shared, PerMonitor }
+
+/// `todos` (padrão) ou `principal`: só o monitor principal do Windows tem barra. Os layouts dos
+/// outros continuam no arquivo e voltam ao trocar para `todos`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BarDisplay { #[default] Todos, Principal }
+
+impl BarDisplay {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BarDisplay::Todos => "todos",
+            BarDisplay::Principal => "principal",
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct MonitorConfig {
@@ -153,6 +224,18 @@ impl BarConfig {
         self.sections.ids().any(|i| i == id) || self.monitors.values().any(|m| m.sections.ids().any(|i| i == id))
     }
 
+    /// Este monitor tem barra? (`display = "principal"` deixa só o principal.)
+    pub fn shows_on(&self, primary: bool) -> bool {
+        primary || self.display == BarDisplay::Todos
+    }
+
+    /// Índices dos monitores (na ordem de `primary`, um por monitor) que ganham barra. Sem nenhum
+    /// marcado como principal, fica o primeiro: o laço sempre tem ao menos uma barra.
+    pub fn monitors_with_bar(&self, primary: &[bool]) -> Vec<usize> {
+        let kept: Vec<usize> = (0..primary.len()).filter(|&i| self.shows_on(primary[i])).collect();
+        if kept.is_empty() && !primary.is_empty() { vec![0] } else { kept }
+    }
+
     pub fn sections_for(&self, monitor_id: Option<&str>) -> &Sections {
         if self.layout_mode == LayoutMode::PerMonitor
             && let Some(entry) = monitor_id.and_then(|id| self.monitors.get(id)) {
@@ -163,9 +246,10 @@ impl BarConfig {
 }
 
 impl Config {
-    /// Só a seção `[terminal]` mudou? O painel do Terminal grava nela e não deve se fechar.
-    pub fn same_except_terminal(&self, other: &Config) -> bool {
-        Config { terminal: other.terminal.clone(), ..self.clone() } == *other
+    /// Só `[terminal]` ou `[chat]` mudaram? Os painéis do Terminal e do chat gravam nelas e não devem
+    /// se fechar.
+    pub fn same_except_panels(&self, other: &Config) -> bool {
+        Config { terminal: other.terminal.clone(), chat: other.chat.clone(), ..self.clone() } == *other
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
@@ -196,6 +280,12 @@ impl Config {
     pub fn shows_embedded_island(&self) -> bool {
         self.island.embedded() && self.bar.uses(ISLAND_CHIP)
     }
+
+    /// Ocultar automaticamente vale agora? Com a ilha externa, não: ela é outro processo e não
+    /// acompanharia a barra.
+    pub fn autohide(&self) -> bool {
+        self.bar.autohide && !self.island.external()
+    }
 }
 
 impl IslandConfig {
@@ -214,13 +304,13 @@ pub struct ClockConfig { pub format: String, pub seconds: bool }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { theme: "obsidian".into(), acrylic: None, bar: BarConfig::default(), island: IslandConfig::default(), clock: ClockConfig::default(), update: UpdateConfig::default(), terminal: TerminalConfig::default() }
+        Config { theme: "obsidian".into(), acrylic: None, bar: BarConfig::default(), island: IslandConfig::default(), clock: ClockConfig::default(), update: UpdateConfig::default(), terminal: TerminalConfig::default(), chat: ChatConfig::default() }
     }
 }
 
 impl Default for BarConfig {
     fn default() -> Self {
-        BarConfig { height: BarHeight::Completa, format: BarFormat::Faixa, sections: Sections::default(), layout_mode: LayoutMode::Shared, monitors: BTreeMap::new() }
+        BarConfig { height: BarHeight::Completa, format: BarFormat::Faixa, sections: Sections::default(), layout_mode: LayoutMode::Shared, monitors: BTreeMap::new(), autohide: false, display: BarDisplay::Todos }
     }
 }
 

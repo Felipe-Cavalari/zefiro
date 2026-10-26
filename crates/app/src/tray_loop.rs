@@ -87,6 +87,8 @@ impl Loop {
         match popup_menu::show(self.bars[primary].hwnd(), &entries)? {
             Some(SHOW) => {
                 self.reveal_bars();
+                // Com ocultar automaticamente, a do principal desce e sobe pela regra normal.
+                self.autohide_reveal(primary)?;
             }
             Some(EDIT) => self.start_editor(primary)?,
             Some(ISLAND) => window::post_user(USER_ISLAND),

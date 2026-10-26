@@ -1,7 +1,10 @@
 //! Quem abre e quem fecha: um painel por vez.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PanelKind { Menu, Calendar, Overflow, Island, Audio, Mic, Brightness, Claude, Codex, VsCode, Terminal, Power, Player, Weather, Hardware }
+pub enum PanelKind { Menu, Settings, Calendar, Overflow, Island, Audio, Mic, Brightness, Claude, Codex, VsCode, Terminal, Chat, Power, Player, Weather, Hardware }
+
+/// Configurações não são um chip: o menu do Z abre o painel como se fosse, preso ao chip `zefiro`.
+pub const SETTINGS_CHIP: &str = "__settings";
 
 impl PanelKind {
     /// Painel com abas da ilha: a própria ilha ou um dos chips que levam uma aba dela.
@@ -23,6 +26,7 @@ pub fn panel_kind_for(chip: &str) -> Option<PanelKind> {
     if chip.starts_with("__more_") { return Some(PanelKind::Overflow); }
     match chip {
         "zefiro" => Some(PanelKind::Menu),
+        SETTINGS_CHIP => Some(PanelKind::Settings),
         "clock" => Some(PanelKind::Calendar),
         "island" => Some(PanelKind::Island),
         "audio" => Some(PanelKind::Audio),
@@ -32,6 +36,7 @@ pub fn panel_kind_for(chip: &str) -> Option<PanelKind> {
         "codex" => Some(PanelKind::Codex),
         "vscode" => Some(PanelKind::VsCode),
         "terminal" => Some(PanelKind::Terminal),
+        "chat" => Some(PanelKind::Chat),
         "power" => Some(PanelKind::Power),
         "player" => Some(PanelKind::Player),
         "weather" => Some(PanelKind::Weather),
@@ -96,6 +101,7 @@ mod tests {
         assert_eq!(panel_kind_for("codex"), Some(PanelKind::Codex));
         assert_eq!(panel_kind_for("vscode"), Some(PanelKind::VsCode));
         assert_eq!(panel_kind_for("terminal"), Some(PanelKind::Terminal));
+        assert_eq!(panel_kind_for("chat"), Some(PanelKind::Chat));
         assert_eq!(panel_kind_for("power"), Some(PanelKind::Power));
         for id in ["notifications", "dnd"] {
             assert_eq!(panel_kind_for(id), None);
@@ -114,6 +120,17 @@ mod tests {
             assert!(kind.tabbed(), "{kind:?}");
         }
         assert!(!PanelKind::Calendar.tabbed());
+    }
+
+    #[test]
+    fn settings_open_from_the_menu_in_its_place() {
+        assert_eq!(panel_kind_for(SETTINGS_CHIP), Some(PanelKind::Settings));
+        let mut c = PanelController::new();
+        c.handle(click(1, "zefiro"));
+        assert_eq!(
+            c.handle(click(1, SETTINGS_CHIP)),
+            vec![PanelEffect::Close { monitor: 1 }, PanelEffect::Open(OpenPanel { monitor: 1, chip: SETTINGS_CHIP.into(), kind: PanelKind::Settings })]
+        );
     }
 
     #[test]

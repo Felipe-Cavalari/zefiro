@@ -4,13 +4,20 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 use windows::Foundation::Uri;
 use windows::Storage::Streams::DataReader;
-use windows::Web::Http::{HttpClient, HttpMethod, HttpRequestMessage};
+use windows::Web::Http::Filters::{HttpBaseProtocolFilter, HttpCacheReadBehavior, HttpCacheWriteBehavior};
+use windows::Web::Http::{HttpClient, HttpMethod, HttpRequestMessage, HttpResponseMessageSource};
 use windows::core::{HSTRING, Result};
 
 pub const USER_AGENT: &str = "Zefiro/0.1 (barra de desktop; https://github.com/Felipe-Cavalari/zefiro)";
 
+/// Sem o cache do Windows: com o filtro padrão, a 2ª consulta em diante devolvia a 1ª resposta do
+/// processo (o chip do Claude parava até reiniciar a barra; medido em 2026-10-21).
 fn client() -> Result<HttpClient> {
-    let client = HttpClient::new()?;
+    let filter = HttpBaseProtocolFilter::new()?;
+    let cache = filter.CacheControl()?;
+    cache.SetReadBehavior(HttpCacheReadBehavior::NoCache)?;
+    cache.SetWriteBehavior(HttpCacheWriteBehavior::NoCache)?;
+    let client = HttpClient::Create(&filter)?;
     let _ = client.DefaultRequestHeaders()?.UserAgent()?.TryParseAdd(&HSTRING::from(USER_AGENT));
     Ok(client)
 }
@@ -19,6 +26,13 @@ fn client() -> Result<HttpClient> {
 pub fn get_string(url: &str) -> Result<String> {
     let uri = Uri::CreateUri(&HSTRING::from(url))?;
     Ok(client()?.GetStringAsync(&uri)?.get()?.to_string())
+}
+
+/// Status e se a resposta veio do cache do `HttpClient` (sonda `http_cache_probe`).
+pub fn get_source(url: &str) -> Result<(u16, bool)> {
+    let uri = Uri::CreateUri(&HSTRING::from(url))?;
+    let response = client()?.GetAsync(&uri)?.get()?;
+    Ok((response.StatusCode()?.0 as u16, response.Source()? == HttpResponseMessageSource::Cache))
 }
 
 /// Status e corpo, para distinguir "não existe" (404) de falha de rede (erro).
@@ -33,6 +47,11 @@ pub fn get(url: &str) -> Result<(u16, String)> {
 /// Como `get`, com cabeçalhos próprios (ex.: `Authorization`) e tempo limite: passado `timeout`, a
 /// requisição é cancelada e volta erro.
 pub fn get_with(url: &str, headers: &[(&str, &str)], timeout: Duration) -> Result<(u16, String)> {
+    get_with_retry_after(url, headers, timeout).map(|(status, body, _)| (status, body))
+}
+
+/// Como `get_with`, e o `Retry-After` em segundos, se veio (num 429, por exemplo).
+pub fn get_with_retry_after(url: &str, headers: &[(&str, &str)], timeout: Duration) -> Result<(u16, String, Option<u64>)> {
     let uri = Uri::CreateUri(&HSTRING::from(url))?;
     let request = HttpRequestMessage::Create(&HttpMethod::Get()?, &uri)?;
     let request_headers = request.Headers()?;
@@ -52,8 +71,9 @@ pub fn get_with(url: &str, headers: &[(&str, &str)], timeout: Duration) -> Resul
     let _ = watchdog.join();
     let response = result?;
     let status = response.StatusCode()?.0 as u16;
+    let retry_after = response.Headers()?.RetryAfter().ok().and_then(|r| r.Delta().ok()).and_then(|d| d.Value().ok()).map(|span| (span.Duration / 10_000_000).max(0) as u64);
     let body = response.Content()?.ReadAsStringAsync()?.get()?.to_string();
-    Ok((status, body))
+    Ok((status, body, retry_after))
 }
 
 /// Status e bytes do corpo (o instalador de uma atualização), com tempo limite.

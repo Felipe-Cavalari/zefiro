@@ -15,3 +15,4 @@ zefiro-resources.workspace = true
 zefiro-ui.workspace = true
 zefiro-integration-clock.workspace = true
 zefiro-integration-usage.workspace = true
+zefiro-integration-chat.workspace = true

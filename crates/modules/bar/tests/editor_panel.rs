@@ -73,6 +73,54 @@ fn shelf_lists_items_off_the_bar_and_accepts_removal() {
 }
 
 #[test]
+fn clean_bar_switches_sit_above_the_buttons_on_both_pages() {
+    let mut s = session();
+    let two = ["Principal".to_string(), "Lateral".to_string()];
+    let one = ["Principal".to_string()];
+    for page in [zefiro_bar::editor_panel::EditorPage::Items, zefiro_bar::editor_panel::EditorPage::Options] {
+        let panel = EditorPanel { page, ..Default::default() };
+        let layout = panel.layout(&cx(&s, &two, false), &FixedWidthMeasurer);
+        let find = |a: EditorAction| layout.buttons.iter().find(|b| b.action == a).unwrap_or_else(|| panic!("{a:?} em {page:?}")).clone();
+        let (autohide, primary, save) = (find(EditorAction::ToggleAutohide), find(EditorAction::TogglePrimaryOnly), find(EditorAction::Save));
+        assert!(autohide.enabled && primary.enabled);
+        assert!(autohide.rect.bottom() <= save.rect.y && primary.rect.bottom() <= save.rect.y, "acima do Cancelar/Concluir");
+    }
+    // Um monitor só: "Só no monitor principal" não aparece.
+    let layout = EditorPanel::default().layout(&cx(&s, &one, false), &FixedWidthMeasurer);
+    assert!(!layout.buttons.iter().any(|b| b.action == EditorAction::TogglePrimaryOnly));
+    // Só no principal ligado: a escolha de monitor e de layout fica apagada.
+    s.toggle_primary_only();
+    let layout = EditorPanel::default().layout(&cx(&s, &two, false), &FixedWidthMeasurer);
+    for b in layout.buttons.iter().filter(|b| matches!(b.action, EditorAction::Monitor(_) | EditorAction::ToggleMode)) {
+        assert!(!b.enabled, "{:?} fica apagado", b.action);
+    }
+    // Ligado, só sobra a barra do principal: a chave continua, senão não dá para desligar.
+    let layout = EditorPanel::default().layout(&cx(&s, &one, false), &FixedWidthMeasurer);
+    let primary = layout.buttons.iter().find(|b| b.action == EditorAction::TogglePrimaryOnly).expect("a chave continua com uma barra só");
+    assert!(primary.enabled && primary.kind == zefiro_bar::editor_panel::ButtonKind::Switch { on: true });
+    // Ilha externa: ocultar automaticamente fica apagado.
+    s.draft.island.engine = zefiro_core::config::IslandEngine::Externa;
+    let layout = EditorPanel::default().layout(&cx(&s, &two, false), &FixedWidthMeasurer);
+    assert!(!layout.buttons.iter().find(|b| b.action == EditorAction::ToggleAutohide).unwrap().enabled);
+}
+
+#[test]
+fn back_row_on_top_returns_to_the_menu_on_both_pages() {
+    let s = session();
+    let names = ["Principal".to_string(), "Lateral".to_string()];
+    let tokens = zefiro_resources::tokens::derive_tokens(&zefiro_resources::theme::parse_theme("obsidian", "o", zefiro_resources::theme::BUILTIN[0].1).unwrap(), zefiro_platform::color::Rgba::rgb(0, 120, 215), None);
+    for page in [zefiro_bar::editor_panel::EditorPage::Items, zefiro_bar::editor_panel::EditorPage::Options] {
+        let panel = EditorPanel { page, ..Default::default() };
+        let layout = panel.layout(&cx(&s, &names, false), &FixedWidthMeasurer);
+        let back = layout.buttons.iter().find(|b| b.action == EditorAction::BackToMenu).unwrap_or_else(|| panic!("‹ Editar barra em {page:?}"));
+        assert!(back.enabled && layout.buttons.iter().filter(|b| b.action != EditorAction::BackToMenu).all(|b| b.rect.y >= back.rect.bottom()), "no topo, como o ‹ Tema");
+        assert_eq!(EditorPanel::hit(&layout, Point { x: back.rect.center_x(), y: back.rect.y + back.rect.h / 2.0 }), Some(Target::Button(EditorAction::BackToMenu)));
+        let texts: Vec<String> = panel.paint(&layout, &s, &tokens).ops.into_iter().filter_map(|o| if let zefiro_ui::paint::DrawOp::Text { text, .. } = o { Some(text) } else { None }).collect();
+        assert!(texts.contains(&"‹ Editar barra".to_string()) && !texts.contains(&"Editar barra".to_string()), "{texts:?}");
+    }
+}
+
+#[test]
 fn options_button_appears_for_the_selected_clock_and_tab_cycles_everything() {
     let s = session();
     let names = ["Principal".to_string()];

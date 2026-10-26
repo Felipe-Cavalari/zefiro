@@ -3,8 +3,9 @@
 use windows::Win32::UI::WindowsAndMessaging::PostQuitMessage;
 use windows::core::Result;
 use zefiro_bar::calendar::{calendar_names, calendar_paint};
-use zefiro_bar::controller::{PanelController, PanelEffect, PanelInput, PanelKind};
+use zefiro_bar::controller::{PanelController, PanelEffect, PanelInput, PanelKind, SETTINGS_CHIP};
 use zefiro_bar::menu::{MenuAction, MenuModel, NavKey, ThemeSwatch};
+use zefiro_bar::settings::{SettingsAction, SettingsModel};
 use zefiro_core::config::set_value;
 use zefiro_integration_clock::format::ClockText;
 use zefiro_integration_clock::grid::{month_grid, ms_to_next_minute, shift_month};
@@ -64,6 +65,10 @@ pub const USER_POWER: u32 = 22;
 pub const USER_UPDATE: u32 = 23;
 /// A thread do Terminal terminou de ler os perfis.
 pub const USER_TERMINAL: u32 = 24;
+/// O processo do chat mandou sinais (texto chegando, fim do turno, erro).
+pub const USER_CHAT: u32 = 25;
+/// Uma imagem colada no chat foi convertida (ou miniaturas de imagens foram lidas).
+pub const USER_CHAT_IMAGE: u32 = 26;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
@@ -87,6 +92,10 @@ pub const TIMER_POWER: usize = 11;
 pub const TIMER_FULLSCREEN: usize = 12;
 /// HUD de debug: uma atualização por segundo, só com ele aberto.
 pub const TIMER_HUD: usize = 13;
+/// Chat sem uso: encerra o processo do `claude` (10 min).
+pub const TIMER_CHAT_IDLE: usize = 14;
+/// Ocultar automaticamente: fim da espera no topo (descer) ou fora da barra (subir).
+pub const TIMER_AUTOHIDE: usize = 16;
 const CYCLE_HALF_MS: u32 = 450;
 
 const VK_ESCAPE: u32 = 0x1B;
@@ -113,6 +122,7 @@ pub struct Loop {
     overflow_focus: usize,
     overflow_scroll: usize,
     menu: Option<MenuModel>,
+    settings: Option<SettingsModel>,
     pub(crate) shown_month: (i32, u32),
     pub(crate) island: crate::island_loop::IslandRuntime,
     pub(crate) debug: crate::debug_loop::DebugRuntime,
@@ -121,8 +131,10 @@ pub struct Loop {
     pub(crate) usage: crate::usage_loop::UsageRuntime,
     pub(crate) vscode: crate::vscode_loop::VsCodeRuntime,
     pub(crate) terminal: crate::terminal_loop::TerminalRuntime,
+    pub(crate) chat: crate::chat_loop::ChatRuntime,
     pub(crate) power: crate::power_loop::PowerRuntime,
     pub(crate) system: crate::system_loop::SystemRuntime,
+    pub(crate) autohide: crate::autohide_loop::AutoHideRuntime,
     /// Ciclos de medição: (total, feitos).
     cycles: Option<(u32, u32)>,
 }
@@ -144,7 +156,7 @@ impl Loop {
             panels.push(PanelView::create(&ctx, b.monitor())?);
         }
         let today = now_local().date;
-        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, shown_month: (today.year, today.month), island: Default::default(), debug: Default::default(), update: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), terminal: Default::default(), power: Default::default(), system: Default::default(), cycles: None })
+        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, settings: None, shown_month: (today.year, today.month), island: Default::default(), debug: Default::default(), update: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), terminal: Default::default(), chat: Default::default(), power: Default::default(), system: Default::default(), autohide: Default::default(), cycles: None })
     }
 
     pub(crate) fn bar_index(&self, hwnd: isize) -> Option<usize> { self.bars.iter().position(|b| b.hwnd().0 as isize == hwnd) }
@@ -153,9 +165,15 @@ impl Loop {
     fn panel_list(&mut self, kind: PanelKind, scale: f32) -> DisplayList {
         match kind {
             PanelKind::Menu => {
-                let m = self.menu.get_or_insert_with(|| MenuModel::new(self.ctx.config.bar.height, self.ctx.config.bar.format, &self.ctx.config.theme, swatches(&self.ctx)).with_autostart(zefiro_platform_windows::system::autostart_enabled()));
+                let m = self.menu.get_or_insert_with(|| MenuModel::new(self.ctx.config.bar.height, self.ctx.config.bar.format, &self.ctx.config.theme, swatches(&self.ctx)));
                 m.set_update(self.update.label.clone());
                 m.set_acrylic(self.ctx.theme.acrylic_wanted(), zefiro_platform_windows::system::transparency_enabled());
+                m.paint(scale, &self.ctx.theme.tokens)
+            }
+            PanelKind::Settings => {
+                let hud = self.hud_open();
+                let m = self.settings.get_or_insert_with(|| SettingsModel::new(zefiro_platform_windows::system::autostart_enabled(), hud, env!("CARGO_PKG_VERSION")));
+                m.hud = hud;
                 m.paint(scale, &self.ctx.theme.tokens)
             }
             PanelKind::Calendar => {
@@ -181,6 +199,7 @@ impl Loop {
             PanelKind::Claude | PanelKind::Codex => self.usage_panel_list(kind, scale),
             PanelKind::VsCode => self.vscode_panel_list(scale),
             PanelKind::Terminal => self.terminal_panel_list(scale),
+            PanelKind::Chat => self.chat_panel_list(scale),
             PanelKind::Power => self.power_panel_list(scale),
         }
     }
@@ -211,10 +230,12 @@ impl Loop {
                         }
                     }
                     self.menu = None;
+                    self.settings = None;
                     self.island_panel_closed();
                     self.devices_panel_closed();
                     self.power_panel_closed();
                     self.terminal_panel_closed();
+                    self.chat_panel_closed();
                 }
                 PanelEffect::Open(p) => {
                     if p.kind == PanelKind::Overflow {
@@ -227,6 +248,7 @@ impl Loop {
                     self.usage_prepare(p.kind);
                     self.vscode_prepare(p.kind);
                     self.terminal_prepare(p.kind);
+                    self.chat_prepare(p.kind)?;
                     self.power_prepare(p.kind);
                     if p.kind.tabbed() {
                         self.island_panel_opening();
@@ -303,6 +325,8 @@ impl Loop {
     }
 
     pub(crate) fn panel_anchor(&self, monitor: usize, id: &str) -> Rect {
+        // As Configurações abrem no lugar do menu do Z.
+        let id = if id == SETTINGS_CHIP { "zefiro" } else { id };
         self.bars[monitor].chip_rect(id).unwrap_or_else(|| {
             let bar = &self.bars[monitor];
             let rect = bar.monitor().rect;
@@ -368,15 +392,11 @@ impl Loop {
                 }
                 return self.redraw_open_panel();
             }
-            MenuAction::ToggleHud => return self.toggle_hud(),
             MenuAction::InstallUpdate => return self.install_update(),
-            MenuAction::ExportDiagnostics => {
-                self.close_open_panel()?;
-                return self.export_diagnostics();
-            }
-            MenuAction::RestartIsland => {
-                window::post_user(USER_ISLAND);
-                return Ok(());
+            MenuAction::OpenSettings => {
+                let monitor = self.controller.open().map_or(0, |p| p.monitor);
+                let fx = self.controller.handle(PanelInput::ChipClick { monitor, chip: SETTINGS_CHIP.into() });
+                return self.run_effects(fx);
             }
             MenuAction::ToggleAcrylic => {
                 // Sem "Efeitos de transparência" no Windows não há acrílico para ligar.
@@ -387,14 +407,6 @@ impl Loop {
                 self.ctx.config.acrylic = Some(on);
                 self.ctx.theme.acrylic = Some(on);
                 let _ = set_value(&path, &["acrylic"], on);
-            }
-            MenuAction::ToggleAutostart => {
-                crate::tray_loop::toggle_autostart();
-                // O menu continua aberto, com a chave na posição nova.
-                if let Some(m) = &mut self.menu {
-                    m.set_autostart(zefiro_platform_windows::system::autostart_enabled());
-                }
-                return self.redraw_open_panel();
             }
             MenuAction::Exit => {
                 // SAFETY: encerra o laço de mensagens desta thread.
@@ -414,6 +426,31 @@ impl Loop {
         }
         self.apply_bars(true)?;
         crate::island::sync(&self.ctx);
+        self.redraw_open_panel()
+    }
+
+    /// Item das Configurações: vale na hora; as chaves continuam no painel aberto, na posição nova.
+    fn settings_action(&mut self, a: SettingsAction) -> Result<()> {
+        match a {
+            // O menu do Z abre no lugar, como o "‹ Tema" volta da tela de temas.
+            SettingsAction::Back => {
+                let monitor = self.controller.open().map_or(0, |p| p.monitor);
+                let fx = self.controller.handle(PanelInput::ChipClick { monitor, chip: "zefiro".into() });
+                return self.run_effects(fx);
+            }
+            SettingsAction::ToggleAutostart => {
+                crate::tray_loop::toggle_autostart();
+                if let Some(m) = &mut self.settings {
+                    m.autostart = zefiro_platform_windows::system::autostart_enabled();
+                }
+            }
+            SettingsAction::ToggleHud => self.toggle_hud()?,
+            SettingsAction::RestartIsland => window::post_user(USER_ISLAND),
+            SettingsAction::ExportDiagnostics => {
+                self.close_open_panel()?;
+                return self.export_diagnostics();
+            }
+        }
         self.redraw_open_panel()
     }
 
@@ -483,12 +520,19 @@ impl Loop {
                     let (ox, oy) = self.panels[i].content_origin();
                     let scale = self.bars[i].scale();
                     let hit = self.menu.as_ref().and_then(|m| m.hit(Point { x: x - ox, y: y - oy }, scale));
-                    if self.controller.open().is_some_and(|o| o.kind.tabbed()) {
+                    let setting = self.settings.as_ref().and_then(|m| m.hit(Point { x: x - ox, y: y - oy }, scale));
+                    if let Some(a) = setting {
+                        self.settings_action(a)?;
+                    } else if self.controller.open().is_some_and(|o| o.kind.tabbed()) {
                         self.island_panel_click(Point { x: x - ox, y: y - oy })?;
                     } else if self.power_click(Point { x: x - ox, y: y - oy })? {
                         // Botão de energia (armar, confirmar ou agir).
+                    } else if self.chat_click(Point { x: x - ox, y: y - oy })? {
+                        // Chat: enviar, parar, conversa nova ou copiar.
                     } else if self.terminal_up(Point { x: x - ox, y: y - oy })? {
                         // Perfil do Windows Terminal aberto (ou clique fora das linhas).
+                    } else if self.usage_click(Point { x: x - ox, y: y - oy }, scale)? {
+                        // Botão de atualizar do painel do Claude.
                     } else if self.vscode_click(Point { x: x - ox, y: y - oy })? {
                         // Projeto do VS Code aberto (ou clique fora das linhas).
                     } else if self.devices_up(Point { x: x - ox, y: y - oy })? {
@@ -539,11 +583,18 @@ impl Loop {
                     let (ox, oy) = self.panels[i].content_origin();
                     self.devices_move(Point { x: x - ox, y: y - oy })?;
                     self.terminal_move(Point { x: x - ox, y: y - oy })?;
+                    self.chat_move(Point { x: x - ox, y: y - oy })?;
+                    self.vscode_move(Point { x: x - ox, y: y - oy })?;
                     // Menu do Z: o item sob o mouse ganha o destaque (só redesenha quando muda).
                     let scale = self.bars[i].scale();
-                    if self.effective_open_kind() == Some(PanelKind::Menu)
-                        && self.menu.as_mut().is_some_and(|m| m.hover(Point { x: x - ox, y: y - oy }, scale))
-                    {
+                    self.usage_move(Point { x: x - ox, y: y - oy }, scale)?;
+                    let p = Point { x: x - ox, y: y - oy };
+                    let lit = match self.effective_open_kind() {
+                        Some(PanelKind::Menu) => self.menu.as_mut().is_some_and(|m| m.hover(p, scale)),
+                        Some(PanelKind::Settings) => self.settings.as_mut().is_some_and(|m| m.hover(p, scale)),
+                        _ => false,
+                    };
+                    if lit {
                         self.redraw_open_panel()?;
                     }
                 }
@@ -562,6 +613,8 @@ impl Loop {
             WinEvent::MouseLeave { hwnd } => {
                 if self.panel_index(hwnd).is_some() {
                     self.terminal_leave()?;
+                    self.chat_leave()?;
+                    self.usage_leave()?;
                 }
                 if let Some(i) = self.bar_index(hwnd) {
                     self.bars[i].set_hover(&self.ctx, None)?;
@@ -584,12 +637,16 @@ impl Loop {
                 if self.panel_index(hwnd).is_none() {
                     return Ok(true);
                 }
-                if self.terminal_key(vk)? || self.vscode_key(vk)? {
+                if self.chat_key(vk)? || self.terminal_key(vk)? || self.vscode_key(vk)? {
                     return Ok(true);
                 }
                 // Esc na tela de temas volta ao menu; no menu, fecha.
                 if vk == VK_ESCAPE && self.effective_open_kind() == Some(PanelKind::Menu) && self.menu.as_ref().is_some_and(|m| m.page() == zefiro_bar::menu::MenuPage::Themes) {
                     return self.menu_action(MenuAction::BackToMenu).map(|_| true);
+                }
+                // Esc nas Configurações também volta ao menu.
+                if vk == VK_ESCAPE && self.effective_open_kind() == Some(PanelKind::Settings) {
+                    return self.settings_action(SettingsAction::Back).map(|_| true);
                 }
                 if vk == VK_ESCAPE {
                     let fx = self.controller.handle(PanelInput::Escape);
@@ -607,6 +664,15 @@ impl Loop {
                         if let (Some(k), Some(m)) = (key, self.menu.as_mut()) {
                             match m.key(k) {
                                 Some(a) => self.menu_action(a)?,
+                                None => self.redraw_open_panel()?,
+                            }
+                        }
+                    }
+                    Some(PanelKind::Settings) => {
+                        let key = match vk { VK_UP => Some(Some(false)), VK_DOWN => Some(Some(true)), VK_RETURN => Some(None), _ => None };
+                        if let (Some(k), Some(m)) = (key, self.settings.as_mut()) {
+                            match m.key(k) {
+                                Some(a) => self.settings_action(a)?,
                                 None => self.redraw_open_panel()?,
                             }
                         }
@@ -640,7 +706,7 @@ impl Loop {
                 if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind.tabbed()) {
                     return self.island_wheel(delta).map(|_| true);
                 }
-                if self.panel_index(hwnd).is_some() && (self.terminal_wheel(delta)? || self.vscode_wheel(delta)?) {
+                if self.panel_index(hwnd).is_some() && (self.chat_wheel(delta)? || self.terminal_wheel(delta)? || self.vscode_wheel(delta)?) {
                     return Ok(true);
                 }
                 if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind == PanelKind::Overflow) {
@@ -676,8 +742,15 @@ impl Loop {
             WinEvent::User { code: USER_CLAUDE } => self.usage_claude_changed()?,
             WinEvent::User { code: USER_VSCODE } => self.vscode_loaded()?,
             WinEvent::User { code: USER_TERMINAL } => self.terminal_loaded()?,
+            WinEvent::User { code: USER_CHAT } => self.chat_signals()?,
+            WinEvent::User { code: USER_CHAT_IMAGE } => self.chat_images()?,
+            WinEvent::Timer { id: TIMER_CHAT_IDLE } => self.chat_idle(),
             WinEvent::Tray { mouse } => self.tray_event(mouse)?,
-            WinEvent::Character { code, .. } => self.vscode_char(code)?,
+            WinEvent::Character { code, .. } => {
+                if !self.chat_char(code)? {
+                    self.vscode_char(code)?;
+                }
+            }
             WinEvent::User { code: USER_POWER } => self.power_user_loaded()?,
             WinEvent::Timer { id: TIMER_POWER } => self.power_timer()?,
             WinEvent::User { code: USER_PRIVACY } => self.island_privacy_changed()?,
@@ -715,10 +788,12 @@ impl Loop {
             WinEvent::User { code: USER_CONFIG_CHANGED } => {
                 let text = std::fs::read_to_string(&self.ctx.config_path).unwrap_or_default();
                 match zefiro_core::config::parse_config(&text) {
-                    // Só `[terminal]` mudou (o próprio painel gravou): atualiza sem fechar o painel.
-                    Ok(new) if new != self.ctx.config && new.same_except_terminal(&self.ctx.config) => {
+                    // Só `[terminal]` ou `[chat]` mudaram (o próprio painel gravou): atualiza sem
+                    // fechar o painel.
+                    Ok(new) if new != self.ctx.config && new.same_except_panels(&self.ctx.config) => {
                         self.ctx.config = new;
                         self.terminal_config_changed()?;
+                        self.chat_config_changed()?;
                     }
                     Ok(new) if new != self.ctx.config => {
                         let fx = self.controller.handle(PanelInput::ConfigChanged);
@@ -742,6 +817,7 @@ impl Loop {
                         crate::island::sync(&self.ctx);
                         self.refresh_services();
                         self.schedule_clock();
+                        self.clean_bar_sync()?;
                     }
                     Ok(_) => {}
                     Err(e) => tracing::warn!(line = ?e.line, "config.toml inválido: {}; mantendo a configuração anterior", e.message),
@@ -769,6 +845,11 @@ impl Loop {
 pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
     let _context_hook = zefiro_platform_windows::bar_context::BarContextHook::install().map_err(|error| tracing::warn!("recuperação pelo botão direito indisponível: {error}")).ok();
     let mut l = Loop::new(ctx, bars)?;
+    // Vive até o fim do laço; soltar desinstala o gancho.
+    let foreground_hook = window::ForegroundHook::install();
+    if foreground_hook.is_none() {
+        tracing::warn!("gancho de foco indisponível: a barra só sai da frente da tela cheia pelo aviso do Windows");
+    }
     l.schedule_clock();
     if let Err(e) = l.refresh_island_accent() {
         tracing::warn!(error = %e, "não consegui aplicar o destaque da ilha");
@@ -785,12 +866,19 @@ pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
     }
     l.refresh_services();
     l.devices_start();
+    if let Err(e) = l.autohide_sync() {
+        tracing::warn!(error = %e, "não consegui preparar o ocultar automaticamente");
+    }
     'pump: while window::pump() {
         for e in window::take_events() {
             match l.handle(e) {
                 Ok(true) => {}
                 Ok(false) => break 'pump,
                 Err(err) => tracing::error!(error = %err, ?e, "erro tratando evento"),
+            }
+            // Cursor, painéis e tela cheia mudam por muitos caminhos: a regra roda depois de cada evento.
+            if let Err(err) = l.autohide_update() {
+                tracing::error!(error = %err, "erro no ocultar automaticamente");
             }
         }
     }
@@ -803,6 +891,7 @@ pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
 /// depois a ilha, que pode levar até 3 s para fechar.
 fn shutdown(l: &mut Loop) {
     l.debug_shutdown();
+    l.chat_shutdown();
     for b in l.bars.drain(..) {
         b.destroy();
     }
