@@ -86,7 +86,14 @@ pub struct Config {
     pub update: UpdateConfig,
     pub terminal: TerminalConfig,
     pub chat: ChatConfig,
+    pub spotify: SpotifyConfig,
 }
+
+/// Chip `spotify` (ADR-0024): o Client ID do app que o usuário criou no Spotify. Escrito pelo
+/// próprio painel.
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+#[serde(default)]
+pub struct SpotifyConfig { pub client_id: String }
 
 /// Chat do chip `chat` (ADR-0020): o agente (`claude` ou `codex`) e, para cada um, a origem e o
 /// modelo. Escrito pelo próprio painel.
@@ -246,10 +253,10 @@ impl BarConfig {
 }
 
 impl Config {
-    /// Só `[terminal]` ou `[chat]` mudaram? Os painéis do Terminal e do chat gravam nelas e não devem
-    /// se fechar.
+    /// Só `[terminal]`, `[chat]` ou `[spotify]` mudaram? Os painéis do Terminal, do chat e do
+    /// Spotify gravam nelas e não devem se fechar.
     pub fn same_except_panels(&self, other: &Config) -> bool {
-        Config { terminal: other.terminal.clone(), chat: other.chat.clone(), ..self.clone() } == *other
+        Config { terminal: other.terminal.clone(), chat: other.chat.clone(), spotify: other.spotify.clone(), ..self.clone() } == *other
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
@@ -304,7 +311,7 @@ pub struct ClockConfig { pub format: String, pub seconds: bool }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { theme: "obsidian".into(), acrylic: None, bar: BarConfig::default(), island: IslandConfig::default(), clock: ClockConfig::default(), update: UpdateConfig::default(), terminal: TerminalConfig::default(), chat: ChatConfig::default() }
+        Config { theme: "obsidian".into(), acrylic: None, bar: BarConfig::default(), island: IslandConfig::default(), clock: ClockConfig::default(), update: UpdateConfig::default(), terminal: TerminalConfig::default(), chat: ChatConfig::default(), spotify: SpotifyConfig::default() }
     }
 }
 
@@ -383,6 +390,29 @@ pub fn set_terminal(path: &Path, terminal: &TerminalConfig) -> std::io::Result<(
     let table = doc.entry("terminal").or_insert(toml_edit::table()).as_table_mut().ok_or_else(|| std::io::Error::other("`terminal` não é uma tabela"))?;
     for (key, values) in [("order", &terminal.order), ("hidden", &terminal.hidden)] {
         table.insert(key, toml_edit::value(values.iter().map(String::as_str).collect::<toml_edit::Array>()));
+    }
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, doc.to_string())?;
+    std::fs::rename(&tmp, path)
+}
+
+/// Grava `[spotify] client_id`, mantendo comentários e o resto do arquivo. Na primeira vez, a chave
+/// leva o comentário de onde o Client ID vem.
+pub fn set_spotify(path: &Path, spotify: &SpotifyConfig) -> std::io::Result<()> {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let mut doc: toml_edit::DocumentMut = text.parse().map_err(std::io::Error::other)?;
+    let table = doc.entry("spotify").or_insert(toml_edit::table()).as_table_mut().ok_or_else(|| std::io::Error::other("`spotify` não é uma tabela"))?;
+    match table.get_mut("client_id").and_then(toml_edit::Item::as_value_mut) {
+        Some(value) => {
+            let decor = value.decor().clone();
+            *value = toml_edit::Value::from(spotify.client_id.as_str());
+            *value.decor_mut() = decor;
+        }
+        None => {
+            let mut value = toml_edit::Value::from(spotify.client_id.as_str());
+            value.decor_mut().set_suffix("   # do app criado em developer.spotify.com (Redirect URI http://127.0.0.1:47823/callback)");
+            table.insert("client_id", toml_edit::Item::Value(value));
+        }
     }
     let tmp = path.with_extension("toml.tmp");
     std::fs::write(&tmp, doc.to_string())?;

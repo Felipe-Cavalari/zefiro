@@ -189,3 +189,36 @@ fn chat_choices_are_written_without_touching_the_rest() {
     let c = parse_config(&text).unwrap();
     assert_eq!((c.chat.agent.as_str(), c.chat.codex.model.as_str(), c.chat.claude.origin.as_str()), ("codex", "gpt-5.6-luna", "auto"));
 }
+
+#[test]
+fn spotify_section_parses_and_defaults_empty() {
+    assert_eq!(parse_config(DEFAULT_CONFIG).unwrap().spotify, SpotifyConfig::default());
+    assert_eq!(SpotifyConfig::default().client_id, "");
+    let c = parse_config("[spotify]\nclient_id = \"abc123\"\n").unwrap();
+    assert_eq!(c.spotify.client_id, "abc123");
+}
+
+#[test]
+fn set_spotify_keeps_comments_and_other_sections() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, DEFAULT_CONFIG).unwrap();
+    set_spotify(&path, &SpotifyConfig { client_id: "abc".into() }).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("Redirect URI http://127.0.0.1:47823/callback"), "comentário na primeira vez: {text}");
+    set_spotify(&path, &SpotifyConfig { client_id: "def".into() }).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("# completa | compacta"), "{text}");
+    assert_eq!(text.matches("Redirect URI").count(), 1, "o comentário não se repete");
+    let c = parse_config(&text).unwrap();
+    assert_eq!(c.spotify.client_id, "def");
+    assert_eq!(c.chat, ChatConfig::default());
+}
+
+#[test]
+fn only_spotify_changed_is_same_except_panels() {
+    let a = Config::default();
+    let mut b = a.clone();
+    b.spotify.client_id = "abc".into();
+    assert!(a.same_except_panels(&b));
+}
