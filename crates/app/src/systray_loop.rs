@@ -34,7 +34,23 @@ pub struct SystrayRuntime {
     /// Altura máxima do último desenho (DIP), para a rolagem.
     max_h: f32,
     layout: Option<TrayLayout>,
+    /// Processo do app cujo menu (clique direito) está aberto: o painel fica atrás dele.
+    menu_pid: Option<u32>,
+    menu_hook: Option<window::MenuHook>,
 }
+
+/// O que pode encerrar o menu de um ícone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuSignal {
+    /// Um menu fechou (escolheu uma opção, Esc ou clicou fora).
+    Ended,
+    /// Esse processo veio para o primeiro plano.
+    Foreground(u32),
+}
+
+/// O menu do app acabou: o painel fecha (se não tiver o foco de volta).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MenuClosed;
 
 impl SystrayRuntime {
     /// Troca os ícones mantendo o hover e a seleção no mesmo ícone (pela chave, não pela posição).
@@ -50,6 +66,21 @@ impl SystrayRuntime {
 }
 
 impl SystrayRuntime {
+    /// O painel está atrás do menu de um app e não fecha ao perder o foco.
+    pub fn holds_panel(&self) -> bool {
+        self.menu_pid.is_some()
+    }
+
+    fn menu_signal(&mut self, signal: MenuSignal) -> Option<MenuClosed> {
+        let pid = self.menu_pid?;
+        if signal == MenuSignal::Foreground(pid) {
+            return None;
+        }
+        self.menu_pid = None;
+        self.menu_hook = None;
+        Some(MenuClosed)
+    }
+
     /// Roda: uma linha por passo; o hover sai (a célula sob o mouse mudou).
     fn scroll_by(&mut self, delta: i32) {
         let max = max_scroll(self.items.len(), self.max_h);
@@ -133,13 +164,28 @@ impl Loop {
         list
     }
 
-    /// Fecha o painel (sem devolver o foco: quem ganha o primeiro plano é o app) e manda o clique.
+    /// Esquerdo: fecha o painel (sem devolver o foco: quem ganha o primeiro plano é o app) e manda o
+    /// clique. Direito: o painel fica atrás do menu do app, como no Windows, e fecha junto com ele.
     fn systray_activate(&mut self, index: usize, button: Button) -> Result<()> {
         let Some(key) = self.systray.items.get(index).map(|i| i.key) else { return Ok(()) };
         let cursor = tray_host::cursor();
-        self.close_panel_for_editor()?;
-        if let Some(host) = &self.systray.host {
-            host.click(&key, button, cursor);
+        if button == Button::Left {
+            self.close_panel_for_editor()?;
+        }
+        let pid = self.systray.host.as_ref().and_then(|h| h.click(&key, button, cursor));
+        if button == Button::Right && pid.is_some() {
+            self.systray.menu_pid = pid;
+            self.systray.menu_hook = window::MenuHook::install();
+        }
+        Ok(())
+    }
+
+    /// Um menu fechou ou outro app veio para a frente: se era o menu do ícone, o painel fecha
+    /// (a não ser que o foco tenha voltado para ele).
+    pub fn systray_menu_signal(&mut self, signal: MenuSignal) -> Result<()> {
+        if self.systray.menu_signal(signal).is_some() && !self.panels.iter().any(|p| p.open && p.has_focus()) {
+            let fx = self.controller.handle(zefiro_bar::controller::PanelInput::FocusLost);
+            self.run_effects(fx)?;
         }
         Ok(())
     }
@@ -231,6 +277,8 @@ impl Loop {
         s.hover = None;
         s.selected = None;
         s.layout = None;
+        s.menu_pid = None;
+        s.menu_hook = None;
     }
 }
 
@@ -266,6 +314,26 @@ mod tests {
         assert_eq!(r.hover, Some(2), "mesmo lugar: continua");
         r.set_items(vec![item(3, "C", 0), item(1, "A", 0)]);
         assert_eq!(r.hover, None, "C mudou de lugar: o nome não pode ficar numa célula sem o mouse");
+    }
+
+    #[test]
+    fn panel_stays_behind_the_app_menu() {
+        let mut r = SystrayRuntime::default();
+        assert!(!r.holds_panel());
+        r.menu_pid = Some(42);
+        assert!(r.holds_panel(), "o menu do app tirou o foco: o painel não fecha");
+        assert_eq!(r.menu_signal(MenuSignal::Foreground(42)), None, "o próprio app no primeiro plano: o menu continua");
+        assert!(r.holds_panel());
+        assert_eq!(r.menu_signal(MenuSignal::Ended), Some(MenuClosed));
+        assert!(!r.holds_panel());
+        assert_eq!(r.menu_signal(MenuSignal::Ended), None, "sem menu aberto, nada a fazer");
+    }
+
+    #[test]
+    fn another_app_in_front_ends_the_menu() {
+        let mut r = SystrayRuntime { menu_pid: Some(42), ..Default::default() };
+        assert_eq!(r.menu_signal(MenuSignal::Foreground(7)), Some(MenuClosed));
+        assert!(!r.holds_panel());
     }
 
     #[test]

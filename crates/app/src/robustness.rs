@@ -62,7 +62,11 @@ pub fn handle(l: &mut Loop, e: WinEvent) -> Result<bool> {
         // App em tela cheia (vídeo, jogo, apresentação): a barra daquele monitor sai da frente,
         // como a barra de tarefas; volta quando o app sai da tela cheia. O aviso do Windows chega uma
         // vez só, então a troca de foco e o temporizador (enquanto há barra escondida) também conferem.
-        WinEvent::AppBar { notification: ABN_FULLSCREENAPP, .. } | WinEvent::ForegroundChanged | WinEvent::Timer { id: TIMER_FULLSCREEN } => reconcile_fullscreen(l)?,
+        WinEvent::ForegroundChanged => {
+            l.systray_menu_signal(crate::systray_loop::MenuSignal::Foreground(window::foreground_pid()))?;
+            reconcile_fullscreen(l)?;
+        }
+        WinEvent::AppBar { notification: ABN_FULLSCREENAPP, .. } | WinEvent::Timer { id: TIMER_FULLSCREEN } => reconcile_fullscreen(l)?,
         WinEvent::AppBar { notification: ABN_POSCHANGED, .. } => {
             for b in &l.bars {
                 b.reposition_appbar();

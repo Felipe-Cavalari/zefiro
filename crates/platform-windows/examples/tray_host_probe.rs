@@ -29,6 +29,31 @@ fn first_owner() -> String {
     }
 }
 
+/// Janelas de menu visíveis e o processo de cada uma.
+fn menus() -> String {
+    use windows::Win32::Foundation::{HWND, LPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetClassNameW, IsWindowVisible};
+    use windows::core::BOOL;
+    unsafe extern "system" fn each(h: HWND, l: LPARAM) -> BOOL {
+        // SAFETY: `l` é o Vec passado por `menus`, vivo durante o EnumWindows.
+        let out = unsafe { &mut *(l.0 as *mut Vec<u32>) };
+        let mut buf = [0u16; 16];
+        // SAFETY: só consultas.
+        let n = unsafe { GetClassNameW(h, &mut buf) } as usize;
+        if String::from_utf16_lossy(&buf[..n]) == "#32768" && unsafe { IsWindowVisible(h) }.as_bool() {
+            let mut pid = 0u32;
+            // SAFETY: só consulta.
+            unsafe { GetWindowThreadProcessId(h, Some(&mut pid)) };
+            out.push(pid);
+        }
+        BOOL(1)
+    }
+    let mut pids: Vec<u32> = Vec::new();
+    // SAFETY: callback síncrono com ponteiro para um Vec local.
+    let _ = unsafe { EnumWindows(Some(each), LPARAM(&mut pids as *mut _ as isize)) };
+    format!("{pids:?}")
+}
+
 fn main() -> windows::core::Result<()> {
     if std::env::args().any(|a| a == "--check") {
         println!("primeira Shell_TrayWnd: {}", first_owner());
@@ -45,6 +70,18 @@ fn main() -> windows::core::Result<()> {
     for i in &items {
         let size = i.image.as_ref().map_or("sem imagem".into(), |im| format!("{}x{}", im.width(), im.height()));
         println!("  {:<40} {:<32} {size}", format!("{:?}", i.tip.lines().next().unwrap_or_default()), i.exe);
+    }
+    // `--click <trecho do exe> left|right`: manda o clique e diz o que apareceu.
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--click") {
+        let target = args.get(i + 1).cloned().unwrap_or_default().to_lowercase();
+        let button = if args.get(i + 2).map(String::as_str) == Some("right") { zefiro_integration_systray::click::Button::Right } else { zefiro_integration_systray::click::Button::Left };
+        if let Some(item) = items.iter().find(|it| it.exe.to_lowercase().contains(&target)) {
+            println!("clique {button:?} em {}", item.exe);
+            host.click(&item.key, button, zefiro_platform_windows::tray_host::cursor());
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            println!("menus visíveis (#32768): {}", menus());
+        }
     }
     drop(host);
     println!("depois de fechar o host: {}", first_owner());

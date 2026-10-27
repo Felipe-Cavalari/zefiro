@@ -130,15 +130,17 @@ impl TrayHost {
         self.model.lock().unwrap_or_else(|e| e.into_inner()).prune(|h| unsafe { IsWindow(Some(HWND(h as usize as *mut _))) }.as_bool())
     }
 
-    /// Devolve um clique ao app dono do ícone, como a barra de tarefas faz. Chamar a partir de um
-    /// clique do usuário: é ele que dá ao Zefiro o direito de liberar o primeiro plano.
-    pub fn click(&self, key: &Key, button: Button, cursor: (i32, i32)) {
-        let target = self.model.lock().unwrap_or_else(|e| e.into_inner()).get(key).map(|i| (i.hwnd, i.uid, i.callback, i.version));
-        let Some((hwnd, uid, callback, version)) = target else { return };
+    /// Devolve um clique ao app dono do ícone, como a barra de tarefas faz, e diz o processo dele.
+    /// Chamar a partir de um clique do usuário: é ele que dá ao Zefiro o direito de liberar o
+    /// primeiro plano.
+    pub fn click(&self, key: &Key, button: Button, cursor: (i32, i32)) -> Option<u32> {
+        let target = self.model.lock().unwrap_or_else(|e| e.into_inner()).get(key).map(|i| (i.hwnd, i.uid, i.callback, i.version, i.exe.clone()));
+        let (hwnd, uid, callback, version, exe) = target?;
+        tracing::info!(?button, version, uid, callback, exe = exe.rsplit(['\\', '/']).next().unwrap_or_default(), "bandeja: clique devolvido ao app");
         let hwnd = HWND(hwnd as usize as *mut _);
         // SAFETY: só consulta; um app que morreu dá `false` e nada é mandado.
         if callback == 0 || !unsafe { IsWindow(Some(hwnd)) }.as_bool() {
-            return;
+            return None;
         }
         let mut pid = 0u32;
         // SAFETY: consulta do processo dono e permissão de primeiro plano para ele.
@@ -153,6 +155,7 @@ impl TrayHost {
             // SAFETY: PostMessage sem ponteiros; um app travado não trava a barra.
             let _ = unsafe { PostMessageW(Some(hwnd), callback, WPARAM(wp), LPARAM(lp)) };
         }
+        Some(pid)
     }
 }
 

@@ -22,6 +22,8 @@ pub const WM_TRAY: u32 = WM_APP + 3;
 const WM_FOREGROUND: u32 = WM_APP + 4;
 /// O cursor entrou ou saiu do topo ou da faixa de uma barra que se oculta (`bar_context`).
 const WM_AUTOHIDE: u32 = WM_APP + 5;
+/// Um menu de qualquer app fechou (`MenuHook`).
+const WM_MENU_END: u32 = WM_APP + 6;
 /// Em `Win32::UI::Controls` na crate windows; definida aqui para não puxar a feature inteira.
 const WM_MOUSELEAVE: u32 = 0x02A3;
 
@@ -64,6 +66,8 @@ pub enum WinEvent {
     TaskbarCreated { own: bool },
     /// Uma janela de outro processo veio para o primeiro plano (`ForegroundHook`).
     ForegroundChanged,
+    /// Um menu de algum app fechou (`MenuHook`, só ligado com o menu de um ícone da bandeja aberto).
+    MenuEnded,
     /// O cursor mudou em relação ao topo ou à faixa de uma barra que se oculta (`bar_context::autohide_cursor`).
     AutoHideCursor,
     SettingChanged,
@@ -226,6 +230,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         m if m == WM_TRAY => push(WinEvent::Tray { mouse: (lp.0 & 0xFFFF) as u32 }),
         m if m == WM_FOREGROUND => push(WinEvent::ForegroundChanged),
         m if m == WM_AUTOHIDE => push(WinEvent::AutoHideCursor),
+        m if m == WM_MENU_END => push(WinEvent::MenuEnded),
         m if (WM_USER_BASE..WM_USER_BASE + 0x100).contains(&m) => push(WinEvent::User { code: m - WM_USER_BASE }),
         m if Some(&m) == TASKBAR_CREATED.get() => push(taskbar_created(lp.0)),
         m if Some(&m) == ISLAND_GEOMETRY.get() => push(WinEvent::IslandGeometryChanged),
@@ -344,6 +349,41 @@ unsafe extern "system" fn on_foreground(_: windows::Win32::UI::Accessibility::HW
     // Só posta: o laço trata depois do GetMessage, com os outros eventos.
     // SAFETY: PostMessage sem ponteiros para a janela de mensagens, que vive até o fim do app.
     let _ = unsafe { PostMessageW(Some(message_window()), WM_FOREGROUND, WPARAM(0), LPARAM(0)) };
+}
+
+/// Avisa a janela de mensagens quando um menu de qualquer app fecha. Ligado só enquanto o menu de um
+/// ícone da bandeja está aberto, para o painel da bandeja ficar atrás dele e fechar junto.
+pub struct MenuHook(windows::Win32::UI::Accessibility::HWINEVENTHOOK);
+
+impl MenuHook {
+    pub fn install() -> Option<Self> {
+        use windows::Win32::UI::Accessibility::SetWinEventHook;
+        // SAFETY: gancho fora do processo; o callback roda nesta thread, que bombeia mensagens.
+        let hook = unsafe { SetWinEventHook(EVENT_SYSTEM_MENUEND, EVENT_SYSTEM_MENUPOPUPEND, None, Some(on_menu), 0, 0, WINEVENT_OUTOFCONTEXT) };
+        (!hook.is_invalid()).then_some(Self(hook))
+    }
+}
+
+impl Drop for MenuHook {
+    fn drop(&mut self) {
+        // SAFETY: handle instalado por esta thread.
+        let _ = unsafe { windows::Win32::UI::Accessibility::UnhookWinEvent(self.0) };
+    }
+}
+
+unsafe extern "system" fn on_menu(_: windows::Win32::UI::Accessibility::HWINEVENTHOOK, event: u32, _: HWND, _: i32, _: i32, _: u32, _: u32) {
+    if event == EVENT_SYSTEM_MENUEND || event == EVENT_SYSTEM_MENUPOPUPEND {
+        // SAFETY: PostMessage sem ponteiros para a janela de mensagens, que vive até o fim do app.
+        let _ = unsafe { PostMessageW(Some(message_window()), WM_MENU_END, WPARAM(0), LPARAM(0)) };
+    }
+}
+
+/// Processo dono da janela em primeiro plano (0 sem janela).
+pub fn foreground_pid() -> u32 {
+    let mut pid = 0u32;
+    // SAFETY: só consultas; sem janela, o pid fica 0.
+    unsafe { GetWindowThreadProcessId(GetForegroundWindow(), Some(&mut pid)) };
+    pid
 }
 
 /// Acorda o laço com `WinEvent::AutoHideCursor` (o hook de mouse roda dentro do `GetMessage`).

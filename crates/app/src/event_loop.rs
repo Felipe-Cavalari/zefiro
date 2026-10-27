@@ -644,7 +644,8 @@ impl Loop {
                 // Um FocusLost atrasado (de um painel que acabou de fechar) não fecha o painel que
                 // abriu no lugar dele e já tem o teclado.
                 let focused = self.panels.iter().any(|p| p.open && p.has_focus());
-                if self.panel_index(hwnd).is_some() && self.controller.open().is_some() && !focused {
+                // O menu de um ícone da bandeja tira o foco do painel, que fica atrás dele.
+                if self.panel_index(hwnd).is_some() && self.controller.open().is_some() && !focused && !self.systray.holds_panel() {
                     let fx = self.controller.handle(PanelInput::FocusLost);
                     self.run_effects(fx)?;
                 }
@@ -759,6 +760,7 @@ impl Loop {
             WinEvent::User { code: USER_VSCODE } => self.vscode_loaded()?,
             WinEvent::User { code: USER_TERMINAL } => self.terminal_loaded()?,
             WinEvent::User { code: USER_TRAY } => self.systray_changed()?,
+            WinEvent::MenuEnded => self.systray_menu_signal(crate::systray_loop::MenuSignal::Ended)?,
             WinEvent::User { code: USER_CHAT } => self.chat_signals()?,
             WinEvent::User { code: USER_CHAT_IMAGE } => self.chat_images()?,
             WinEvent::Timer { id: TIMER_CHAT_IDLE } => self.chat_idle(),
