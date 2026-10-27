@@ -67,6 +67,7 @@ impl Loop {
         self.update_services();
         self.chat_services();
         self.systray_services();
+        self.spotify_services();
         // Mídia e clima seguem a ilha embutida e os chips do player e do clima.
         if let Err(e) = self.island_services() {
             tracing::warn!("não consegui atualizar os serviços da ilha: {e}");

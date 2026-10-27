@@ -71,6 +71,8 @@ pub const USER_CHAT: u32 = 25;
 pub const USER_CHAT_IMAGE: u32 = 26;
 /// O host da bandeja viu ícones mudarem.
 pub const USER_TRAY: u32 = 27;
+/// O serviço do Spotify respondeu (login, player, listas, busca, capa).
+pub const USER_SPOTIFY: u32 = 28;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
@@ -98,6 +100,10 @@ pub const TIMER_HUD: usize = 13;
 pub const TIMER_CHAT_IDLE: usize = 14;
 /// Ocultar automaticamente: fim da espera no topo (descer) ou fora da barra (subir).
 pub const TIMER_AUTOHIDE: usize = 16;
+/// Painel do Spotify aberto: progresso da música e fim do aviso do rodapé, uma vez por segundo.
+pub const TIMER_SPOTIFY_TICK: usize = 17;
+/// Busca do Spotify: 300 ms depois da última tecla.
+pub const TIMER_SPOTIFY_SEARCH: usize = 18;
 const CYCLE_HALF_MS: u32 = 450;
 
 const VK_ESCAPE: u32 = 0x1B;
@@ -138,6 +144,7 @@ pub struct Loop {
     pub(crate) power: crate::power_loop::PowerRuntime,
     pub(crate) system: crate::system_loop::SystemRuntime,
     pub(crate) autohide: crate::autohide_loop::AutoHideRuntime,
+    pub(crate) spotify: crate::spotify_loop::SpotifyRuntime,
     /// Ciclos de medição: (total, feitos).
     cycles: Option<(u32, u32)>,
 }
@@ -159,7 +166,7 @@ impl Loop {
             panels.push(PanelView::create(&ctx, b.monitor())?);
         }
         let today = now_local().date;
-        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, settings: None, shown_month: (today.year, today.month), island: Default::default(), debug: Default::default(), update: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), terminal: Default::default(), systray: Default::default(), chat: Default::default(), power: Default::default(), system: Default::default(), autohide: Default::default(), cycles: None })
+        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, settings: None, shown_month: (today.year, today.month), island: Default::default(), debug: Default::default(), update: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), terminal: Default::default(), systray: Default::default(), chat: Default::default(), power: Default::default(), system: Default::default(), autohide: Default::default(), spotify: Default::default(), cycles: None })
     }
 
     pub(crate) fn bar_index(&self, hwnd: isize) -> Option<usize> { self.bars.iter().position(|b| b.hwnd().0 as isize == hwnd) }
@@ -205,8 +212,7 @@ impl Loop {
             PanelKind::Chat => self.chat_panel_list(scale),
             PanelKind::Power => self.power_panel_list(scale),
             PanelKind::Tray => self.systray_panel_list(scale),
-            // Ligado na Tarefa 11 do plano do Spotify (spotify_loop.rs).
-            PanelKind::Spotify => DisplayList::default(),
+            PanelKind::Spotify => self.spotify_panel_list(scale),
         }
     }
 
@@ -243,6 +249,7 @@ impl Loop {
                     self.terminal_panel_closed();
                     self.systray_panel_closed();
                     self.chat_panel_closed();
+                    self.spotify_panel_closed();
                 }
                 PanelEffect::Open(p) => {
                     if p.kind == PanelKind::Overflow {
@@ -258,6 +265,7 @@ impl Loop {
                     self.systray_prepare(p.kind);
                     self.chat_prepare(p.kind)?;
                     self.power_prepare(p.kind);
+                    self.spotify_prepare(p.kind)?;
                     if p.kind.tabbed() {
                         self.island_panel_opening();
                     }
@@ -543,6 +551,8 @@ impl Loop {
                         // Perfil do Windows Terminal aberto (ou clique fora das linhas).
                     } else if self.usage_click(Point { x: x - ox, y: y - oy }, scale)? {
                         // Botão de atualizar do painel do Claude.
+                    } else if self.spotify_click(Point { x: x - ox, y: y - oy }, false)? {
+                        // Spotify: linha, filtro, menu de ações ou botão do cartão.
                     } else if self.vscode_click(Point { x: x - ox, y: y - oy })? {
                         // Projeto do VS Code aberto (ou clique fora das linhas).
                     } else if self.devices_up(Point { x: x - ox, y: y - oy })? {
@@ -570,7 +580,7 @@ impl Loop {
                 tracing::debug!(hwnd, x, y, "botão direito");
                 if let Some(i) = self.panel_index(hwnd) {
                     let (ox, oy) = self.panels[i].content_origin();
-                    if self.systray_right_up(Point { x: x - ox, y: y - oy })? {
+                    if self.systray_right_up(Point { x: x - ox, y: y - oy })? || self.spotify_click(Point { x: x - ox, y: y - oy }, true)? {
                         return Ok(true);
                     }
                 }
@@ -602,6 +612,7 @@ impl Loop {
                     self.systray_move(Point { x: x - ox, y: y - oy })?;
                     self.chat_move(Point { x: x - ox, y: y - oy })?;
                     self.vscode_move(Point { x: x - ox, y: y - oy })?;
+                    self.spotify_move(Point { x: x - ox, y: y - oy })?;
                     // Menu do Z: o item sob o mouse ganha o destaque (só redesenha quando muda).
                     let scale = self.bars[i].scale();
                     self.usage_move(Point { x: x - ox, y: y - oy }, scale)?;
@@ -656,7 +667,7 @@ impl Loop {
                 if self.panel_index(hwnd).is_none() {
                     return Ok(true);
                 }
-                if self.chat_key(vk)? || self.terminal_key(vk)? || self.systray_key(vk)? || self.vscode_key(vk)? {
+                if self.chat_key(vk)? || self.terminal_key(vk)? || self.systray_key(vk)? || self.spotify_key(vk)? || self.vscode_key(vk)? {
                     return Ok(true);
                 }
                 // Esc na tela de temas volta ao menu; no menu, fecha.
@@ -725,7 +736,7 @@ impl Loop {
                 if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind.tabbed()) {
                     return self.island_wheel(delta).map(|_| true);
                 }
-                if self.panel_index(hwnd).is_some() && (self.chat_wheel(delta)? || self.terminal_wheel(delta)? || self.systray_wheel(delta)? || self.vscode_wheel(delta)?) {
+                if self.panel_index(hwnd).is_some() && (self.chat_wheel(delta)? || self.terminal_wheel(delta)? || self.systray_wheel(delta)? || self.spotify_wheel(delta)? || self.vscode_wheel(delta)?) {
                     return Ok(true);
                 }
                 if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind == PanelKind::Overflow) {
@@ -766,9 +777,12 @@ impl Loop {
             WinEvent::User { code: USER_CHAT } => self.chat_signals()?,
             WinEvent::User { code: USER_CHAT_IMAGE } => self.chat_images()?,
             WinEvent::Timer { id: TIMER_CHAT_IDLE } => self.chat_idle(),
+            WinEvent::User { code: USER_SPOTIFY } => self.spotify_replies()?,
+            WinEvent::Timer { id: TIMER_SPOTIFY_TICK } => self.spotify_tick()?,
+            WinEvent::Timer { id: TIMER_SPOTIFY_SEARCH } => self.spotify_search_timer(),
             WinEvent::Tray { mouse } => self.tray_event(mouse)?,
             WinEvent::Character { code, .. } => {
-                if !self.chat_char(code)? {
+                if !self.chat_char(code)? && !self.spotify_char(code)? {
                     self.vscode_char(code)?;
                 }
             }
@@ -809,12 +823,13 @@ impl Loop {
             WinEvent::User { code: USER_CONFIG_CHANGED } => {
                 let text = std::fs::read_to_string(&self.ctx.config_path).unwrap_or_default();
                 match zefiro_core::config::parse_config(&text) {
-                    // Só `[terminal]` ou `[chat]` mudaram (o próprio painel gravou): atualiza sem
+                    // Só `[terminal]`, `[chat]` ou `[spotify]` mudaram (o próprio painel gravou): atualiza sem
                     // fechar o painel.
                     Ok(new) if new != self.ctx.config && new.same_except_panels(&self.ctx.config) => {
                         self.ctx.config = new;
                         self.terminal_config_changed()?;
                         self.chat_config_changed()?;
+                        self.spotify_services();
                     }
                     Ok(new) if new != self.ctx.config => {
                         let fx = self.controller.handle(PanelInput::ConfigChanged);

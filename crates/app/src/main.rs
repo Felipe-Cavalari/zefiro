@@ -22,6 +22,7 @@ mod update_loop;
 mod usage_loop;
 mod systray_loop;
 mod terminal_loop;
+mod spotify_loop;
 mod vscode_loop;
 mod theme_state;
 
