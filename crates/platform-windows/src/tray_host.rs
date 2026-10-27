@@ -10,13 +10,14 @@ use std::cell::{Cell, RefCell};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, Once};
 use std::thread::JoinHandle;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::System::Threading::GetCurrentThreadId;
+use windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentThreadId, OpenProcessToken};
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::WindowsAndMessaging::{
-    AllowSetForegroundWindow, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, EVENT_SYSTEM_FOREGROUND, FindWindowExW, FindWindowW, GetMessageW, GetWindowRect,
+    AllowSetForegroundWindow, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, EVENT_SYSTEM_FOREGROUND, FindWindowExW, FindWindowW, GetMessageW, GetShellWindow, GetWindowRect,
     GetWindowThreadProcessId, HICON, HWND_BROADCAST, HWND_TOPMOST, InSendMessage, IsWindow, MSG, PostMessageW, PostThreadMessageW, RegisterClassExW, RegisterWindowMessageW,
     SMTO_ABORTIFHUNG, SWP_NOACTIVATE, SendMessageTimeoutW, SetTimer, SetWindowPos, TranslateMessage, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_COMMAND, WM_COPYDATA,
     WM_QUIT, WM_TIMER, WM_USER, WNDCLASSEXW, WS_CHILD, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
@@ -31,8 +32,12 @@ use zefiro_platform::image::Image;
 /// como um reinício do Explorer.
 pub const OWN_BROADCAST: isize = 0x5A45_4649;
 
-/// Quanto o repasse espera a barra de tarefas antes de desistir.
-const FORWARD_MS: u32 = 300;
+/// Quanto o repasse espera a barra de tarefas antes de desistir. Como o próprio shell32: com o
+/// Explorer travado, o `SMTO_ABORTIFHUNG` volta na hora; ocupado (logon, AppBars se registrando), ele
+/// responde, e quem chamou recebe a resposta de verdade.
+const FORWARD_MS: u32 = 4000;
+/// Repasses aninhados: outro host (sonda, YASB) pode repassar de volta ao nosso.
+const MAX_FORWARD_DEPTH: u32 = 2;
 /// Conferência da barra de tarefas de verdade (viva? ainda atrás do host?).
 const TICK_MS: u32 = 1000;
 const TICK: usize = 1;
@@ -69,6 +74,10 @@ thread_local! {
     static CTX: RefCell<Option<Ctx>> = const { RefCell::new(None) };
     static HOST: Cell<isize> = const { Cell::new(0) };
     static NOTIFY_WND: Cell<isize> = const { Cell::new(0) };
+    /// Repasses em andamento nesta thread (ver `MAX_FORWARD_DEPTH`).
+    static DEPTH: Cell<u32> = const { Cell::new(0) };
+    /// A `Shell_TrayWnd` do Explorer da última vez: outra igual num `TaskbarCreated` é reinício.
+    static LAST_EXPLORER: Cell<isize> = const { Cell::new(0) };
 }
 
 fn ctx() -> Option<Ctx> {
@@ -83,6 +92,11 @@ fn host() -> Option<HWND> {
 impl TrayHost {
     /// Sobe a thread e a janela. `on_change` roda na thread do host e deve só postar.
     pub fn start(on_change: Notify, icon_px: u32) -> Result<TrayHost> {
+        // Elevado, o UIPI barra o WM_COPYDATA dos apps comuns: o `FindWindow` deles acharia o host e o
+        // ícone não chegaria nem ao Explorer.
+        if is_elevated() {
+            return Err(windows::core::Error::new(windows::Win32::Foundation::E_ACCESSDENIED, "o Zefiro está rodando como administrador; a bandeja fica desligada para não quebrar a dos outros apps"));
+        }
         let model: Model = Arc::new(Mutex::new(TrayModel::default()));
         let (tx, rx) = mpsc::channel();
         let ctx = Ctx { model: model.clone(), on_change, icon_px, taskbar_created: 0 };
@@ -213,17 +227,99 @@ fn run(mut ctx: Ctx, ready: mpsc::Sender<Result<u32>>) {
     tracing::info!("bandeja: host fora do ar");
 }
 
-/// A primeira `Shell_TrayWnd` que não é a do host: a barra de tarefas de verdade.
+/// Entre as `Shell_TrayWnd` (janela, processo), a do shell; sem shell conhecido (`shell_pid = 0`),
+/// a primeira que não é a nossa. Outro host (YASB, a sonda) nunca é a barra de tarefas.
+fn pick_real(candidates: &[(isize, u32)], ours: isize, shell_pid: u32) -> Option<isize> {
+    let mut others = candidates.iter().filter(|(h, _)| *h != ours);
+    if shell_pid == 0 {
+        return others.next().map(|(h, _)| *h);
+    }
+    others.find(|(_, pid)| *pid == shell_pid).map(|(h, _)| *h)
+}
+
+fn pid_of(h: HWND) -> u32 {
+    let mut pid = 0u32;
+    // SAFETY: só consulta; janela inválida dá 0.
+    unsafe { GetWindowThreadProcessId(h, Some(&mut pid)) };
+    pid
+}
+
+/// A barra de tarefas de verdade: a `Shell_TrayWnd` do processo do shell (o Explorer).
 fn real_taskbar() -> Option<HWND> {
-    let ours = host();
+    let mut candidates = Vec::new();
     let mut after: Option<HWND> = None;
-    loop {
-        // SAFETY: só procura janelas de topo pela classe.
-        let h = unsafe { FindWindowExW(None, after, w!("Shell_TrayWnd"), PCWSTR::null()) }.ok()?;
-        if Some(h) != ours {
-            return Some(h);
-        }
+    // SAFETY: só procura janelas de topo pela classe.
+    while let Ok(h) = unsafe { FindWindowExW(None, after, w!("Shell_TrayWnd"), PCWSTR::null()) } {
+        candidates.push((h.0 as isize, pid_of(h)));
         after = Some(h);
+    }
+    // SAFETY: só consulta.
+    let shell = unsafe { GetShellWindow() };
+    let shell_pid = if shell.is_invalid() { 0 } else { pid_of(shell) };
+    pick_real(&candidates, host().map_or(0, |h| h.0 as isize), shell_pid).map(|h| HWND(h as *mut _))
+}
+
+fn may_forward(depth: u32) -> bool {
+    depth < MAX_FORWARD_DEPTH
+}
+
+/// Um `TaskbarCreated` é reinício do Explorer só se a barra de tarefas dele é outra janela.
+fn is_restart(last: Option<isize>, now: Option<isize>) -> bool {
+    now.is_some() && now != last
+}
+
+/// `(dwData, bytes)` de um WM_COPYDATA, ou `None` com ponteiro nulo (um app com bug não derruba a
+/// barra).
+///
+/// # Safety
+/// `cds` é nulo ou aponta para um COPYDATASTRUCT válido enquanto o resultado é usado.
+unsafe fn copydata_bytes<'a>(cds: *const COPYDATASTRUCT) -> Option<(usize, &'a [u8])> {
+    // SAFETY: o chamador garante que `cds`, se não for nulo, é válido.
+    let cds = unsafe { cds.as_ref() }?;
+    if cds.cbData == 0 {
+        return Some((cds.dwData, &[]));
+    }
+    if cds.lpData.is_null() {
+        return None;
+    }
+    // SAFETY: o sistema garante `cbData` bytes em `lpData` enquanto o WM_COPYDATA é tratado.
+    Some((cds.dwData, unsafe { std::slice::from_raw_parts(cds.lpData as *const u8, cds.cbData as usize) }))
+}
+
+/// Repassa à barra de tarefas com o limite de aninhamento.
+fn forward(real: HWND, msg: u32, wp: WPARAM, lp: LPARAM, sent: bool) -> LRESULT {
+    let depth = DEPTH.with(Cell::get);
+    if !may_forward(depth) {
+        return LRESULT(0);
+    }
+    DEPTH.with(|d| d.set(depth + 1));
+    let mut result = 0usize;
+    // SAFETY: mesmos parâmetros que a barra de tarefas receberia direto do app; o sistema copia o
+    // COPYDATASTRUCT para o outro processo.
+    unsafe {
+        if !sent {
+            let _ = PostMessageW(Some(real), msg, wp, lp);
+        } else if SendMessageTimeoutW(real, msg, wp, lp, SMTO_ABORTIFHUNG, FORWARD_MS, Some(&mut result)).0 == 0 {
+            tracing::debug!(msg, "bandeja: repasse à barra de tarefas expirou");
+        }
+    }
+    DEPTH.with(|d| d.set(depth));
+    LRESULT(result as isize)
+}
+
+/// O processo roda elevado?
+fn is_elevated() -> bool {
+    let mut token = HANDLE::default();
+    let mut elevation = TOKEN_ELEVATION::default();
+    let mut len = 0u32;
+    // SAFETY: token do próprio processo, fechado logo depois; estrutura do tamanho pedido.
+    unsafe {
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).is_err() {
+            return false;
+        }
+        let ok = GetTokenInformation(token, TokenElevation, Some(&mut elevation as *mut _ as *mut _), size_of::<TOKEN_ELEVATION>() as u32, &mut len).is_ok();
+        let _ = CloseHandle(token);
+        ok && elevation.TokenIsElevated != 0
     }
 }
 
@@ -232,6 +328,7 @@ fn create_host() -> Result<()> {
     unsafe {
         let h = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, w!("Shell_TrayWnd"), PCWSTR::null(), WS_POPUP, 0, 0, 0, 0, None, None, None, None)?;
         HOST.with(|c| c.set(h.0 as isize));
+        LAST_EXPLORER.with(|c| c.set(real_taskbar().map_or(0, |r| r.0 as isize)));
         let n = CreateWindowExW(Default::default(), w!("TrayNotifyWnd"), PCWSTR::null(), WS_CHILD, 0, 0, 0, 0, Some(h), None, None, None)?;
         NOTIFY_WND.with(|c| c.set(n.0 as isize));
         raise(h);
@@ -282,9 +379,7 @@ fn keep_first() {
 }
 
 /// Lê um ícone e atualiza o modelo.
-fn record(cds: &COPYDATASTRUCT, c: &Ctx) {
-    // SAFETY: o sistema garante `cbData` bytes em `lpData` enquanto o WM_COPYDATA é tratado.
-    let bytes = unsafe { std::slice::from_raw_parts(cds.lpData as *const u8, cds.cbData as usize) };
+fn record(bytes: &[u8], c: &Ctx) {
     let Some(n) = wire::parse(bytes) else { return };
     // O HICON é de outro processo e pode sumir: vira imagem agora e o handle não é guardado.
     let image = (n.flags & NIF_ICON != 0 && n.hicon != 0).then(|| crate::app_icon::hicon_to_image(HICON(n.hicon as usize as *mut _), c.icon_px)).flatten();
@@ -305,31 +400,19 @@ unsafe extern "system" fn host_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -
         return unsafe { DefWindowProcW(h, msg, wp, lp) };
     };
     if msg == WM_COPYDATA {
-        // SAFETY: `lp` aponta para um COPYDATASTRUCT válido durante o WM_COPYDATA.
-        let cds = unsafe { &*(lp.0 as *const COPYDATASTRUCT) };
-        if cds.dwData == COPYDATA_NOTIFY {
-            record(cds, &c);
+        // SAFETY: durante o WM_COPYDATA, `lp` é nulo ou aponta para um COPYDATASTRUCT válido.
+        let Some((data, bytes)) = (unsafe { copydata_bytes(lp.0 as *const COPYDATASTRUCT) }) else { return LRESULT(0) };
+        if data == COPYDATA_NOTIFY {
+            record(bytes, &c);
         }
         let Some(real) = real_taskbar() else { return LRESULT(0) };
-        let mut result = 0usize;
-        // SAFETY: repassa a mesma mensagem; o sistema copia o COPYDATASTRUCT para o Explorer.
-        if unsafe { SendMessageTimeoutW(real, WM_COPYDATA, wp, lp, SMTO_ABORTIFHUNG, FORWARD_MS, Some(&mut result)) }.0 == 0 {
-            tracing::debug!(data = cds.dwData, "bandeja: repasse à barra de tarefas expirou");
-        }
-        return LRESULT(result as isize);
+        return forward(real, WM_COPYDATA, wp, lp, true);
     }
     if forwarded(msg, &c) {
         let Some(real) = real_taskbar() else { return LRESULT(0) };
-        let mut result = 0usize;
-        // SAFETY: mesmos parâmetros, que a barra de tarefas receberia direto do app.
-        unsafe {
-            if InSendMessage().as_bool() {
-                let _ = SendMessageTimeoutW(real, msg, wp, lp, SMTO_ABORTIFHUNG, FORWARD_MS, Some(&mut result));
-            } else {
-                let _ = PostMessageW(Some(real), msg, wp, lp);
-            }
-        }
-        return LRESULT(result as isize);
+        // SAFETY: só consulta se a mensagem veio enviada (e espera resposta) ou postada.
+        let sent = unsafe { InSendMessage() }.as_bool();
+        return forward(real, msg, wp, lp, sent);
     }
     // SAFETY: padrão.
     unsafe { DefWindowProcW(h, msg, wp, lp) }
@@ -341,12 +424,23 @@ unsafe extern "system" fn watch_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         return unsafe { DefWindowProcW(h, msg, wp, lp) };
     };
     if msg == c.taskbar_created && msg != 0 {
-        if lp.0 != OWN_BROADCAST {
-            // O Explorer (re)subiu: o host volta para a frente da barra nova e pede os ícones.
-            tracing::info!("bandeja: Explorer de volta, recriando o host");
-            destroy_host();
-            if let Err(e) = create_host() {
-                tracing::warn!("bandeja: não consegui recriar o host: {e}");
+        let now = real_taskbar().map(|r| r.0 as isize);
+        let last = Some(LAST_EXPLORER.with(Cell::get)).filter(|&h| h != 0);
+        if lp.0 != OWN_BROADCAST && is_restart(last, now) {
+            // O Explorer (re)subiu: o host vai para a frente da barra nova e pede os ícones de novo.
+            tracing::info!("bandeja: Explorer de volta, host na frente da barra nova");
+            match host() {
+                Some(h) => {
+                    LAST_EXPLORER.with(|c| c.set(now.unwrap_or(0)));
+                    raise(h);
+                    // SAFETY: PostMessage sem ponteiros para todas as janelas de topo.
+                    let _ = unsafe { PostMessageW(Some(HWND_BROADCAST), c.taskbar_created, WPARAM(0), LPARAM(OWN_BROADCAST)) };
+                }
+                None => {
+                    if let Err(e) = create_host() {
+                        tracing::warn!("bandeja: não consegui recriar o host: {e}");
+                    }
+                }
             }
         }
         return LRESULT(0);
@@ -358,7 +452,8 @@ unsafe extern "system" fn watch_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 tracing::info!("bandeja: barra de tarefas sumiu, host fora até o Explorer voltar");
                 destroy_host();
             }
-            (Some(_), Some(_)) => keep_first(),
+            // Primeiro na ordem Z e com o retângulo da barra de tarefas (que muda com DPI e resolução).
+            (Some(h), Some(_)) => raise(h),
             _ => {}
         }
         return LRESULT(0);
@@ -397,5 +492,47 @@ mod tests {
         assert!(!forwarded(0xC0B3, &c), "o TaskbarCreated não volta ao Explorer");
         assert!(!forwarded(0x0001, &c), "WM_CREATE é da própria janela");
         assert!(!forwarded(0x0014, &c));
+    }
+
+    #[test]
+    fn real_taskbar_is_the_shells_not_another_host() {
+        // Zefiro, outro host (sonda, YASB) e o Explorer, nessa ordem Z.
+        let candidates = [(10, 1), (20, 2), (30, 3)];
+        assert_eq!(pick_real(&candidates, 10, 3), Some(30));
+        assert_eq!(pick_real(&candidates, 10, 0), Some(20), "sem shell conhecido, o primeiro que não é nosso");
+        assert_eq!(pick_real(&[(10, 1)], 10, 3), None);
+    }
+
+    #[test]
+    fn nested_forwards_stop() {
+        assert!(may_forward(0));
+        assert!(may_forward(1));
+        assert!(!may_forward(2));
+    }
+
+    #[test]
+    fn restart_only_when_explorers_taskbar_changed() {
+        assert!(is_restart(None, Some(7)));
+        assert!(is_restart(Some(7), Some(8)));
+        assert!(!is_restart(Some(7), Some(7)), "outro host mandou TaskbarCreated: o Explorer não reiniciou");
+        assert!(!is_restart(Some(7), None));
+    }
+
+    #[test]
+    fn forward_waits_like_the_shell() {
+        const { assert!(FORWARD_MS >= 3000) };
+    }
+
+    #[test]
+    fn copydata_with_null_pointers_is_ignored() {
+        // SAFETY: ponteiros nulos ou para dados locais vivos durante o teste.
+        unsafe {
+            assert!(copydata_bytes(std::ptr::null()).is_none());
+            let empty = COPYDATASTRUCT { dwData: 1, cbData: 5, lpData: std::ptr::null_mut() };
+            assert!(copydata_bytes(&empty).is_none());
+            let mut data = [1u8, 2, 3];
+            let ok = COPYDATASTRUCT { dwData: 1, cbData: 3, lpData: data.as_mut_ptr().cast() };
+            assert_eq!(copydata_bytes(&ok).map(|(d, b)| (d, b.to_vec())), Some((1, vec![1, 2, 3])));
+        }
     }
 }

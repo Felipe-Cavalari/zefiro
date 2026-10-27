@@ -40,11 +40,21 @@ impl SystrayRuntime {
     /// Troca os ícones mantendo o hover e a seleção no mesmo ícone (pela chave, não pela posição).
     fn set_items(&mut self, items: Vec<TrayItem>) {
         let follow = |i: Option<usize>| i.and_then(|i| self.items.get(i)).and_then(|old| items.iter().position(|n| n.key == old.key));
-        let (selected, hover) = (follow(self.selected), follow(self.hover));
-        self.selected = selected;
+        // O hover só fica se o ícone continua sob o mouse; a seleção do teclado segue o ícone.
+        let hover = self.hover.filter(|&i| follow(Some(i)) == Some(i));
+        self.selected = follow(self.selected);
         self.hover = hover;
         self.names = items.iter().map(|i| display_name(&i.tip, &i.exe)).collect();
         self.items = items;
+    }
+}
+
+impl SystrayRuntime {
+    /// Roda: uma linha por passo; o hover sai (a célula sob o mouse mudou).
+    fn scroll_by(&mut self, delta: i32) {
+        let max = max_scroll(self.items.len(), self.max_h);
+        self.scroll = if delta > 0 { self.scroll.saturating_sub(1) } else { (self.scroll + 1).min(max) };
+        self.hover = None;
     }
 }
 
@@ -59,7 +69,12 @@ impl Loop {
         let s = &mut self.systray;
         match (wanted, s.host.is_some()) {
             (true, false) => match TrayHost::start(Arc::new(|| window::post_user(USER_TRAY)), ICON_PX) {
-                Ok(host) => s.host = Some(host),
+                Ok(host) => {
+                    s.host = Some(host);
+                    // O ícone do Zefiro entrou antes do host e não responde ao pedido do próprio
+                    // Zefiro: ele vai de novo, agora passando pelo host.
+                    crate::tray_loop::show_icon();
+                }
                 Err(e) => tracing::warn!("bandeja indisponível: {e}"),
             },
             (false, true) => {
@@ -178,9 +193,7 @@ impl Loop {
         if !self.systray_open() {
             return Ok(false);
         }
-        let s = &mut self.systray;
-        let max = max_scroll(s.items.len(), s.max_h);
-        s.scroll = if delta > 0 { s.scroll.saturating_sub(1) } else { (s.scroll + 1).min(max) };
+        self.systray.scroll_by(delta);
         self.redraw_open_panel()?;
         Ok(true)
     }
@@ -240,7 +253,30 @@ mod tests {
         r.set_items(vec![item(1, "A", 0), item(2, "B", 9), item(3, "C", 0)]);
         assert_eq!((r.selected, r.hover), (Some(1), Some(2)));
         r.set_items(vec![item(3, "C", 0), item(1, "A", 0)]);
-        assert_eq!((r.selected, r.hover), (None, Some(0)), "B saiu; C mudou de lugar");
+        assert_eq!(r.selected, None, "B saiu");
         assert_eq!(r.names, ["C", "A"]);
+    }
+
+    #[test]
+    fn hover_is_dropped_when_the_icon_under_the_mouse_moves() {
+        let mut r = SystrayRuntime::default();
+        r.set_items(vec![item(1, "A", 0), item(2, "B", 0), item(3, "C", 0)]);
+        r.hover = Some(2);
+        r.set_items(vec![item(1, "A", 0), item(2, "B", 0), item(3, "C", 9)]);
+        assert_eq!(r.hover, Some(2), "mesmo lugar: continua");
+        r.set_items(vec![item(3, "C", 0), item(1, "A", 0)]);
+        assert_eq!(r.hover, None, "C mudou de lugar: o nome não pode ficar numa célula sem o mouse");
+    }
+
+    #[test]
+    fn scrolling_drops_hover() {
+        let mut r = SystrayRuntime::default();
+        r.set_items((0..40).map(|i| item(i, "x", 0)).collect());
+        r.max_h = 200.0;
+        r.hover = Some(3);
+        r.scroll_by(-120);
+        assert_eq!((r.scroll, r.hover), (1, None));
+        r.scroll_by(120);
+        assert_eq!(r.scroll, 0);
     }
 }
