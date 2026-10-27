@@ -954,6 +954,7 @@ dependencies = [
  "zefiro-core",
  "zefiro-integration-chat",
  "zefiro-integration-clock",
+ "zefiro-integration-spotify",
  "zefiro-integration-usage",
  "zefiro-platform",
  "zefiro-resources",

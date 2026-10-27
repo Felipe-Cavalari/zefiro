@@ -12,6 +12,8 @@ pub mod hud;
 pub mod menu;
 pub mod power;
 pub mod settings;
+pub mod spotify;
+pub mod spotify_view;
 pub mod systray;
 pub mod terminal;
 pub mod usage;

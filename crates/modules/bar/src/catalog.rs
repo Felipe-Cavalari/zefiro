@@ -14,6 +14,7 @@ pub const ITEMS: &[ItemDescriptor] = &[
     ItemDescriptor { id: "vscode", name: "VS Code", description: "Projetos recentes do VS Code" },
     ItemDescriptor { id: "terminal", name: "Terminal", description: "Perfis do Windows Terminal; o lápis escolhe e ordena" },
     ItemDescriptor { id: "chat", name: "Chat com o Claude", description: "Pergunte ao Claude direto da barra (usa o Claude Code)" },
+    ItemDescriptor { id: "spotify", name: "Spotify", description: "Busque e toque no Spotify sem abrir o app (Premium)" },
     ItemDescriptor { id: "notifications", name: "Notificações", description: "Contador; clique abre a central" },
     ItemDescriptor { id: "dnd", name: "Não perturbe", description: "Liga e desliga o Não perturbe; o botão do meio abre as configurações" },
     ItemDescriptor { id: "island", name: "Ilha", description: "Mídia, avisos e espiada; clique abre o painel com abas" },
@@ -34,11 +35,12 @@ mod tests {
 
     #[test]
     fn new_items_are_in_the_catalog() {
-        for id in ["claude", "codex", "vscode", "terminal", "chat", "notifications", "dnd", "power", "player", "weather", "hardware", "island", "tray"] {
+        for id in ["claude", "codex", "vscode", "terminal", "chat", "notifications", "dnd", "power", "player", "weather", "hardware", "island", "tray", "spotify"] {
             assert!(descriptor(id).is_some(), "{id} fora do catálogo");
         }
         let names: std::collections::HashSet<_> = ITEMS.iter().map(|i| i.name).collect();
         assert_eq!(names.len(), ITEMS.len(), "nomes repetidos");
         assert!(ITEMS.iter().all(|i| !i.name.is_empty() && !i.description.is_empty()));
+        assert_eq!(descriptor("spotify").map(|d| (d.name, d.description)), Some(("Spotify", "Busque e toque no Spotify sem abrir o app (Premium)")));
     }
 }

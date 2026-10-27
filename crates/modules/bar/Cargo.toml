@@ -16,3 +16,4 @@ zefiro-ui.workspace = true
 zefiro-integration-clock.workspace = true
 zefiro-integration-usage.workspace = true
 zefiro-integration-chat.workspace = true
+zefiro-integration-spotify.workspace = true

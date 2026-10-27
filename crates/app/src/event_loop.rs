@@ -205,6 +205,8 @@ impl Loop {
             PanelKind::Chat => self.chat_panel_list(scale),
             PanelKind::Power => self.power_panel_list(scale),
             PanelKind::Tray => self.systray_panel_list(scale),
+            // Ligado na Tarefa 11 do plano do Spotify (spotify_loop.rs).
+            PanelKind::Spotify => DisplayList::default(),
         }
     }
 
