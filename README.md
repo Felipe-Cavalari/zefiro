@@ -2,7 +2,7 @@
 
 <img src="assets/branding/logo.svg" alt="Símbolo do Zefiro" width="96" height="96" />
 
-Um ambiente de desktop nativo para Windows (barra, ilha de mídia, launcher, dock), sem WebView: leve, fluido e personalizável.
+Um ambiente de desktop nativo para Windows (barra, ilha de mídia, launcher), sem WebView: leve, fluido e personalizável.
 
 > **Status:** em desenvolvimento (Fase 1 até a 1e: barra no design da ilha, modo de edição, ilha embutida em Rust, áudio e brilho e os widgets do YASB: uso do Claude e do Codex, projetos do VS Code, notificações, Não perturbe e energia; próxima: itens declarativos). Uso pessoal, ainda sem instalador.
 

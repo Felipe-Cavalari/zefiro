@@ -1,7 +1,7 @@
 # Zefiro — Planejamento
 
 > **Projeto:** Zefiro (de Zéfiro, o vento oeste: leve e rápido)
-> **Proposta:** um **"Seelen-UI nativo"**: um ambiente de desktop para Windows (barra, ilha de mídia, launcher, dock e gerenciador de janelas), sem WebView, mais fluido e com muito menos RAM.
+> **Proposta:** um **"Seelen-UI nativo"**: um ambiente de desktop para Windows (barra, ilha de mídia, launcher e gerenciador de janelas), sem WebView, mais fluido e com muito menos RAM. Ele complementa a barra de tarefas do Windows em vez de substituí-la.
 > **Data:** 2026-10-14 · **Autor:** Felipe Cavalari
 > **Licença:** MIT OR Apache-2.0
 > **Status:** rascunho para revisão
@@ -18,8 +18,11 @@ Módulos, em ordem de entrega:
 
 1. **Barra** (Fase 1): widgets sempre visíveis no topo, com uma **ilha de mídia** no centro, ao estilo do macOS/Dynamic Island.
 2. **Launcher** (Fase 3): atalho global que busca apps, arquivos, projetos e ações.
-3. **Dock** (Fase 4): estilo macOS, com apps fixados e abertos.
-4. **Gerenciador de janelas** (Fase 6): tiling próprio. Até lá, integração com o **komorebi** (depois da 1.0).
+3. **Gerenciador de janelas** (Fase 6): tiling próprio. Até lá, integração com o **komorebi** (depois da 1.0).
+
+A **dock** (antiga Fase 4) saiu do plano em 2026-10-26: os apps fixados e abertos, a bandeja e o progresso ficam com a barra de tarefas do Windows (§12).
+
+**Posicionamento:** barra + ilha de mídia + widgets para quem programa (Claude, Codex, VS Code, Terminal, chat, WSL), nativo, leve e com desinstalação limpa. O que diferencia o Zefiro de docks e barras "estilo macOS" como o MyDockFinder e o Seelen-UI é a ilha, os widgets de dev e a estabilidade, não imitar o macOS.
 
 O projeto será **publicado como open source**. Antes disso, eu uso no dia a dia para encontrar bugs (dogfooding), com **logs e diagnóstico embutidos desde o primeiro dia**.
 
@@ -30,7 +33,7 @@ O projeto será **publicado como open source**. Antes disso, eu uso no dia a dia
 | **Nativo de verdade** | Rust + Win32 + compositor do Windows + Direct2D/DirectWrite. Sem WebView, sem Electron, sem Python. |
 | **Leve por padrão** | Nada roda se o módulo ou widget estiver desligado. Atualizações por evento do sistema sempre que possível; polling só quando não há evento. |
 | **Fluido** | Animações na taxa do monitor (60–144 Hz+), com física de mola, rodando no **compositor** sempre que possível. Abrir um painel nunca espera dado de rede. |
-| **Uma integração, várias caras** | Toda integração expõe *estado* (o que a barra e a dock mostram) e *ações* (o que o launcher busca). |
+| **Uma integração, várias caras** | Toda integração expõe *estado* (o que a barra mostra) e *ações* (o que o launcher busca). |
 | **Personalizável e seguro** | Temas e itens da comunidade são **declarativos**: dá para compartilhar sem que eles executem código no PC de ninguém. |
 | **Falha isolada** | Uma integração com erro nunca derruba a barra: o widget mostra o erro e tenta de novo sozinho. |
 | **Portável no núcleo** | Só a camada de plataforma conhece o Windows. Linux fica "engatilhado", não implementado. |
@@ -60,7 +63,7 @@ Valores medidos com **todos os widgets da Fase 1 ligados**, em 2 monitores:
 | **1 — Barra (MVP)** | Barra + **ilha de mídia** + painéis + **modo de edição** (komorebi fica fora até a 1.0; os itens declarativos foram para a Fase 5) | Só eu (dogfooding) | YASB, Fancy Toolbar (Seelen), Dynamic Island, Dock do PowerToys |
 | **2 — Beta público** | Instalador, documentação, **app de configurações** pesquisável com pré-visualização ao vivo, formato de recursos documentado | Público (beta) | Settings do Seelen |
 | **3 — Launcher** | Busca fuzzy em apps, arquivos, projetos e **ações das integrações** | Público | Raycast, Apps Menu do Seelen |
-| **4 — Dock** | Apps fixados e abertos, ampliação com mola, badges (itens declarativos na dock só depois da Fase 5) | Público | Weg do Seelen |
+| ~~4 — Dock~~ | **Removida em 2026-10-26** (ver §12) | — | — |
 | **5 — Plugins e catálogo** | **Itens declarativos** + linguagem de expressões, providers externos (fora do processo) + catálogo de recursos da comunidade | Público | Providers e marketplace do Zebar |
 | **6 — Gerenciador de janelas** | Tiling próprio e animado (BSP, colunas, monocle…), **só se ainda fizer falta** depois da integração com o komorebi | Público | Window Manager do Seelen |
 | **7 — Linux (opcional)** | Implementação de plataforma para Wayland | Futuro | — |
@@ -96,7 +99,7 @@ Valores medidos com **todos os widgets da Fase 1 ligados**, em 2 monitores:
 │ app (binário)                                                │
 │   lê config, sobe plataforma, registra módulos e integrações │
 ├──────────────────────────────────────────────────────────────┤
-│ módulos: bar · island · (launcher · dock · wm, fases futuras)│
+│ módulos: bar · island · (launcher · wm, fases futuras)       │
 ├──────────────────────────────────────────────────────────────┤
 │ integrations/*  (providers: estado + ações)                  │
 │   partes do Windows ficam atrás de traits de serviço         │
@@ -131,7 +134,7 @@ zefiro/
 │  ├─ platform/              # só traits
 │  ├─ platform-windows/
 │  ├─ modules/
-│  │  ├─ bar/  island/       # Fase 1 (launcher/, dock/, wm/ nas fases seguintes)
+│  │  ├─ bar/  island/       # Fase 1 (launcher/ e wm/ nas fases seguintes)
 │  ├─ integrations/
 │  │  ├─ media/  clock/  komorebi/  vscode/  brightness/
 │  │  ├─ claude/ codex/  pomodoro/  audio/   focus/
@@ -156,7 +159,7 @@ zefiro/
 
 ### 3.3 Contrato de integração (provider)
 
-Toda integração implementa o mesmo contrato. A barra e a dock usam o **estado**; o launcher (Fase 3) busca as **ações**; os providers externos (Fase 5) falam o mesmo modelo por JSON-RPC.
+Toda integração implementa o mesmo contrato. A barra usa o **estado**; o launcher (Fase 3) busca as **ações**; os providers externos (Fase 5) falam o mesmo modelo por JSON-RPC.
 
 ```rust
 pub trait Integration: Send + 'static {
@@ -323,7 +326,7 @@ A comunidade personaliza o Zefiro com **recursos**: arquivos declarativos que s�
 | Tipo | O que é | Fase |
 |---|---|---|
 | **Tema** | Tokens (§4.1) + ajustes por módulo | 1 |
-| **Item** | Elemento de barra (e depois de dock): ícone, texto, cor, painel e ações, ligado a um provider | 5 |
+| **Item** | Elemento de barra: ícone, texto, cor, painel e ações, ligado a um provider | 5 |
 | **Pacote de ícones** | Mapeia nomes de ícones para glifos/SVGs | 2 |
 | **Idioma** | Textos da interface | 2 |
 | **Sons** | Sons de eventos (opcional) | Futuro |
@@ -490,9 +493,9 @@ App de configurações (pesquisável, pré-visualização ao vivo), documentaç�
 
 Atalho global, janela acrílica, busca fuzzy em apps, arquivos, projetos e **ações de todas as integrações**. Spec própria.
 
-### Fase 4 — Dock
+### ~~Fase 4 — Dock~~
 
-Estilo macOS: apps fixados e abertos, indicadores, badges, ampliação com mola. Itens declarativos na dock só depois da Fase 5. Spec própria.
+**Removida em 2026-10-26.** Uma dock no Windows só vale a pena substituindo a barra de tarefas, e é aí que estão os bugs de todas as docks (MyDockFinder, Seelen, Nexus): o Windows não tem API para isso, então esconder a barra de tarefas é um truque que se desfaz quando o Explorer reinicia e a cada atualização; a bandeja só funciona imitando a `Shell_TrayWnd`; o progresso e os selos dos ícones (`ITaskbarList3`) não chegam a terceiros; apps da Store, PWAs, Electron e jogos se identificam mal (ícones duplicados); e o UIPI bloqueia as janelas de administrador. O Zefiro **complementa** o Windows em vez de substituí-lo: a barra de tarefas continua cuidando da bandeja, dos apps abertos, do progresso e das listas de atalhos. O mesmo motivo já tinha tirado o chip Apps na 1e (ADR-0011). A numeração das fases seguintes fica como está.
 
 ### Fase 5 — Plugins e catálogo
 

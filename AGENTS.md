@@ -1,6 +1,6 @@
 # AGENTS.md — instruções para agentes (Codex e outros)
 
-Zefiro é um ambiente de desktop nativo para Windows (barra, ilha de mídia, launcher, dock), sem WebView: leve, fluido e personalizável. Ele é escrito em Rust; a ilha de mídia é um fork em C++.
+Zefiro é um ambiente de desktop nativo para Windows (barra, ilha de mídia, launcher), sem WebView: leve, fluido e personalizável. Ele é escrito em Rust; a ilha de mídia é um fork em C++.
 
 Leia antes de mudar qualquer coisa:
 
