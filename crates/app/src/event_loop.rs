@@ -201,6 +201,7 @@ impl Loop {
             PanelKind::Terminal => self.terminal_panel_list(scale),
             PanelKind::Chat => self.chat_panel_list(scale),
             PanelKind::Power => self.power_panel_list(scale),
+            PanelKind::Tray => DisplayList::default(),
         }
     }
 
