@@ -12,6 +12,7 @@ pub mod hud;
 pub mod menu;
 pub mod power;
 pub mod settings;
+pub mod systray;
 pub mod terminal;
 pub mod usage;
 pub mod vscode;
