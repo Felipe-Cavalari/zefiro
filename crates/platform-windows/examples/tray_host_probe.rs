@@ -69,7 +69,7 @@ fn main() -> windows::core::Result<()> {
     println!("{} ícones:", items.len());
     for i in &items {
         let size = i.image.as_ref().map_or("sem imagem".into(), |im| format!("{}x{}", im.width(), im.height()));
-        println!("  {:<40} {:<32} {size}", format!("{:?}", i.tip.lines().next().unwrap_or_default()), i.exe);
+        println!("  {:<40} {:<32} {size} {:?}", format!("{:?}", i.tip.lines().next().unwrap_or_default()), i.exe, i.key);
     }
     // `--click <trecho do exe> left|right`: manda o clique e diz o que apareceu.
     let args: Vec<String> = std::env::args().collect();

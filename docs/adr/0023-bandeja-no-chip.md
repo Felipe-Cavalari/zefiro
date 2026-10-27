@@ -63,6 +63,11 @@ depois de `AllowSetForegroundWindow`.
 - **Limitações:** `IsWindowVisible` e o processo dono da primeira `Shell_TrayWnd` mudam enquanto o chip
   existe (o host é invisível e é do Zefiro); nenhum app comum quebrou no spike. Balões (`NIF_INFO`)
   ficam de fora. Shift+F10 não chega ao painel (é `WM_SYSKEYDOWN`); a tecla de menu abre o menu do app.
+- **Ícone de volume do Windows fora do painel (2026-10-27):** o `explorer.exe` registra um ícone de volume
+  (`{7820AE73-23E3-4229-82C1-E41CB67D5B9C}`) que a barra de tarefas do Windows 11 não mostra, mas o host
+  recebia, e o painel exibia. O clique nele não fazia nada (`callback = 0`), e o chip de som já faz o papel
+  dele. `TrayModel::visible` o deixa de fora pelo GUID (`WINDOWS_VOLUME`); a sonda `tray_host_probe`
+  mostra a chave de cada ícone.
 - **Nomes:** `tray.rs` é o ícone do próprio Zefiro; `tray_host.rs`, `systray` e `systray_loop.rs` são a
   bandeja dos outros apps.
 - **Plano B:** se uma atualização do Windows mudar o formato, `wire::parse` devolve `None` e o painel

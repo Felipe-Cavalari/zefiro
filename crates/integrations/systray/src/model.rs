@@ -19,6 +19,11 @@ impl Key {
     }
 }
 
+/// Ícone de volume do Windows ({7820AE73-23E3-4229-82C1-E41CB67D5B9C}, do `explorer.exe`), com os
+/// bytes como chegam no `WM_COPYDATA`. O painel não mostra: o chip de som faz o papel dele, e o clique
+/// não chega a lugar nenhum (`callback = 0`).
+const WINDOWS_VOLUME: [u8; 16] = [0x73, 0xAE, 0x20, 0x78, 0xE3, 0x23, 0x29, 0x42, 0x82, 0xC1, 0xE4, 0x1C, 0xB6, 0x7D, 0x5B, 0x9C];
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Icon<I> {
     pub key: Key,
@@ -74,7 +79,7 @@ impl<I: Clone> TrayModel<I> {
 
     /// Os que aparecem no painel, na ordem de chegada.
     pub fn visible(&self) -> Vec<&Icon<I>> {
-        self.icons.iter().filter(|i| !i.hidden).collect()
+        self.icons.iter().filter(|i| !i.hidden && i.key != Key::Guid(WINDOWS_VOLUME)).collect()
     }
 
     pub fn get(&self, key: &Key) -> Option<&Icon<I>> {
@@ -119,6 +124,16 @@ mod tests {
 
     fn tips(m: &TrayModel<u8>) -> Vec<&str> {
         m.visible().iter().map(|i| i.tip.as_str()).collect()
+    }
+
+    #[test]
+    fn windows_volume_icon_never_shows() {
+        let mut m = TrayModel::default();
+        // {7820AE73-23E3-4229-82C1-E41CB67D5B9C}, como chega no `WM_COPYDATA` (sonda tray_host_probe).
+        let volume = [0x73, 0xAE, 0x20, 0x78, 0xE3, 0x23, 0x29, 0x42, 0x82, 0xC1, 0xE4, 0x1C, 0xB6, 0x7D, 0x5B, 0x9C];
+        m.apply(&Notify { guid: Some(volume), ..n(Op::Add, 1, 100, NIF_TIP | NIF_GUID, "Alto-falantes (USB): 58%") }, None::<u8>);
+        m.apply(&n(Op::Add, 2, 0, NIF_TIP, "Discord"), None);
+        assert_eq!(tips(&m), ["Discord"], "o chip de som já faz o papel dele");
     }
 
     #[test]
