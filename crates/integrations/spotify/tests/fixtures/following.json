@@ -1,0 +1,21 @@
+{
+ "artists": {
+  "items": [
+   {
+    "id": "ti",
+    "name": "Tame Impala",
+    "uri": "spotify:artist:ti",
+    "type": "artist",
+    "external_urls": {
+     "spotify": "https://open.spotify.com/artist/ti"
+    }
+   }
+  ],
+  "next": "https://api.spotify.com/v1/me/following?type=artist&after=ti&limit=50",
+  "cursors": {
+   "after": "ti"
+  },
+  "limit": 50,
+  "total": 7
+ }
+}

@@ -1,0 +1,71 @@
+{
+ "items": [
+  {
+   "id": "p1",
+   "name": "Foco no código",
+   "uri": "spotify:playlist:p1",
+   "type": "playlist",
+   "collaborative": false,
+   "owner": {
+    "id": "me",
+    "display_name": "me"
+   },
+   "images": [
+    {
+     "url": "https://i.scdn.co/image/p1",
+     "height": null,
+     "width": null
+    }
+   ],
+   "items": {
+    "total": 42
+   }
+  },
+  {
+   "id": "p2",
+   "name": "Daily Mix 1",
+   "uri": "spotify:playlist:p2",
+   "type": "playlist",
+   "collaborative": false,
+   "owner": {
+    "id": "spotify",
+    "display_name": "Spotify"
+   },
+   "images": [
+    {
+     "url": "https://i.scdn.co/image/p2",
+     "height": null,
+     "width": null
+    }
+   ],
+   "items": {
+    "total": 42
+   }
+  },
+  {
+   "id": "p3",
+   "name": "Rolê",
+   "uri": "spotify:playlist:p3",
+   "type": "playlist",
+   "collaborative": true,
+   "owner": {
+    "id": "outro",
+    "display_name": "outro"
+   },
+   "images": [
+    {
+     "url": "https://i.scdn.co/image/p3",
+     "height": null,
+     "width": null
+    }
+   ],
+   "items": {
+    "total": 42
+   }
+  }
+ ],
+ "next": null,
+ "offset": 0,
+ "limit": 50,
+ "total": 3
+}

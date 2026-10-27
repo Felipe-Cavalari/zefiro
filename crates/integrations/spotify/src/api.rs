@@ -25,8 +25,9 @@ impl Method {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request { pub method: Method, pub path: String, pub body: Option<String> }
 
+/// `Device` é um aparelho do Spotify Connect numa lista do painel; nunca vai para a busca.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Kind { Track, Episode, Album, Artist, Playlist, Show }
+pub enum Kind { Track, Episode, Album, Artist, Playlist, Show, Device }
 
 impl Kind {
     pub fn api_name(&self) -> &'static str {
@@ -37,6 +38,7 @@ impl Kind {
             Kind::Artist => "artist",
             Kind::Playlist => "playlist",
             Kind::Show => "show",
+            Kind::Device => "device",
         }
     }
 }

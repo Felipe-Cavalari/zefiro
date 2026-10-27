@@ -1,0 +1,35 @@
+{
+ "items": [
+  {
+   "added_at": "2026-10-01T00:00:00Z",
+   "show": {
+    "id": "sh",
+    "name": "Café da Manhã",
+    "uri": "spotify:show:sh",
+    "type": "show",
+    "publisher": "Folha",
+    "images": [
+     {
+      "url": "https://i.scdn.co/image/sh640",
+      "height": 640,
+      "width": 640
+     },
+     {
+      "url": "https://i.scdn.co/image/sh300",
+      "height": 300,
+      "width": 300
+     },
+     {
+      "url": "https://i.scdn.co/image/sh64",
+      "height": 64,
+      "width": 64
+     }
+    ]
+   }
+  }
+ ],
+ "next": null,
+ "offset": 0,
+ "limit": 50,
+ "total": 1
+}

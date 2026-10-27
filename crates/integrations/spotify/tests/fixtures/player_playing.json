@@ -1,0 +1,73 @@
+{
+ "device": {
+  "id": "d1",
+  "is_active": true,
+  "name": "Notebook",
+  "type": "Computer",
+  "volume_percent": 60
+ },
+ "shuffle_state": true,
+ "repeat_state": "context",
+ "progress_ms": 90500,
+ "is_playing": true,
+ "currently_playing_type": "track",
+ "context": {
+  "type": "playlist",
+  "uri": "spotify:playlist:p1"
+ },
+ "item": {
+  "id": "t1",
+  "name": "The Less I Know the Better",
+  "uri": "spotify:track:t1",
+  "type": "track",
+  "duration_ms": 216000,
+  "album": {
+   "id": "cur",
+   "name": "Currents",
+   "uri": "spotify:album:cur",
+   "type": "album",
+   "album_type": "album",
+   "release_date": "2015-07-17",
+   "total_tracks": 13,
+   "images": [
+    {
+     "url": "https://i.scdn.co/image/cur640",
+     "height": 640,
+     "width": 640
+    },
+    {
+     "url": "https://i.scdn.co/image/cur300",
+     "height": 300,
+     "width": 300
+    },
+    {
+     "url": "https://i.scdn.co/image/cur64",
+     "height": 64,
+     "width": 64
+    }
+   ],
+   "artists": [
+    {
+     "id": "ti",
+     "name": "Tame Impala",
+     "uri": "spotify:artist:ti",
+     "type": "artist",
+     "external_urls": {
+      "spotify": "https://open.spotify.com/artist/ti"
+     }
+    }
+   ]
+  },
+  "artists": [
+   {
+    "id": "ti",
+    "name": "Tame Impala",
+    "uri": "spotify:artist:ti",
+    "type": "artist",
+    "external_urls": {
+     "spotify": "https://open.spotify.com/artist/ti"
+    }
+   }
+  ]
+ }
+}

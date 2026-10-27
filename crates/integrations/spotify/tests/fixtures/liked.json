@@ -1,0 +1,124 @@
+{
+ "items": [
+  {
+   "added_at": "2026-10-01T00:00:00Z",
+   "track": {
+    "id": "t1",
+    "name": "The Less I Know the Better",
+    "uri": "spotify:track:t1",
+    "type": "track",
+    "duration_ms": 216000,
+    "album": {
+     "id": "cur",
+     "name": "Currents",
+     "uri": "spotify:album:cur",
+     "type": "album",
+     "album_type": "album",
+     "release_date": "2015-07-17",
+     "total_tracks": 13,
+     "images": [
+      {
+       "url": "https://i.scdn.co/image/cur640",
+       "height": 640,
+       "width": 640
+      },
+      {
+       "url": "https://i.scdn.co/image/cur300",
+       "height": 300,
+       "width": 300
+      },
+      {
+       "url": "https://i.scdn.co/image/cur64",
+       "height": 64,
+       "width": 64
+      }
+     ],
+     "artists": [
+      {
+       "id": "ti",
+       "name": "Tame Impala",
+       "uri": "spotify:artist:ti",
+       "type": "artist",
+       "external_urls": {
+        "spotify": "https://open.spotify.com/artist/ti"
+       }
+      }
+     ]
+    },
+    "artists": [
+     {
+      "id": "ti",
+      "name": "Tame Impala",
+      "uri": "spotify:artist:ti",
+      "type": "artist",
+      "external_urls": {
+       "spotify": "https://open.spotify.com/artist/ti"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "added_at": "2026-10-02T00:00:00Z",
+   "track": {
+    "id": "t2",
+    "name": "Let It Happen",
+    "uri": "spotify:track:t2",
+    "type": "track",
+    "duration_ms": 467000,
+    "album": {
+     "id": "cur",
+     "name": "Currents",
+     "uri": "spotify:album:cur",
+     "type": "album",
+     "album_type": "album",
+     "release_date": "2015-07-17",
+     "total_tracks": 13,
+     "images": [
+      {
+       "url": "https://i.scdn.co/image/cur640",
+       "height": 640,
+       "width": 640
+      },
+      {
+       "url": "https://i.scdn.co/image/cur300",
+       "height": 300,
+       "width": 300
+      },
+      {
+       "url": "https://i.scdn.co/image/cur64",
+       "height": 64,
+       "width": 64
+      }
+     ],
+     "artists": [
+      {
+       "id": "ti",
+       "name": "Tame Impala",
+       "uri": "spotify:artist:ti",
+       "type": "artist",
+       "external_urls": {
+        "spotify": "https://open.spotify.com/artist/ti"
+       }
+      }
+     ]
+    },
+    "artists": [
+     {
+      "id": "ti",
+      "name": "Tame Impala",
+      "uri": "spotify:artist:ti",
+      "type": "artist",
+      "external_urls": {
+       "spotify": "https://open.spotify.com/artist/ti"
+      }
+     }
+    ]
+   }
+  }
+ ],
+ "next": "https://api.spotify.com/v1/me/tracks?offset=50&limit=50",
+ "offset": 0,
+ "limit": 50,
+ "total": 120
+}

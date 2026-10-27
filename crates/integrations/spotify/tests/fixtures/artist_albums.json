@@ -1,0 +1,82 @@
+{
+ "items": [
+  {
+   "id": "cur",
+   "name": "Currents",
+   "uri": "spotify:album:cur",
+   "type": "album",
+   "album_type": "album",
+   "release_date": "2015-07-17",
+   "total_tracks": 13,
+   "images": [
+    {
+     "url": "https://i.scdn.co/image/cur640",
+     "height": 640,
+     "width": 640
+    },
+    {
+     "url": "https://i.scdn.co/image/cur300",
+     "height": 300,
+     "width": 300
+    },
+    {
+     "url": "https://i.scdn.co/image/cur64",
+     "height": 64,
+     "width": 64
+    }
+   ],
+   "artists": [
+    {
+     "id": "ti",
+     "name": "Tame Impala",
+     "uri": "spotify:artist:ti",
+     "type": "artist",
+     "external_urls": {
+      "spotify": "https://open.spotify.com/artist/ti"
+     }
+    }
+   ]
+  },
+  {
+   "id": "lon",
+   "name": "Lonerism",
+   "uri": "spotify:album:lon",
+   "type": "album",
+   "album_type": "album",
+   "release_date": "2012-10-05",
+   "total_tracks": 13,
+   "images": [
+    {
+     "url": "https://i.scdn.co/image/lon640",
+     "height": 640,
+     "width": 640
+    },
+    {
+     "url": "https://i.scdn.co/image/lon300",
+     "height": 300,
+     "width": 300
+    },
+    {
+     "url": "https://i.scdn.co/image/lon64",
+     "height": 64,
+     "width": 64
+    }
+   ],
+   "artists": [
+    {
+     "id": "ti",
+     "name": "Tame Impala",
+     "uri": "spotify:artist:ti",
+     "type": "artist",
+     "external_urls": {
+      "spotify": "https://open.spotify.com/artist/ti"
+     }
+    }
+   ]
+  }
+ ],
+ "next": null,
+ "offset": 0,
+ "limit": 50,
+ "total": 2
+}

@@ -1,0 +1,26 @@
+{
+ "items": [
+  {
+   "id": "t1",
+   "name": "The Less I Know the Better",
+   "uri": "spotify:track:t1",
+   "type": "track",
+   "duration_ms": 216000,
+   "artists": [
+    {
+     "id": "ti",
+     "name": "Tame Impala",
+     "uri": "spotify:artist:ti",
+     "type": "artist",
+     "external_urls": {
+      "spotify": "https://open.spotify.com/artist/ti"
+     }
+    }
+   ]
+  }
+ ],
+ "next": null,
+ "offset": 0,
+ "limit": 50,
+ "total": 1
+}

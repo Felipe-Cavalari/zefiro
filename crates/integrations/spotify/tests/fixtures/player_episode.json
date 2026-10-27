@@ -1,0 +1,64 @@
+{
+ "device": {
+  "id": "d2",
+  "is_active": true,
+  "name": "Celular",
+  "type": "Smartphone",
+  "volume_percent": null
+ },
+ "shuffle_state": false,
+ "repeat_state": "off",
+ "progress_ms": 1000,
+ "is_playing": false,
+ "currently_playing_type": "episode",
+ "context": null,
+ "item": {
+  "id": "e1",
+  "name": "Episódio 1",
+  "uri": "spotify:episode:e1",
+  "type": "episode",
+  "duration_ms": 1800000,
+  "release_date": "2026-10-20",
+  "images": [
+   {
+    "url": "https://i.scdn.co/image/e1640",
+    "height": 640,
+    "width": 640
+   },
+   {
+    "url": "https://i.scdn.co/image/e1300",
+    "height": 300,
+    "width": 300
+   },
+   {
+    "url": "https://i.scdn.co/image/e164",
+    "height": 64,
+    "width": 64
+   }
+  ],
+  "show": {
+   "id": "sh",
+   "name": "Café da Manhã",
+   "uri": "spotify:show:sh",
+   "type": "show",
+   "publisher": "Folha",
+   "images": [
+    {
+     "url": "https://i.scdn.co/image/sh640",
+     "height": 640,
+     "width": 640
+    },
+    {
+     "url": "https://i.scdn.co/image/sh300",
+     "height": 300,
+     "width": 300
+    },
+    {
+     "url": "https://i.scdn.co/image/sh64",
+     "height": 64,
+     "width": 64
+    }
+   ]
+  }
+ }
+}

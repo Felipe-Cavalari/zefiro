@@ -1,0 +1,18 @@
+{
+ "devices": [
+  {
+   "id": "d1",
+   "is_active": true,
+   "name": "Notebook",
+   "type": "Computer",
+   "volume_percent": 60
+  },
+  {
+   "id": "d2",
+   "is_active": false,
+   "name": "Celular",
+   "type": "Smartphone",
+   "volume_percent": 100
+  }
+ ]
+}

@@ -1,0 +1,122 @@
+{
+ "items": [
+  {
+   "added_at": "2026-10-01T00:00:00Z",
+   "item": {
+    "id": "t1",
+    "name": "The Less I Know the Better",
+    "uri": "spotify:track:t1",
+    "type": "track",
+    "duration_ms": 216000,
+    "album": {
+     "id": "cur",
+     "name": "Currents",
+     "uri": "spotify:album:cur",
+     "type": "album",
+     "album_type": "album",
+     "release_date": "2015-07-17",
+     "total_tracks": 13,
+     "images": [
+      {
+       "url": "https://i.scdn.co/image/cur640",
+       "height": 640,
+       "width": 640
+      },
+      {
+       "url": "https://i.scdn.co/image/cur300",
+       "height": 300,
+       "width": 300
+      },
+      {
+       "url": "https://i.scdn.co/image/cur64",
+       "height": 64,
+       "width": 64
+      }
+     ],
+     "artists": [
+      {
+       "id": "ti",
+       "name": "Tame Impala",
+       "uri": "spotify:artist:ti",
+       "type": "artist",
+       "external_urls": {
+        "spotify": "https://open.spotify.com/artist/ti"
+       }
+      }
+     ]
+    },
+    "artists": [
+     {
+      "id": "ti",
+      "name": "Tame Impala",
+      "uri": "spotify:artist:ti",
+      "type": "artist",
+      "external_urls": {
+       "spotify": "https://open.spotify.com/artist/ti"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "added_at": "2026-10-01T00:00:00Z",
+   "item": {
+    "id": "e1",
+    "name": "Episódio 1",
+    "uri": "spotify:episode:e1",
+    "type": "episode",
+    "duration_ms": 1800000,
+    "release_date": "2026-10-20",
+    "images": [
+     {
+      "url": "https://i.scdn.co/image/e1640",
+      "height": 640,
+      "width": 640
+     },
+     {
+      "url": "https://i.scdn.co/image/e1300",
+      "height": 300,
+      "width": 300
+     },
+     {
+      "url": "https://i.scdn.co/image/e164",
+      "height": 64,
+      "width": 64
+     }
+    ],
+    "show": {
+     "id": "sh",
+     "name": "Café da Manhã",
+     "uri": "spotify:show:sh",
+     "type": "show",
+     "publisher": "Folha",
+     "images": [
+      {
+       "url": "https://i.scdn.co/image/sh640",
+       "height": 640,
+       "width": 640
+      },
+      {
+       "url": "https://i.scdn.co/image/sh300",
+       "height": 300,
+       "width": 300
+      },
+      {
+       "url": "https://i.scdn.co/image/sh64",
+       "height": 64,
+       "width": 64
+      }
+     ]
+    }
+   }
+  },
+  {
+   "added_at": "2026-10-01T00:00:00Z",
+   "item": null
+  }
+ ],
+ "next": null,
+ "offset": 0,
+ "limit": 50,
+ "total": 3
+}

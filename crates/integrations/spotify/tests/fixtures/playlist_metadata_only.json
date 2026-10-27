@@ -1,0 +1,28 @@
+{
+ "id": "p2",
+ "name": "Daily Mix 1",
+ "uri": "spotify:playlist:p2",
+ "type": "playlist",
+ "collaborative": false,
+ "owner": {
+  "id": "spotify",
+  "display_name": "Spotify"
+ },
+ "images": [
+  {
+   "url": "https://i.scdn.co/image/p2640",
+   "height": 640,
+   "width": 640
+  },
+  {
+   "url": "https://i.scdn.co/image/p2300",
+   "height": 300,
+   "width": 300
+  },
+  {
+   "url": "https://i.scdn.co/image/p264",
+   "height": 64,
+   "width": 64
+  }
+ ]
+}
