@@ -11,19 +11,19 @@ thread_local! {
     static WATCHES: RefCell<Vec<Watch>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Ocultar automaticamente: onde fica o topo de verdade do monitor de uma barra e a faixa dela, e
-/// onde o cursor está em relação a eles. O hook só observa; o clique segue para quem está embaixo.
-struct Watch { hwnd: isize, edge_y: f32, edges: Vec<(f32, f32)>, band: Rect, at_edge: bool, over: bool }
+/// Ocultar automaticamente: os gatilhos do topo do monitor de uma barra e a faixa dela, e onde o
+/// cursor está em relação a eles. O hook só observa; o clique segue para quem está embaixo.
+struct Watch { hwnd: isize, triggers: Vec<Rect>, band: Rect, at_edge: bool, over: bool }
 
-/// Passa a observar o cursor para a barra `hwnd`: `edges` são os trechos (x inicial, x final) da
-/// linha `edge_y` que são borda de verdade; `band` é a faixa da barra, na tela. Atualizar mantém o
+/// Passa a observar o cursor para a barra `hwnd`: `triggers` são os gatilhos do topo
+/// (`zefiro_ui::autohide::top_triggers`); `band` é a faixa da barra, na tela. Atualizar mantém o
 /// estado atual do cursor.
-pub fn watch_autohide(hwnd: HWND, edge_y: f32, edges: Vec<(f32, f32)>, band: Rect) {
+pub fn watch_autohide(hwnd: HWND, triggers: Vec<Rect>, band: Rect) {
     WATCHES.with(|w| {
         let mut w = w.borrow_mut();
         match w.iter_mut().find(|x| x.hwnd == hwnd.0 as isize) {
-            Some(x) => (x.edge_y, x.edges, x.band) = (edge_y, edges, band),
-            None => w.push(Watch { hwnd: hwnd.0 as isize, edge_y, edges, band, at_edge: false, over: false }),
+            Some(x) => (x.triggers, x.band) = (triggers, band),
+            None => w.push(Watch { hwnd: hwnd.0 as isize, triggers, band, at_edge: false, over: false }),
         }
     });
 }
@@ -39,7 +39,7 @@ fn cursor_moved(p: Point) {
     let changed = WATCHES.with(|w| {
         let mut changed = false;
         for x in w.borrow_mut().iter_mut() {
-            let at_edge = p.y <= x.edge_y && x.edges.iter().any(|&(a, b)| p.x >= a && p.x < b);
+            let at_edge = x.triggers.iter().any(|r| r.contains(p));
             let over = x.band.contains(p);
             changed |= (at_edge, over) != (x.at_edge, x.over);
             (x.at_edge, x.over) = (at_edge, over);

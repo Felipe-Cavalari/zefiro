@@ -22,7 +22,7 @@ enum Phase {
 /// O que a barra sabe agora para decidir.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Inputs {
-    /// Cursor encostado na borda de cima do monitor (só onde ela é borda de verdade, `top_edges`).
+    /// Cursor num gatilho do topo do monitor (`top_triggers`).
     pub at_edge: bool,
     /// Cursor sobre a faixa da barra.
     pub over_bar: bool,
@@ -100,6 +100,34 @@ pub fn top_edges(monitor: Rect, others: &[Rect]) -> Vec<(f32, f32)> {
     edges
 }
 
+/// Espessura da faixa de ativação onde outro monitor está logo acima (DIP).
+pub const COVERED_BAND_DIP: f32 = 6.0;
+
+/// `COVERED_BAND_DIP` em pixels num monitor de `dpi`.
+pub fn covered_band(dpi: u32) -> f32 {
+    COVERED_BAND_DIP * dpi as f32 / 96.0
+}
+
+/// Onde o cursor faz a barra de `monitor` descer, em pixels de tela. Na borda de verdade, a linha de
+/// cima, onde o cursor encosta e para. Onde outro monitor está logo acima, o cursor passaria direto
+/// para ele, então o gatilho é uma faixa de `band` px no alto do próprio monitor (`covered_band`).
+/// Juntos, cobrem toda a largura: a barra nunca fica só pela bandeja.
+pub fn top_triggers(monitor: Rect, others: &[Rect], band: f32) -> Vec<Rect> {
+    let mut triggers = Vec::new();
+    let mut x = monitor.x;
+    for (a, b) in top_edges(monitor, others) {
+        if a > x {
+            triggers.push(Rect::new(x, monitor.y, a - x, band));
+        }
+        triggers.push(Rect::new(a, monitor.y, b - a, 1.0));
+        x = b;
+    }
+    if monitor.right() > x {
+        triggers.push(Rect::new(x, monitor.y, monitor.right() - x, band));
+    }
+    triggers
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,6 +185,48 @@ mod tests {
         // Monitor ao lado não muda nada; um em cima, no meio, corta a borda.
         assert_eq!(top_edges(main, &[Rect::new(1920.0, 0.0, 1920.0, 1080.0)]), [(0.0, 1920.0)]);
         assert_eq!(top_edges(main, &[Rect::new(500.0, -1080.0, 1000.0, 1080.0)]), [(0.0, 500.0), (1500.0, 1920.0)]);
-        assert!(top_edges(main, &[Rect::new(-100.0, -1440.0, 2560.0, 1440.0)]).is_empty(), "coberto inteiro: só pela bandeja");
+        assert!(top_edges(main, &[Rect::new(-100.0, -1440.0, 2560.0, 1440.0)]).is_empty(), "coberto inteiro: nenhuma borda de verdade (fica a faixa, `top_triggers`)");
+    }
+
+    fn triggers_at(triggers: &[Rect], x: f32, y: f32) -> bool {
+        triggers.iter().any(|r| r.contains(zefiro_platform::geometry::Point { x, y }))
+    }
+
+    /// Arranjo de um tester: o 1 (principal) embaixo, o 2 logo acima alinhado à esquerda e mais estreito,
+    /// o 3 em retrato à esquerda dos dois. Só a ponta direita do topo do 1 era borda de verdade, e a barra
+    /// não descia pelo meio.
+    #[test]
+    fn a_monitor_with_another_above_has_a_band_under_it() {
+        let main = Rect::new(0.0, 0.0, 2560.0, 1440.0);
+        let above = Rect::new(0.0, -1080.0, 1920.0, 1080.0);
+        let portrait = Rect::new(-1440.0, -1080.0, 1440.0, 2560.0);
+        let t = top_triggers(main, &[above, portrait], covered_band(96));
+        assert!(triggers_at(&t, 1280.0, 0.0) && triggers_at(&t, 1280.0, 5.0), "o meio do topo dispara: {t:?}");
+        assert!(!triggers_at(&t, 1280.0, 6.0), "a faixa tem 6 px a 100 %");
+        assert!(!triggers_at(&t, 1280.0, -1.0), "no monitor de cima não conta");
+        // A ponta direita é borda de verdade: só a linha onde o cursor para.
+        assert!(triggers_at(&t, 2200.0, 0.0) && !triggers_at(&t, 2200.0, 1.0));
+        assert_eq!(covered_band(144), 9.0);
+    }
+
+    /// Em nenhum arranjo a barra fica só pela bandeja: todo ponto da linha de cima do monitor dispara.
+    #[test]
+    fn every_point_of_the_top_reaches_the_bar() {
+        let main = Rect::new(0.0, 0.0, 2560.0, 1440.0);
+        let arrangements: [&[Rect]; 7] = [
+            &[],
+            &[Rect::new(2560.0, 0.0, 1920.0, 1080.0)],
+            &[Rect::new(-100.0, -1440.0, 2760.0, 1440.0)],
+            &[Rect::new(500.0, -1080.0, 1000.0, 1080.0)],
+            &[Rect::new(-500.0, -1080.0, 1500.0, 1080.0)],
+            &[Rect::new(0.0, -1080.0, 1280.0, 1080.0), Rect::new(1280.0, -1080.0, 1280.0, 1080.0)],
+            &[Rect::new(0.0, -1080.0, 1920.0, 1080.0), Rect::new(-1440.0, -1080.0, 1440.0, 2560.0)],
+        ];
+        for others in arrangements {
+            let t = top_triggers(main, others, covered_band(96));
+            for x in 0..2560 {
+                assert!(triggers_at(&t, x as f32, 0.0), "x = {x} não dispara com {others:?}");
+            }
+        }
     }
 }

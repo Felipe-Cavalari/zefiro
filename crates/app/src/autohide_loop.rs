@@ -5,7 +5,7 @@
 use windows::core::Result;
 use zefiro_platform::geometry::Rect;
 use zefiro_platform_windows::{bar_context, monitors, window};
-use zefiro_ui::autohide::{Inputs, top_edges};
+use zefiro_ui::autohide::{Inputs, covered_band, top_triggers};
 
 use crate::event_loop::{Loop, TIMER_AUTOHIDE};
 
@@ -76,7 +76,8 @@ impl Loop {
             let monitor = b.monitor().rect;
             let others: Vec<Rect> = self.autohide.screens.iter().filter(|r| **r != monitor).copied().collect();
             // A faixa muda com a altura e o formato; atualizar mantém o que o hook já sabe do cursor.
-            bar_context::watch_autohide(b.hwnd(), monitor.y, top_edges(monitor, &others), b.band_on_screen());
+            let triggers = top_triggers(monitor, &others, covered_band(b.monitor().dpi));
+            bar_context::watch_autohide(b.hwnd(), triggers, b.band_on_screen());
             let (at_edge, over_bar) = bar_context::autohide_cursor(b.hwnd());
             let inputs = Inputs { at_edge, over_bar, held: open == Some(i) || editing == Some(i), fullscreen: b.is_hidden() };
             let step = self.bars[i].auto.step(inputs, now);
