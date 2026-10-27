@@ -995,6 +995,15 @@ name = "zefiro-integration-devices"
 version = "1.2.2"
 
 [[package]]
+name = "zefiro-integration-spotify"
+version = "1.2.2"
+dependencies = [
+ "serde_json",
+ "zefiro-integration-chat",
+ "zefiro-integration-update",
+]
+
+[[package]]
 name = "zefiro-integration-systray"
 version = "1.2.2"
 

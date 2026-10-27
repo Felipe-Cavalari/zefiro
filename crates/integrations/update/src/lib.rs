@@ -103,8 +103,13 @@ const K: [u32; 64] = [
     0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ];
 
-/// SHA-256 (FIPS 180-4) em hexadecimal minúsculo. Próprio, para não puxar dependência por ~40 linhas.
+/// SHA-256 (FIPS 180-4) em hexadecimal minúsculo.
 pub fn sha256_hex(data: &[u8]) -> String {
+    sha256(data).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// SHA-256 (FIPS 180-4) em bytes. Próprio, para não puxar dependência por ~40 linhas.
+pub fn sha256(data: &[u8]) -> [u8; 32] {
     let mut h: [u32; 8] = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
     let mut msg = data.to_vec();
     let bits = (data.len() as u64).wrapping_mul(8);
@@ -144,5 +149,9 @@ pub fn sha256_hex(data: &[u8]) -> String {
             *x = x.wrapping_add(v);
         }
     }
-    h.iter().map(|x| format!("{x:08x}")).collect()
+    let mut out = [0u8; 32];
+    for (chunk, x) in out.as_chunks_mut::<4>().0.iter_mut().zip(h) {
+        *chunk = x.to_be_bytes();
+    }
+    out
 }
