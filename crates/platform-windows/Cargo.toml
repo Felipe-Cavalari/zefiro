@@ -18,6 +18,7 @@ zefiro-integration-usage.workspace = true
 zefiro-integration-update.workspace = true
 zefiro-integration-chat.workspace = true
 zefiro-integration-systray.workspace = true
+zefiro-integration-spotify.workspace = true
 windows.workspace = true
 windows-core.workspace = true
 windows-numerics.workspace = true

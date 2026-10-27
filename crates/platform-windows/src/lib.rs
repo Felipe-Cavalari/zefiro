@@ -28,6 +28,8 @@ pub mod painter;
 pub mod power;
 pub mod popup_menu;
 pub mod privacy;
+pub mod secret;
+pub mod spotify_auth;
 pub mod system;
 pub mod system_events;
 pub mod text;

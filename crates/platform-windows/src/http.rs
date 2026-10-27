@@ -3,9 +3,9 @@
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 use windows::Foundation::Uri;
-use windows::Storage::Streams::DataReader;
+use windows::Storage::Streams::{DataReader, UnicodeEncoding};
 use windows::Web::Http::Filters::{HttpBaseProtocolFilter, HttpCacheReadBehavior, HttpCacheWriteBehavior};
-use windows::Web::Http::{HttpClient, HttpMethod, HttpRequestMessage, HttpResponseMessageSource};
+use windows::Web::Http::{HttpClient, HttpMethod, HttpRequestMessage, HttpResponseMessageSource, HttpStringContent};
 use windows::core::{HSTRING, Result};
 
 pub const USER_AGENT: &str = "Zefiro/0.1 (barra de desktop; https://github.com/Felipe-Cavalari/zefiro)";
@@ -52,11 +52,21 @@ pub fn get_with(url: &str, headers: &[(&str, &str)], timeout: Duration) -> Resul
 
 /// Como `get_with`, e o `Retry-After` em segundos, se veio (num 429, por exemplo).
 pub fn get_with_retry_after(url: &str, headers: &[(&str, &str)], timeout: Duration) -> Result<(u16, String, Option<u64>)> {
+    send("GET", url, headers, None, timeout)
+}
+
+/// Qualquer método, com cabeçalhos, corpo opcional (content-type, texto em UTF-8) e tempo limite:
+/// status, corpo e o `Retry-After` em segundos.
+pub fn send(method: &str, url: &str, headers: &[(&str, &str)], body: Option<(&str, &str)>, timeout: Duration) -> Result<(u16, String, Option<u64>)> {
     let uri = Uri::CreateUri(&HSTRING::from(url))?;
-    let request = HttpRequestMessage::Create(&HttpMethod::Get()?, &uri)?;
+    let request = HttpRequestMessage::Create(&HttpMethod::Create(&HSTRING::from(method))?, &uri)?;
     let request_headers = request.Headers()?;
     for (name, value) in headers {
         request_headers.TryAppendWithoutValidation(&HSTRING::from(*name), &HSTRING::from(*value))?;
+    }
+    if let Some((content_type, text)) = body {
+        let content = HttpStringContent::CreateFromStringWithEncodingAndMediaType(&HSTRING::from(text), UnicodeEncoding::Utf8, &HSTRING::from(content_type))?;
+        request.SetContent(&content)?;
     }
     let op = client()?.SendRequestAsync(&request)?;
     let (done, wait) = mpsc::channel::<()>();
