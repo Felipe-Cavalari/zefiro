@@ -37,8 +37,8 @@ coisas não cabem no mesmo TOML. Ficou `[bar] display = "todos" | "principal"`.
 
 ## Decisão
 
-- A regra é portável (`zefiro_ui::autohide`): desce depois de **300 ms** com o cursor na borda de verdade
-  (`top_edges` tira os trechos que encostam num monitor acima), sobe **500 ms** depois de o cursor sair
+- A regra é portável (`zefiro_ui::autohide`): desce depois de **300 ms** com o cursor num gatilho do topo
+  (`top_triggers`; ver "Topo coberto por outro monitor", abaixo), sobe **500 ms** depois de o cursor sair
   da faixa, fica descida com painel, menu ou Editar barra abertos no monitor, e fica fora com tela cheia.
   Avisos da ilha não a trazem. A regra roda depois de cada evento do laço; os prazos usam
   `TIMER_AUTOHIDE`.
@@ -65,7 +65,33 @@ coisas não cabem no mesmo TOML. Ficou `[bar] display = "todos" | "principal"`.
 ## Consequências
 
 - Sem a AppBar, outra AppBar no topo (de outro programa) pode ficar por baixo da barra quando ela desce.
-- Um monitor sem nenhum trecho de borda de verdade (outro monitor cobrindo todo o topo) só mostra a
-  barra pela bandeja.
+- ~~Um monitor sem nenhum trecho de borda de verdade (outro monitor cobrindo todo o topo) só mostra a
+  barra pela bandeja.~~ Substituído pela faixa de ativação (abaixo).
 - A posição da faixa observada pelo hook é atualizada a cada passo da regra; mudanças de monitor relêem
   os retângulos de todos os monitores (`autohide_sync`).
+
+## Topo coberto por outro monitor (2026-10-27)
+
+**Problema.** A barra de um tester sumia e não voltava mais pelo mouse. O arranjo dele: o monitor 1
+(principal, com `display = "principal"`) embaixo; o 2 logo acima, alinhado à esquerda e um pouco mais
+estreito; o 3 em retrato à esquerda dos dois. Só a ponta direita do topo do 1, depois do fim do 2, era
+borda de verdade. No resto, inclusive no meio, onde fica a barra, o cursor passava direto para o 2, e a
+regra acima não deixava ele disparar. Com o 2 da mesma largura do 1, não sobraria trecho nenhum.
+
+**Opções.** Segurar o cursor na fronteira engolindo o movimento no hook (o hook deixaria de só observar e
+mudaria como o mouse anda; rejeitada); um gesto de subir e voltar (ninguém descobriria; rejeitada);
+usar o topo do monitor de cima (a barra apareceria longe do cursor; rejeitada); **uma faixa de ativação no
+alto do próprio monitor, nos trechos cobertos** (escolhida pelo Felipe).
+
+**Regra.** `top_triggers` devolve os gatilhos do topo de cada monitor, em pixels de tela:
+
+- na borda de verdade, a linha de cima, como antes (o cursor encosta e para);
+- onde outro monitor está logo acima, uma faixa de **6 DIP** (`COVERED_BAND_DIP`, convertida pelo DPI do
+  monitor em `covered_band`) no alto do próprio monitor. O cursor parado ali 300 ms faz a barra descer;
+  subir para o monitor de cima antes disso cancela, então passar de um monitor para o outro não a traz.
+
+Juntos, os gatilhos cobrem toda a largura do topo de qualquer monitor, em qualquer arranjo: a barra nunca
+fica só pela bandeja (teste `every_point_of_the_top_reaches_the_bar`; o arranjo do tester é
+`a_monitor_with_another_above_has_a_band_under_it`). O hook (`bar_context`) só confere se o cursor está
+dentro de algum gatilho. 6 DIP é o meio-termo: com 4 é difícil parar ali sem passar para o monitor de cima;
+com 8, parar sobre as abas de um navegador maximizado traria a barra sem querer.
