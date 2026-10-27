@@ -59,7 +59,9 @@ pub enum WinEvent {
     AppBar { hwnd: isize, notification: u32, param: isize },
     /// Ícone da bandeja: `mouse` é WM_LBUTTONUP, WM_RBUTTONUP etc.
     Tray { mouse: u32 },
-    TaskbarCreated,
+    /// O Explorer (re)subiu, ou (`own`) o host da bandeja pediu os ícones de novo: esse não é um
+    /// reinício e o Zefiro não refaz nada.
+    TaskbarCreated { own: bool },
     /// Uma janela de outro processo veio para o primeiro plano (`ForegroundHook`).
     ForegroundChanged,
     /// O cursor mudou em relação ao topo ou à faixa de uma barra que se oculta (`bar_context::autohide_cursor`).
@@ -225,7 +227,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         m if m == WM_FOREGROUND => push(WinEvent::ForegroundChanged),
         m if m == WM_AUTOHIDE => push(WinEvent::AutoHideCursor),
         m if (WM_USER_BASE..WM_USER_BASE + 0x100).contains(&m) => push(WinEvent::User { code: m - WM_USER_BASE }),
-        m if Some(&m) == TASKBAR_CREATED.get() => push(WinEvent::TaskbarCreated),
+        m if Some(&m) == TASKBAR_CREATED.get() => push(taskbar_created(lp.0)),
         m if Some(&m) == ISLAND_GEOMETRY.get() => push(WinEvent::IslandGeometryChanged),
         // SAFETY: mensagens não tratadas vão para o Windows.
         _ => return unsafe { DefWindowProcW(hwnd, msg, wp, lp) },
@@ -310,6 +312,11 @@ pub fn post_user(code: u32) {
         // SAFETY: PostMessage é seguro entre threads; a janela de mensagens vive até o fim do app.
         let _ = unsafe { PostMessageW(Some(HWND(h as *mut _)), WM_USER_BASE + code, WPARAM(0), LPARAM(0)) };
     }
+}
+
+/// `TaskbarCreated` com o `lParam` dele: o que o host da bandeja manda vem marcado.
+pub(crate) fn taskbar_created(lparam: isize) -> WinEvent {
+    WinEvent::TaskbarCreated { own: lparam == crate::tray_host::OWN_BROADCAST }
 }
 
 /// Avisa a janela de mensagens a cada troca do primeiro plano. O aviso de tela cheia do Windows
@@ -517,6 +524,12 @@ pub fn pump_pending() {
 mod tests {
     use super::*;
     use windows::Win32::Graphics::Gdi::GetWindowRgnBox;
+
+    #[test]
+    fn own_broadcast_is_recognized() {
+        assert_eq!(taskbar_created(crate::tray_host::OWN_BROADCAST), WinEvent::TaskbarCreated { own: true });
+        assert_eq!(taskbar_created(0), WinEvent::TaskbarCreated { own: false });
+    }
 
     /// A janela de mensagens é global: os testes que criam janelas rodam um de cada vez.
     static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());

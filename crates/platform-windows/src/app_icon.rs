@@ -89,7 +89,7 @@ fn exe_icon(path: &str, size: u32) -> Option<Image> {
 
 /// Desenha o ícone numa DIB de 32 bits e devolve BGRA pré-multiplicado. Ícones antigos sem alfa
 /// usam a máscara para saber o que é transparente.
-fn hicon_to_image(icon: HICON, size: u32) -> Option<Image> {
+pub(crate) fn hicon_to_image(icon: HICON, size: u32) -> Option<Image> {
     let draw = |flags| -> Option<Vec<u8>> {
         // SAFETY: DIB e DC próprios, liberados antes de sair; os bits são copiados enquanto a DIB vive.
         unsafe {

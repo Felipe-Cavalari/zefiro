@@ -13,7 +13,9 @@ const ABN_FULLSCREENAPP: u32 = 2;
 
 pub fn handle(l: &mut Loop, e: WinEvent) -> Result<bool> {
     match e {
-        WinEvent::TaskbarCreated => {
+        // O host da bandeja pediu os ícones de novo: o Explorer não reiniciou.
+        WinEvent::TaskbarCreated { own: true } => {}
+        WinEvent::TaskbarCreated { own: false } => {
             tracing::info!("Explorer reiniciado: registrando as AppBars de novo");
             for b in &mut l.bars {
                 b.register_appbar(&l.ctx);

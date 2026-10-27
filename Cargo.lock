@@ -1064,6 +1064,7 @@ dependencies = [
  "windows-numerics",
  "zefiro-integration-chat",
  "zefiro-integration-devices",
+ "zefiro-integration-systray",
  "zefiro-integration-update",
  "zefiro-integration-usage",
  "zefiro-integration-vscode",
