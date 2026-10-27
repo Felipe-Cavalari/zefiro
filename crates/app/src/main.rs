@@ -20,6 +20,7 @@ mod tab_strip;
 mod tray_loop;
 mod update_loop;
 mod usage_loop;
+mod systray_loop;
 mod terminal_loop;
 mod vscode_loop;
 mod theme_state;

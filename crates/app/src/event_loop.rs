@@ -69,6 +69,8 @@ pub const USER_TERMINAL: u32 = 24;
 pub const USER_CHAT: u32 = 25;
 /// Uma imagem colada no chat foi convertida (ou miniaturas de imagens foram lidas).
 pub const USER_CHAT_IMAGE: u32 = 26;
+/// O host da bandeja viu ícones mudarem.
+pub const USER_TRAY: u32 = 27;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 pub const TIMER_RAISE: usize = 3;
@@ -131,6 +133,7 @@ pub struct Loop {
     pub(crate) usage: crate::usage_loop::UsageRuntime,
     pub(crate) vscode: crate::vscode_loop::VsCodeRuntime,
     pub(crate) terminal: crate::terminal_loop::TerminalRuntime,
+    pub(crate) systray: crate::systray_loop::SystrayRuntime,
     pub(crate) chat: crate::chat_loop::ChatRuntime,
     pub(crate) power: crate::power_loop::PowerRuntime,
     pub(crate) system: crate::system_loop::SystemRuntime,
@@ -156,7 +159,7 @@ impl Loop {
             panels.push(PanelView::create(&ctx, b.monitor())?);
         }
         let today = now_local().date;
-        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, settings: None, shown_month: (today.year, today.month), island: Default::default(), debug: Default::default(), update: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), terminal: Default::default(), chat: Default::default(), power: Default::default(), system: Default::default(), autohide: Default::default(), cycles: None })
+        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, settings: None, shown_month: (today.year, today.month), island: Default::default(), debug: Default::default(), update: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), terminal: Default::default(), systray: Default::default(), chat: Default::default(), power: Default::default(), system: Default::default(), autohide: Default::default(), cycles: None })
     }
 
     pub(crate) fn bar_index(&self, hwnd: isize) -> Option<usize> { self.bars.iter().position(|b| b.hwnd().0 as isize == hwnd) }
@@ -201,7 +204,7 @@ impl Loop {
             PanelKind::Terminal => self.terminal_panel_list(scale),
             PanelKind::Chat => self.chat_panel_list(scale),
             PanelKind::Power => self.power_panel_list(scale),
-            PanelKind::Tray => DisplayList::default(),
+            PanelKind::Tray => self.systray_panel_list(scale),
         }
     }
 
@@ -236,6 +239,7 @@ impl Loop {
                     self.devices_panel_closed();
                     self.power_panel_closed();
                     self.terminal_panel_closed();
+                    self.systray_panel_closed();
                     self.chat_panel_closed();
                 }
                 PanelEffect::Open(p) => {
@@ -249,6 +253,7 @@ impl Loop {
                     self.usage_prepare(p.kind);
                     self.vscode_prepare(p.kind);
                     self.terminal_prepare(p.kind);
+                    self.systray_prepare(p.kind);
                     self.chat_prepare(p.kind)?;
                     self.power_prepare(p.kind);
                     if p.kind.tabbed() {
@@ -530,6 +535,8 @@ impl Loop {
                         // Botão de energia (armar, confirmar ou agir).
                     } else if self.chat_click(Point { x: x - ox, y: y - oy })? {
                         // Chat: enviar, parar, conversa nova ou copiar.
+                    } else if self.systray_up(Point { x: x - ox, y: y - oy })? {
+                        // Ícone da bandeja: o app abre (o painel já fechou).
                     } else if self.terminal_up(Point { x: x - ox, y: y - oy })? {
                         // Perfil do Windows Terminal aberto (ou clique fora das linhas).
                     } else if self.usage_click(Point { x: x - ox, y: y - oy }, scale)? {
@@ -559,6 +566,12 @@ impl Loop {
             }
             WinEvent::RightUp { hwnd, x, y } => {
                 tracing::debug!(hwnd, x, y, "botão direito");
+                if let Some(i) = self.panel_index(hwnd) {
+                    let (ox, oy) = self.panels[i].content_origin();
+                    if self.systray_right_up(Point { x: x - ox, y: y - oy })? {
+                        return Ok(true);
+                    }
+                }
                 if let Some(i) = self.bar_index(hwnd) {
                     if self.bars[i].chip_at(x, y).as_deref() == Some(crate::bar_view::ISLAND_CHIP) {
                         self.close_open_panel()?;
@@ -584,6 +597,7 @@ impl Loop {
                     let (ox, oy) = self.panels[i].content_origin();
                     self.devices_move(Point { x: x - ox, y: y - oy })?;
                     self.terminal_move(Point { x: x - ox, y: y - oy })?;
+                    self.systray_move(Point { x: x - ox, y: y - oy })?;
                     self.chat_move(Point { x: x - ox, y: y - oy })?;
                     self.vscode_move(Point { x: x - ox, y: y - oy })?;
                     // Menu do Z: o item sob o mouse ganha o destaque (só redesenha quando muda).
@@ -614,6 +628,7 @@ impl Loop {
             WinEvent::MouseLeave { hwnd } => {
                 if self.panel_index(hwnd).is_some() {
                     self.terminal_leave()?;
+                    self.systray_leave()?;
                     self.chat_leave()?;
                     self.usage_leave()?;
                 }
@@ -638,7 +653,7 @@ impl Loop {
                 if self.panel_index(hwnd).is_none() {
                     return Ok(true);
                 }
-                if self.chat_key(vk)? || self.terminal_key(vk)? || self.vscode_key(vk)? {
+                if self.chat_key(vk)? || self.terminal_key(vk)? || self.systray_key(vk)? || self.vscode_key(vk)? {
                     return Ok(true);
                 }
                 // Esc na tela de temas volta ao menu; no menu, fecha.
@@ -707,7 +722,7 @@ impl Loop {
                 if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind.tabbed()) {
                     return self.island_wheel(delta).map(|_| true);
                 }
-                if self.panel_index(hwnd).is_some() && (self.chat_wheel(delta)? || self.terminal_wheel(delta)? || self.vscode_wheel(delta)?) {
+                if self.panel_index(hwnd).is_some() && (self.chat_wheel(delta)? || self.terminal_wheel(delta)? || self.systray_wheel(delta)? || self.vscode_wheel(delta)?) {
                     return Ok(true);
                 }
                 if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind == PanelKind::Overflow) {
@@ -743,6 +758,7 @@ impl Loop {
             WinEvent::User { code: USER_CLAUDE } => self.usage_claude_changed()?,
             WinEvent::User { code: USER_VSCODE } => self.vscode_loaded()?,
             WinEvent::User { code: USER_TERMINAL } => self.terminal_loaded()?,
+            WinEvent::User { code: USER_TRAY } => self.systray_changed()?,
             WinEvent::User { code: USER_CHAT } => self.chat_signals()?,
             WinEvent::User { code: USER_CHAT_IMAGE } => self.chat_images()?,
             WinEvent::Timer { id: TIMER_CHAT_IDLE } => self.chat_idle(),

@@ -27,6 +27,7 @@ zefiro-integration-update.workspace = true
 zefiro-integration-chat.workspace = true
 zefiro-integration-vscode.workspace = true
 zefiro-integration-terminal.workspace = true
+zefiro-integration-systray.workspace = true
 zefiro-platform-windows.workspace = true
 windows.workspace = true
 windows-numerics.workspace = true

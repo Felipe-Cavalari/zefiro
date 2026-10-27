@@ -48,13 +48,13 @@ pub enum Nav {
 }
 
 /// Linhas que cabem em `max_h` (pelo menos uma).
-fn rows_fitting(max_h: f32) -> usize {
+pub fn visible_rows(max_h: f32) -> usize {
     (((max_h - PAD * 2.0 - NAME_H) / CELL).floor() as usize).max(1)
 }
 
 /// Primeira linha máxima da rolagem.
 pub fn max_scroll(count: usize, max_h: f32) -> usize {
-    count.div_ceil(COLUMNS).saturating_sub(rows_fitting(max_h))
+    count.div_ceil(COLUMNS).saturating_sub(visible_rows(max_h))
 }
 
 pub fn tray_panel(view: &TrayView, scale: f32, tokens: &Tokens) -> TrayLayout {
@@ -68,7 +68,7 @@ pub fn tray_panel(view: &TrayView, scale: f32, tokens: &Tokens) -> TrayLayout {
         return TrayLayout { list: DisplayList { size: Size { w, h: px(PAD * 2.0 + 20.0) }, ops }, cells };
     }
     let total_rows = view.cells.len().div_ceil(COLUMNS);
-    let rows = total_rows.min(rows_fitting(view.max_h));
+    let rows = total_rows.min(visible_rows(view.max_h));
     let scroll = view.scroll.min(max_scroll(view.cells.len(), view.max_h));
     let first = scroll * COLUMNS;
     let shown = view.cells.len().min(first + rows * COLUMNS);
