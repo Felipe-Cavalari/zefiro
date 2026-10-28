@@ -81,7 +81,7 @@ Base: [guia de migração de fevereiro de 2026](https://developer.spotify.com/do
 
 | id | Nome | Na barra | Clique |
 | --- | --- | --- | --- |
-| `spotify` | Spotify | Só um ícone de nota musical (glifo da Segoe Fluent), largura fixa como os chips de VS Code e Terminal. **Sem logotipo do Spotify** (marca). | Abre o painel "Spotify". |
+| `spotify` | Spotify | O logo oficial do Spotify no verde da marca (#1ED760), largura fixa como os chips de VS Code e Terminal. *(Mudou em 2026-10-27, a pedido do usuário; antes era uma nota musical.)* | Abre o painel "Spotify". |
 
 Descrição no catálogo: "Busque e toque no Spotify sem abrir o app (Premium)". Ele entra em qualquer
 seção de qualquer monitor, como os outros chips. O chip não mostra a música tocando: isso já é
@@ -215,9 +215,11 @@ continua como estava, com a mesma seleção e a mesma rolagem.
 Fluxo de Authorization Code com PKCE: não há segredo no binário nem no disco, só o Client ID.
 
 1. **Sem `client_id`:** o painel mostra uma tela de configuração:
-   - um passo a passo curto: criar um app em developer.spotify.com, com a Web API marcada e o
-     Redirect URI `http://127.0.0.1:47823/callback` (o painel mostra esse texto com um botão
-     "Copiar");
+   - um passo a passo curto, com o logo no título:
+     - criar um app com a Web API em developer.spotify.com (o endereço é um botão que abre o painel
+       do desenvolvedor no navegador);
+     - cadastrar o Redirect URI `http://127.0.0.1:47823/callback` (o painel mostra esse texto com
+       um botão "Copiar");
    - um campo "Client ID" onde a pessoa cola com Ctrl+V, e o botão "Salvar".
 
    O painel grava `[spotify] client_id` no `config.toml`.

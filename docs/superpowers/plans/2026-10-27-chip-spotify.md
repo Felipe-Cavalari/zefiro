@@ -66,8 +66,7 @@ Ledger: `.superpowers/sdd/2026-10-27-chip-spotify/progress.md`.
   - id `spotify`;
   - nome "Spotify";
   - descrição "Busque e toque no Spotify sem abrir o app (Premium)";
-  - glifo `\u{EC4F}` (MusicNote);
-  - sem logotipo do Spotify.
+  - glifo `\u{EC4F}` (MusicNote), trocado depois pelo logo oficial no verde #1ED760 (pedido do usuário em 2026-10-27).
 - **Textos exatos:**
   - campo de busca: "Buscar no Spotify…" e "Filtrar <nome>…";
   - entradas da raiz: "Sua biblioteca", com o subtítulo "Curtidas, playlists, álbuns, artistas,

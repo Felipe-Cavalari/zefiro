@@ -87,6 +87,8 @@ E as regras de funcionamento:
 
 ## Consequências
 
+- **Marca:** o chip e as telas de configuração usam o logo oficial do Spotify (ícone da Simple Icons, CC0, `crates/resources/icons/spotify.svg`) no verde #1ED760, a pedido do usuário. O Spotify pede o logo como atribuição quando um app mostra conteúdo dele.
+
 - **Configuração:**
   - o primeiro uso pede o Client ID, e o painel mostra o passo a passo e o Redirect URI para copiar;
   - o `[spotify] client_id` fica no `config.toml` e não é segredo;
