@@ -60,7 +60,7 @@ pub fn codex_args() -> Vec<String> {
 pub const GROK_PROFILE: &str = "grok-perfil.md";
 
 /// Perfil de agente do chat (ADR-0027): só o `todo_write`, que não lê nem escreve nada fora da
-/// sessão, e nenhum servidor MCP herdado. O `--deny` e o `--disallowed-tools` do `grok` não valem no
+/// sessão, e o `image_gen`, que gera imagens (a cota é a do Imagine), e nenhum servidor MCP herdado. O `--deny` e o `--disallowed-tools` do `grok` não valem no
 /// `agent stdio` (sonda de 2026-10-28), e o `always-approve` do usuário roda as ferramentas sem
 /// pedir. Uma linha por item, sem aspas duplas nem barras invertidas (no WSL, cada linha vira um
 /// `echo` na linha de comando do `wsl.exe`).
@@ -68,10 +68,10 @@ pub const GROK_PROFILE_LINES: [&str; 7] = [
     "---",
     "name: zefiro-chat",
     "description: Chat rápido do Zefiro, só conversa",
-    "tools: todo_write",
+    "tools: todo_write, image_gen",
     "mcpInheritance: none",
     "---",
-    "Você é o chat rápido do Zefiro. Só converse: não leia arquivos, não rode comandos e não busque na web.",
+    "Você é o chat rápido do Zefiro. Converse e, quando pedirem uma imagem, gere com a ferramenta image_gen. Não leia arquivos, não rode comandos e não busque na web.",
 ];
 
 /// Ambiente do `grok` do chat e do chip: sem atualização em segundo plano, sem memória entre
@@ -225,7 +225,7 @@ mod tests {
         assert_eq!(grok_usage_args(), ["agent", "stdio"], "o chip não abre sessão");
         let profile = grok_profile();
         assert!(profile.starts_with("---\nname: zefiro-chat\n") && profile.ends_with('\n'));
-        assert!(profile.contains("\ntools: todo_write\n") && profile.contains("\nmcpInheritance: none\n"));
+        assert!(profile.contains("\ntools: todo_write, image_gen\n") && profile.contains("\nmcpInheritance: none\n"));
         assert!(GROK_ENV.contains(&("GROK_DISABLE_AUTOUPDATER", "1")) && GROK_ENV.contains(&("GROK_MEMORY", "0")));
     }
 

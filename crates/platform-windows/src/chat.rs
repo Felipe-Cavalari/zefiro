@@ -208,6 +208,31 @@ struct GrokState {
     model: Option<String>,
     default_model: Option<String>,
     queued: Vec<Question>,
+    /// Chamadas do `image_gen` deste processo (uma falha delas é imagem que não veio).
+    images: Vec<String>,
+}
+
+/// Maior imagem gerada que o chat lê (o Imagine manda JPGs de poucas centenas de KB).
+const MAX_GENERATED_BYTES: u64 = 30 * 1024 * 1024;
+
+/// Lê a imagem que o `image_gen` gravou na origem do Grok: no Windows, o arquivo; numa distro
+/// (rodando, já que o Grok está nela), por `\\wsl.localhost`. "WSL" é a distro padrão: tenta as
+/// que estão rodando.
+fn read_generated(origin: &str, path: &str) -> Result<Vec<u8>, String> {
+    if !grok::image_path_allowed(path) {
+        return Err("caminho fora das sessões do Grok".into());
+    }
+    let candidates: Vec<PathBuf> = match origin {
+        "Windows" => vec![PathBuf::from(path)],
+        "WSL" => crate::wsl::running_distros().iter().filter_map(|d| grok::wsl_file(d, path)).collect(),
+        distro => grok::wsl_file(distro, path).into_iter().collect(),
+    };
+    for file in candidates {
+        if std::fs::metadata(&file).is_ok_and(|m| m.is_file() && m.len() <= MAX_GENERATED_BYTES) {
+            return std::fs::read(&file).map_err(|e| e.to_string());
+        }
+    }
+    Err("arquivo não encontrado".into())
 }
 
 impl GrokState {
@@ -524,6 +549,25 @@ fn grok_incoming(r: &mut Running, incoming: grok::Incoming, inbox: &Inbox) {
         grok::Incoming::Event(e) => push(e),
         grok::Incoming::Models { list, current } => push(g.models(list, current)),
         grok::Incoming::Tool(name) => tracing::debug!(ferramenta = %name, "chat: o Grok chamou uma ferramenta"),
+        // O histórico reenviado pelo `session/load` não gera imagem de novo.
+        grok::Incoming::ImageStarted(_) | grok::Incoming::ImageFile { .. } if g.loading.is_some() => {}
+        grok::Incoming::ImageStarted(id) => {
+            g.images.push(id);
+            push(Event::ImageStarted);
+        }
+        // Lida aqui mesmo (poucos ms), para chegar antes do fim do turno.
+        grok::Incoming::ImageFile { item, path } => match read_generated(&r.origin, &path) {
+            Ok(bytes) => push(Event::Image { item, data: zefiro_integration_chat::image::base64(&bytes) }),
+            Err(e) => {
+                tracing::warn!(origem = %r.origin, "chat: não consegui ler a imagem do Grok: {e}");
+                push(Event::ImageFailed);
+            }
+        },
+        grok::Incoming::ToolFailed(id) => {
+            if g.images.contains(&id) {
+                push(Event::ImageFailed);
+            }
+        }
         grok::Incoming::ServerRequest(reply) => lines.push(reply),
     }
     for line in lines {

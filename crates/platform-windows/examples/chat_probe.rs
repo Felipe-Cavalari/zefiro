@@ -1,12 +1,17 @@
 //! Sonda do chat: sobe o `claude`, o `codex` ou o `grok` pela origem pedida, faz duas perguntas (a
 //! segunda depende da primeira), para uma resposta longa no meio e retoma a sessão num processo
-//! novo. No Grok, pede também para ler um arquivo: nenhuma ferramenta pode rodar. Imprime só
-//! eventos e tamanhos, nunca o texto. Sai com 1 se algo falhar.
+//! novo. No Grok, pede também para ler um arquivo (nenhuma ferramenta pode rodar) e uma imagem (o
+//! `image_gen` tem que trazê-la). Imprime só eventos e tamanhos, nunca o texto. Sai com 1 se algo
+//! falhar.
 //!
 //! `ZEFIRO_CHAT_AGENT=claude|codex|grok`, `ZEFIRO_CHAT_ORIGIN=auto|windows|wsl|<distro>` (padrão
 //! `auto`), `ZEFIRO_CHAT_MODEL=<modelo>`.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
+
+/// Imagens geradas que chegaram.
+static IMAGES: AtomicUsize = AtomicUsize::new(0);
 use zefiro_integration_chat::conversation::Conversation;
 use zefiro_integration_chat::origin::{Prefer, parse_choice};
 use zefiro_integration_chat::agent::Agent;
@@ -23,6 +28,12 @@ fn wait_turn(service: &ChatService, c: &mut Conversation, limit: Duration, stop_
                 Signal::Ready { origin } => println!("  pronto em {origin}"),
                 Signal::Origins { .. } => {}
                 Signal::Event(Event::Models(models)) => println!("  modelos: {:?}", models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>()),
+                Signal::Event(Event::Image { data, .. }) => {
+                    IMAGES.fetch_add(1, Ordering::SeqCst);
+                    println!("  imagem gerada: {} caracteres em base64, em {:.1} s", data.len(), started.elapsed().as_secs_f32());
+                }
+                Signal::Event(Event::ImageStarted) => println!("  gerando imagem…"),
+                Signal::Event(Event::ImageFailed) => println!("  a imagem falhou"),
                 Signal::Event(Event::Finished { error: Some(e), .. }) => {
                     c.fail(&classify(&e));
                     return if stopped { Ok(started.elapsed()) } else { Err(format!("erro no fim do turno: {e}")) };
@@ -91,6 +102,12 @@ fn run() -> Result<(), String> {
         if leaked {
             service.stop();
             return Err("o Grok leu um arquivo".into());
+        }
+        println!("5. pedido de imagem (o image_gen é a única ferramenta liberada)");
+        ask(&service, &mut c, &model, "Gere uma imagem simples: um quadrado azul sobre fundo branco.", None)?;
+        if IMAGES.load(Ordering::SeqCst) == 0 {
+            service.stop();
+            return Err("a imagem não chegou".into());
         }
     }
     service.stop();

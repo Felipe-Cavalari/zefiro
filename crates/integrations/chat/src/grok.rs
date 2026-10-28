@@ -71,6 +71,13 @@ pub enum Incoming {
     Models { list: Vec<ModelOption>, current: Option<String> },
     /// O modelo chamou uma ferramenta: só o nome, para o log.
     Tool(String),
+    /// Começou a gerar uma imagem (`image_gen`), com o id da chamada.
+    ImageStarted(String),
+    /// A imagem gerada ficou pronta neste arquivo, na origem do Grok (caminho do Windows ou da
+    /// distro).
+    ImageFile { item: String, path: String },
+    /// Uma chamada de ferramenta falhou (se era imagem, quem chama sabe pelo id).
+    ToolFailed(String),
     /// Pedido do agente: a linha que o responde (permissão negada; o resto, recusado).
     ServerRequest(String),
     Other,
@@ -114,10 +121,41 @@ fn update(u: &Value) -> Incoming {
         Some("agent_thought_chunk") => Incoming::Event(Event::Thinking),
         Some("tool_call") => {
             let name = u["_meta"]["x.ai/tool"]["name"].as_str().or(u["title"].as_str()).unwrap_or("?");
-            Incoming::Tool(name.to_string())
+            match u["toolCallId"].as_str() {
+                Some(id) if name == IMAGE_TOOL => Incoming::ImageStarted(id.to_string()),
+                _ => Incoming::Tool(name.to_string()),
+            }
+        }
+        Some("tool_call_update") => {
+            let id = u["toolCallId"].as_str().unwrap_or_default().to_string();
+            match (u["status"].as_str(), u["rawOutput"]["type"].as_str(), u["rawOutput"]["path"].as_str()) {
+                (Some("completed"), Some("ImageGen"), Some(path)) if !id.is_empty() && !path.is_empty() => Incoming::ImageFile { item: id, path: path.to_string() },
+                (Some("failed"), ..) if !id.is_empty() => Incoming::ToolFailed(id),
+                _ => Incoming::Other,
+            }
         }
         _ => Incoming::Other,
     }
+}
+
+/// A única ferramenta que o perfil do chat libera além do `todo_write`.
+pub const IMAGE_TOOL: &str = "image_gen";
+
+/// O arquivo de uma imagem gerada só é lido se for uma imagem dentro de `.grok` (as sessões do
+/// Grok): o caminho vem da saída do processo.
+pub fn image_path_allowed(path: &str) -> bool {
+    let lower = path.to_lowercase().replace('\\', "/");
+    let image = [".jpg", ".jpeg", ".png", ".webp"].iter().any(|e| lower.ends_with(e));
+    image && lower.contains("/.grok/") && !lower.split('/').any(|part| part == "..")
+}
+
+/// O caminho de um arquivo da distro visto do Windows: `\\wsl.localhost\<distro>\home\…`. Só
+/// para distro rodando (ler uma parada a liga).
+pub fn wsl_file(distro: &str, linux_path: &str) -> Option<std::path::PathBuf> {
+    let rest = linux_path.strip_prefix('/')?;
+    let mut path = std::path::PathBuf::from(format!(r"\\wsl.localhost\{distro}"));
+    path.extend(rest.split('/').filter(|p| !p.is_empty()));
+    Some(path)
 }
 
 pub fn parse(line: &str) -> Incoming {
@@ -284,6 +322,30 @@ mod tests {
         assert!(model_state(&json!({ "stopReason": "end_turn" })).is_none());
         let Incoming::Models { list, current } = parse(MODELS) else { panic!() };
         assert_eq!((list.len(), current.as_deref()), (2, Some("grok-4.5")));
+    }
+
+    #[test]
+    fn generated_images_come_as_files() {
+        // Sonda de 2026-10-28 com o perfil liberando o `image_gen`.
+        let started = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"call-9a05-0","title":"image_gen","rawInput":{"prompt":"A red circle","aspect_ratio":"1:1"},"_meta":{"x.ai/tool":{"version":1,"name":"image_gen","kind":"image_gen","read_only":false}}}}}"#;
+        assert_eq!(parse(started), Incoming::ImageStarted("call-9a05-0".into()));
+        let done = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-9a05-0","status":"completed","content":[{"type":"content","content":{"type":"text","text":"{}"}}],"rawOutput":{"type":"ImageGen","path":"/home/x/.grok/sessions/%2Fhome%2Fx%2F.cache%2Fzefiro-chat/01a1/images/1.jpg","filename":"1.jpg","session_folder":"images"}}}}"#;
+        assert_eq!(parse(done), Incoming::ImageFile { item: "call-9a05-0".into(), path: "/home/x/.grok/sessions/%2Fhome%2Fx%2F.cache%2Fzefiro-chat/01a1/images/1.jpg".into() });
+        let in_progress = r#"{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call-9a05-0","kind":"other","rawInput":{"variant":"ImageGen"}}}}"#;
+        assert_eq!(parse(in_progress), Incoming::Other);
+        let failed = r#"{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call-9a05-0","status":"failed"}}}"#;
+        assert_eq!(parse(failed), Incoming::ToolFailed("call-9a05-0".into()));
+    }
+
+    #[test]
+    fn only_images_inside_grok_are_read() {
+        assert!(image_path_allowed("/home/x/.grok/sessions/a/01a1/images/1.jpg"));
+        assert!(image_path_allowed(r"C:\Users\x\.grok\sessions\a\images\2.PNG"));
+        assert!(!image_path_allowed("/home/x/.ssh/id_rsa"));
+        assert!(!image_path_allowed("/home/x/.grok/auth.json"));
+        assert!(!image_path_allowed("/home/x/.grok/../.ssh/a.jpg"));
+        assert_eq!(wsl_file("Ubuntu-24.04", "/home/x/.grok/i/1.jpg"), Some(std::path::PathBuf::from(r"\\wsl.localhost\Ubuntu-24.04\home\x\.grok\i\1.jpg")));
+        assert_eq!(wsl_file("Ubuntu-24.04", "relativo/1.jpg"), None);
     }
 
     #[test]
