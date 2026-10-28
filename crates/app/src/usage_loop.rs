@@ -68,6 +68,7 @@ fn claude_message(e: UsageError, origin: &str) -> String {
     match e {
         UsageError::Expired => format!("Login expirado no {origin}.\nAbra o Claude Code no {origin} para renovar."),
         UsageError::Missing => "Faça login no Claude Code".into(),
+        UsageError::NotInstalled => format!("Claude Code não encontrado no {origin}"),
         UsageError::Network => "Sem conexão.\nTento de novo em 5 min.".into(),
         UsageError::UnknownFormat => "Formato de resposta desconhecido".into(),
         UsageError::Http(status) => format!("O serviço respondeu {status}.\nTento de novo em 5 min."),

@@ -77,7 +77,7 @@ Valores medidos com **todos os widgets da Fase 1 ligados**, em 2 monitores:
 | **Workspaces (komorebi)** — *fora até a 1.0* | Workspaces e layout atual; clique troca de workspace | Eventos do komorebi (`komorebic subscribe-pipe`) + comandos via `komorebic` |
 | **Projetos VS Code** | Painel com projetos recentes (locais, WSL, remotos, workspaces), abrir no VS Code | `%APPDATA%\Code\User\workspaceStorage\*\workspace.json` (a chave do `state.vscdb` não existe mais na versão atual; ADR-0011) |
 | **Brilho** | % na barra; painel com um slider por monitor; roda do mouse no ícone ajusta | DDC/CI via `dxva2` (`GetPhysicalMonitorsFromHMONITOR`, `Get/SetVCPFeature` código `0x10`); WMI `WmiMonitorBrightness` para tela interna |
-| **Uso do Claude** | % da janela de 5 h (e 7 dias no painel), cor por faixa | Token de `~/.claude/.credentials.json` → `GET https://api.anthropic.com/api/oauth/usage`. O token nunca vai para log. |
+| **Uso do Claude** | % da janela de 5 h (e 7 dias no painel), cor por faixa | `claude -p /usage` do próprio Claude Code (`usage_report` do stream-json); o Zefiro não usa o token (ADR-0025) |
 | **Uso do Codex** | % primária (5 h) e secundária (semanal) | Eventos de uso nos `*.jsonl` de sessão em `~/.codex` (sem abrir credenciais) |
 | **Pomodoro** | Timer foco/pausa; liga e desliga no modo de edição | Interno (máquina de estados no núcleo) + notificação ao terminar |
 | **Áudio — alto-falantes** | Volume/mudo, roda do mouse, painel com troca de dispositivo de saída | Core Audio: `IMMDeviceEnumerator`, `IAudioEndpointVolume` (+ callbacks), troca de padrão via `IPolicyConfig` |

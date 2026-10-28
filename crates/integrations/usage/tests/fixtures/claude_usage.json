@@ -1,7 +1,0 @@
-{"five_hour": {"utilization": 42.0, "resets_at": "2026-10-19T22:50:00.043079+00:00", "limit_dollars": null, "used_dollars": null, "remaining_dollars": null, "locked_reason": null},
- "seven_day": {"utilization": 19.0, "resets_at": "2026-10-24T17:00:00.043098+00:00", "limit_dollars": null, "used_dollars": null, "remaining_dollars": null, "locked_reason": null},
- "seven_day_opus": {"utilization": 12.5, "resets_at": "2026-10-24T17:00:00+00:00"},
- "seven_day_sonnet": null,
- "seven_day_breakdown": {"as_of": "2026-10-19T18:19:19.070284+00:00", "rows": [{"display_name": "Claude Code", "key": "claude_code", "percent": 100}]},
- "extra_usage": {"is_enabled": false, "utilization": null},
- "amber_gauge": null}

@@ -30,9 +30,8 @@ Copy-Item island/build/zefiro-island.exe target/release/
 
 Os chips de uso juntam as contas do Windows e das distros do WSL que estão rodando (`wsl --list --running`), identificando quem é quem pelo e-mail/UUID da conta em cada origem.
 
-- O Zefiro **só lê** o arquivo de credenciais (`~/.claude/.credentials.json`) a cada consulta; ele nunca renova nem grava o token, porque isso derrubaria o login do Claude Code. Quem renova é sempre o próprio Claude Code, ao ser executado.
-- Isso significa que o painel pode mostrar **"Login expirado"** numa conta do WSL mesmo com a distro ligada: o token OAuth tem validade própria e só é renovado quando o `claude` roda de fato lá dentro — ter a distro "rodando" em segundo plano, sem nenhum processo usando o Claude Code, não renova nada sozinho.
-- Para manter a conta do WSL sempre válida sem depender de um terminal aberto, deixe algo rodando o Claude Code na distro (um serviço systemd, uma sessão `tmux`/`screen`), em vez de contar com o Windows Terminal ficar aberto.
+- O uso do Claude vem do comando `/usage` do próprio Claude Code (`claude -p /usage`), a cada 5 minutos. O Zefiro **não usa o token** da sua assinatura: quem lê o login, renova e fala com a Anthropic é o Claude Code. O comando não chama o modelo e não gasta nada da sua cota.
+- Por isso o Claude Code precisa estar instalado em cada origem (Windows ou distro) com login. Sem ele, o painel diz "Claude Code não encontrado".
 - Uma distro parada aparece como "WSL desligado": o Zefiro nunca lê `\\wsl.localhost\<distro>\...` de uma distro parada, porque isso a ligaria sozinho.
 
 ## Créditos e agradecimentos
