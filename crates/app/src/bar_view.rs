@@ -158,11 +158,10 @@ fn chip_content(ctx: &AppCtx, id: &str, device: &str, height: BarHeight, chip_h:
             let p = ctx.devices.brightness_of(device);
             level_chip(Level { glyph: ICON_BRIGHTNESS, text: "", dim: p.is_none() }, chip_h, font_px, scale, t, &ctx.text)
         }
-        // Claude, Codex e VS Code: o ícone da marca (SVG) no lugar do glifo.
+        // Claude, Codex, Grok e VS Code: o ícone da marca (SVG) no lugar do glifo.
         "codex" => with_svg_icon(zefiro_bar::usage::usage_chip(crate::usage_loop::CODEX_GLYPH, ctx.usage.codex_chip(), chip_h, font_px, scale, t, &ctx.text), icons::CODEX),
         "claude" => with_svg_icon(zefiro_bar::usage::usage_chip(crate::usage_loop::CLAUDE_GLYPH, ctx.usage.claude_chip(), chip_h, font_px, scale, t, &ctx.text), icons::CLAUDE_CODE),
-        // Grok: o glifo de robô do Segoe, sem o logo da marca.
-        "grok" => zefiro_bar::usage::usage_chip(crate::usage_loop::GROK_GLYPH, ctx.usage.grok_chip(), chip_h, font_px, scale, t, &ctx.text),
+        "grok" => with_svg_icon(zefiro_bar::usage::usage_chip(crate::usage_loop::GROK_GLYPH, ctx.usage.grok_chip(), chip_h, font_px, scale, t, &ctx.text), icons::GROK),
         "vscode" => with_svg_icon(level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text), icons::VSCODE),
         "notifications" => zefiro_bar::chips::bell_chip(ctx.system.notifications, chip_h, font_px, scale, t, &ctx.text),
         "dnd" => zefiro_bar::chips::dnd_chip(ctx.system.dnd, chip_h, font_px, t),

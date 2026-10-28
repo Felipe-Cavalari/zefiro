@@ -19,10 +19,10 @@ use crate::usage::usage_chip;
 
 pub const AI_CHIP: &str = "ia";
 
-/// Glifos de reserva (Segoe Fluent Icons): os de Claude e Codex viram o ícone SVG da marca.
+/// Glifos de reserva (Segoe Fluent Icons): os de Claude, Codex e Grok viram o ícone SVG da marca.
 const GLYPH_CLAUDE: &str = "\u{E945}";
 const GLYPH_CODEX: &str = "\u{E943}";
-/// Robô: o Grok e o chip sem nenhuma conta.
+/// Robô: o lugar do ícone do Grok e o chip sem nenhuma conta.
 pub const GLYPH_AI: &str = "\u{E99A}";
 
 /// Uma conta de uma IA numa origem.
@@ -111,7 +111,7 @@ pub fn slide_chip(slide: &Slide, tag_w: f32, chip_h: f32, font_px: f32, scale: f
     chip = match slide.agent {
         Agent::Claude => with_svg_icon(chip, icons::CLAUDE_CODE),
         Agent::Codex => with_svg_icon(chip, icons::CODEX),
-        Agent::Grok => chip,
+        Agent::Grok => with_svg_icon(chip, icons::GROK),
     };
     if tag_w > 0.0 {
         let gap = (4.0 * scale).round();
@@ -322,7 +322,7 @@ mod tests {
         assert!(texts(&lists[0]).contains(&"Win".to_string()) && texts(&lists[0]).contains(&"41%".to_string()));
         assert!(matches!(lists[0].ops[0], DrawOp::Svg { .. }), "o ícone do Claude");
         assert!(!texts(&lists[2]).iter().any(|t| t == "Win" || t == "WSL"), "a mesma conta nos dois lados");
-        assert!(texts(&lists[3]).contains(&GLYPH_AI.to_string()), "o robô do Grok");
+        assert!(matches!(lists[3].ops[0], DrawOp::Svg { svg, .. } if svg == icons::GROK), "o logo do Grok");
         let (empty, _) = slide_chips(&[], 28.0, 12.0, 1.0, &tokens(), &FixedWidthMeasurer);
         assert_eq!(empty.len(), 1, "sem conta, o robô com o traço");
     }

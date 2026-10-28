@@ -23,7 +23,7 @@ use zefiro_bar::ai::{AI_CHIP, AiHit, hit_at, nudge, pencil_ops, pencil_rect, sli
 
 pub const CODEX_GLYPH: &str = "\u{E943}";
 pub const CLAUDE_GLYPH: &str = "\u{E945}";
-/// Robô (Segoe Fluent Icons).
+/// Robô (Segoe Fluent Icons): reserva o lugar do logo do Grok.
 pub const GROK_GLYPH: &str = "\u{E99A}";
 
 #[derive(Default)]
