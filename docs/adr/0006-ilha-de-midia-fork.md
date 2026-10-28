@@ -1,8 +1,8 @@
 # ADR-0006: Ilha de mídia como fork do Dynamic Island, em processo separado
 
-- **Status:** aceito
+- **Status:** substituído por [ADR-0026](0026-remocao-da-ilha-cpp.md) (o fork saiu do repositório em 2026-10-28)
 - **Data:** 2026-10-15
-- **Branch:** `claude/spike-s6-island-fork-6f5cda` (código em [`island/`](../../island/))
+- **Branch:** `claude/spike-s6-island-fork-6f5cda` (o código ficava em `island/`)
 
 ## Contexto
 

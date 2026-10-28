@@ -1,6 +1,6 @@
 # ADR-0009: Ilha de mídia embutida na barra (Rust), no lugar do processo C++
 
-- **Status:** aceito (substitui a decisão de processo separado do [ADR-0006](0006-ilha-de-midia-fork.md) como padrão; o fork C++ continua disponível)
+- **Status:** aceito (substitui a decisão de processo separado do [ADR-0006](0006-ilha-de-midia-fork.md) como padrão). O fork C++ e o `engine = "externa"` saíram na [ADR-0026](0026-remocao-da-ilha-cpp.md).
 - **Data:** 2026-10-16
 - **Branch:** `main` (commits `32c0e2f` … `8af6770`)
 

@@ -1,6 +1,6 @@
 # AGENTS.md — instruções para agentes (Codex e outros)
 
-Zefiro é um ambiente de desktop nativo para Windows (barra, ilha de mídia, launcher), sem WebView: leve, fluido e personalizável. Ele é escrito em Rust; a ilha de mídia é um fork em C++.
+Zefiro é um ambiente de desktop nativo para Windows (barra, ilha de mídia, launcher), sem WebView: leve, fluido e personalizável. Ele é todo escrito em Rust, inclusive a ilha de mídia.
 
 Leia antes de mudar qualquer coisa:
 
@@ -50,10 +50,8 @@ Leia antes de mudar qualquer coisa:
 | `crates/integrations/update` | Atualização pelo GitHub Releases, portável: versão, última release, URL confiável e SHA-256 (ADR-0014) |
 | `crates/modules/bar` | Chips, menu do Zefiro, calendário, chips e painéis de som, microfone e brilho (`devices.rs`), uso (`usage.rs`), chat (`chat.rs`: campo, quebra de linha e painel), VS Code (`vscode.rs`), energia (`power.rs`), sino e lua (`chips.rs`) e o controlador de painéis |
 | `crates/modules/island` (`zefiro-island`) | Ilha embutida, portável: mídia e escolha da fonte, estados, avisos, visões em `DisplayList`, abas (clima, hardware, letras), menu, visualizador e cor da capa (ADR-0009) |
-| `crates/modules/island-host` | Ilha externa (`engine = "externa"`): gravação do `island.ini`/`island-state.ini`, política de reinício e o processo |
 | `crates/platform-windows` | Janelas, AppBar, compositor (Windows.UI.Composition), `MorphShape`, Direct2D/DirectWrite em WARP, monitores, preferências do sistema e os serviços (mídia, volume de saída e entrada, dispositivos de áudio, brilho por DDC/CI…) |
-| `crates/app` (`zefiro.exe`) | Junta tudo: barras por monitor, painéis, laço de eventos, robustez e o ciclo de vida da ilha |
-| `island/` | Fork em C++ do Dynamic Island for Windows (MIT) como `zefiro-island.exe`, usado só com `engine = "externa"`; ver ADR-0006 e ADR-0009 |
+| `crates/app` (`zefiro.exe`) | Junta tudo: barras por monitor, painéis, laço de eventos e robustez |
 
 ## Comandos
 
@@ -62,14 +60,12 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 pwsh -NoProfile -File scripts/check-windows-imports.ps1
 
-# Barra + ilha
+# Barra
 cargo build --release -p zefiro-app
-./island/build.ps1                     # MSVC; feche o zefiro-island.exe antes, senão o link falha
-Copy-Item island/build/zefiro-island.exe target/release/
 ./target/release/zefiro.exe
 
 # Instalador (Inno Setup 6: winget install JRSoftware.InnoSetup) → dist\Zefiro-<versão>-setup.exe
-pwsh -NoProfile -File scripts/package.ps1      # -BuildIsland recompila a ilha C++ antes
+pwsh -NoProfile -File scripts/package.ps1
 ```
 
 **Releases e atualização (ADR-0014):** o Zefiro instalado consulta o GitHub Releases a cada 24 h e oferece "Atualizar para a x.y.z" no menu do Z. Para publicar: subir a versão no `Cargo.toml`, commit e `git tag vX.Y.Z` + push (só quando o usuário pedir); o `.github/workflows/release.yml` gera e anexa o instalador. Guia: `docs/RELEASES.md`. O build de `target
@@ -96,10 +92,10 @@ elease` só checa com `ZEFIRO_UPDATE_CHECK=1`.
 
 **Medir:**
 
-- `./scripts/perf.ps1 -Process zefiro …`: RAM e CPU. Ele soma os processos filhos, e a ilha é filha do zefiro, então para medir só a barra use `[island] enabled = false`.
+- `./scripts/perf.ps1 -Process zefiro …`: RAM e CPU. Ele soma os processos filhos. A ilha roda dentro do próprio `zefiro.exe`: para medir a barra sem ela, use `[island] enabled = false`.
 - `ZEFIRO_CYCLES=50`: abre e fecha o calendário 50 vezes e registra no log o tempo do clique até o quadro.
 - `./scripts/frames.ps1`: quadros perdidos a partir de um CSV do PresentMon, que precisa de um PowerShell elevado.
-- `./scripts/stability.ps1`: dia da contagem das 2 semanas sem crash (início no `-Since`, padrão 2026-10-22), com os panics (`crash-*.txt`), os crashes e travamentos do Windows (eventos 1000 e 1002 do `zefiro.exe` e do `zefiro-island.exe`) e os inícios da barra. Os logs ficam 21 dias (`LOG_FILES_KEPT`).
+- `./scripts/stability.ps1`: dia da contagem das 2 semanas sem crash (início no `-Since`, padrão 2026-10-22), com os panics (`crash-*.txt`), os crashes e travamentos do Windows (eventos 1000 e 1002 do `zefiro.exe`) e os inícios da barra. Os logs ficam 21 dias (`LOG_FILES_KEPT`).
 
 ## Coisas não óbvias (detalhes nos ADRs)
 
@@ -124,18 +120,13 @@ elease` só checa com `ZEFIRO_UPDATE_CHECK=1`.
 - **Sondas de tela sem roubar o mouse:** `PostMessage` na janela `ZefiroInput` simula cliques, mas não dá ao Zefiro o direito de trazer janelas para frente; para isso é preciso entrada real (`SendInput`).
 - **DPI:** o processo é Per-Monitor v2 (`system::enable_per_monitor_dpi`, chamado no início do `main`).
 - **Tela cheia:** com `ABN_FULLSCREENAPP`, a barra do monitor coberto some. O aviso chega uma vez só, então a troca de foco (`window::ForegroundHook`) e um temporizador de 1 s (enquanto há barra escondida) também conferem, por `robustness::reconcile_fullscreen`. Só a janela em primeiro plano **no próprio monitor** decide a barra dele (`system::fullscreen_verdict`): foco no outro monitor não traz a barra por cima do jogo, mas ela volta se o app que a escondeu fechar, minimizar ou sair da tela cheia. Jogos sem bordas (Cyberpunk) também são sempre-no-topo; quem fica na frente é quem subiu por último. As janelas do próprio Zefiro nunca contam como tela cheia.
-- **Barra limpa (ADR-0022):** com `autohide`, a barra não registra AppBar (sem reserva) e o hook `WH_MOUSE_LL` do `bar_context` só observa o cursor: avisa o laço (`WinEvent::AutoHideCursor`) quando ele entra ou sai de um gatilho do topo (`zefiro_ui::autohide::top_triggers`: a linha de cima na borda de verdade e uma faixa de 6 DIP onde outro monitor está logo acima, para a barra nunca ficar inacessível) ou da faixa, sem reter clique. A regra (`AutoHide`, 300 ms para descer, 500 ms para subir, painel aberto segura, tela cheia manda) roda depois de cada evento (`Loop::autohide_update`). A barra desliza no `Offset` do visual raiz e a janela some quando a mola assenta. `is_hidden()` é só a tela cheia; `is_visible()` junta as duas coisas. Com a ilha externa a opção é ignorada. `display = "principal"` cria barra só no principal (`robustness::bar_monitors`). O menu do Z não tem mais Acrílico (foi para a tela de temas), mosaico, HUD, diagnóstico, iniciar com o Windows e reiniciar a ilha: os quatro últimos estão no painel de Configurações (`PanelKind::Settings`, pseudo-chip `__settings`).
+- **Barra limpa (ADR-0022):** com `autohide`, a barra não registra AppBar (sem reserva) e o hook `WH_MOUSE_LL` do `bar_context` só observa o cursor: avisa o laço (`WinEvent::AutoHideCursor`) quando ele entra ou sai de um gatilho do topo (`zefiro_ui::autohide::top_triggers`: a linha de cima na borda de verdade e uma faixa de 6 DIP onde outro monitor está logo acima, para a barra nunca ficar inacessível) ou da faixa, sem reter clique. A regra (`AutoHide`, 300 ms para descer, 500 ms para subir, painel aberto segura, tela cheia manda) roda depois de cada evento (`Loop::autohide_update`). A barra desliza no `Offset` do visual raiz e a janela some quando a mola assenta. `is_hidden()` é só a tela cheia; `is_visible()` junta as duas coisas. `display = "principal"` cria barra só no principal (`robustness::bar_monitors`). O menu do Z não tem mais Acrílico (foi para a tela de temas), mosaico, HUD, diagnóstico e iniciar com o Windows: os três últimos estão no painel de Configurações (`PanelKind::Settings`, pseudo-chip `__settings`).
 - **Nenhuma janela do Zefiro do tamanho exato do monitor:** em primeiro plano, o Windows a trata como app em tela cheia e liga o Não perturbe sozinho. A janela do painel tem uma linha a menos (`panel_window`, ADR-0007).
-- **Fork da ilha:** toda mudança no `dynamic-island-for-windows.wh.cpp` vai dentro de `#ifdef ZEFIRO_ISLAND` e é marcada com `// ZEFIRO:`, para acompanhar o upstream com diffs mínimos. A camada `wh_shim.*` substitui a API do Windhawk.
-- **Ilha embutida (padrão, ADR-0009 e ADR-0017):** é o chip `island`, em qualquer seção de qualquer monitor; a barra desenha a ilha no próprio compositor, centrada no chip, que reserva a largura máxima dela. Sem o chip, o centro do principal fica livre. Clique abre o painel com abas. Os serviços só da ilha seguem `Config::shows_embedded_island()`. Ilha e player não têm fundo próprio (`SurfaceKind::Merged`): uma segunda camada a 96 % por cima da faixa ficava mais escura. Cada fonte de dados (SMTC, volume, privacidade, notificações, Bluetooth, clima, letras, hardware) é um serviço em `platform-windows` com thread própria que avisa a UI por `post_user`; nada consulta por quadro. O hardware só amostra com a aba aberta, e a captura de áudio só roda com mídia tocando e a barra visível.
+- **Ilha (ADR-0009, ADR-0017 e ADR-0026):** é o chip `island`, em qualquer seção de qualquer monitor; a barra desenha a ilha no próprio compositor, centrada no chip, que reserva a largura máxima dela. Sem o chip, o centro do principal fica livre. Clique abre o painel com abas. Os serviços só da ilha seguem `Config::shows_embedded_island()`. Ilha e player não têm fundo próprio (`SurfaceKind::Merged`): uma segunda camada a 96 % por cima da faixa ficava mais escura. Cada fonte de dados (SMTC, volume, privacidade, notificações, Bluetooth, clima, letras, hardware) é um serviço em `platform-windows` com thread própria que avisa a UI por `post_user`; nada consulta por quadro. O hardware só amostra com a aba aberta, e a captura de áudio só roda com mídia tocando e a barra visível.
 - **YouTube no Brave/Chrome:** a cada troca de vídeo (próxima, anterior, fim no Mix) a sessão some do SMTC por ~5 s e volta com uma miniatura genérica; a definitiva chega ~150 ms depois, às vezes sem evento. O serviço segura a sessão sumida sem controles (`VanishHold`), guarda a capa pelos bytes da miniatura (`CoverCache`) e relê a capa por 3 s depois de faixa nova. Sonda: `media_watch_probe` (`ZEFIRO_PROBE_NEXT=5` pula a faixa).
 - **Chips da ilha (ADR-0012):** `player`, `weather` e `hardware` levam partes da ilha para qualquer seção e monitor. O player é uma `IslandView` própria no retângulo do chip, sem os avisos; a largura dele segue a pílula e refaz o layout. Os painéis reaproveitam o painel com abas da ilha (`PanelKind::tabbed`, `tabs::for_set`). Mídia e clima rodam com a ilha embutida ou com o chip na barra.
 - **HUD e diagnóstico (ADR-0013):** `Ctrl+Alt+Shift+D` abre o HUD (quadros do DWM, memória, último dado de cada integração e os últimos avisos do log, pela `RecentLayer`); ele só atualiza aberto. "Exportar diagnóstico" nas Configurações (menu do Z) grava um zip limpo (`zefiro_core::diagnostics::sanitize`) em Downloads.
-- **Ilha externa e temas novos:** a ilha C++ tem só 8 paletas; temas embutidos depois delas vão como personalizados (`ISLAND_PRESETS`).
-- **Barra ↔ ilha externa (`engine = "externa"`):**
-  - A barra grava `island.ini` (seção `[Zefiro]`, cores do tema, e no formato faixa sem contorno, sem sombra e sem o tom da capa) e o `ColorThemeV2` no `island-state.ini`.
-  - A ilha publica `ZefiroAccent` no `island-state.ini`. A barra usa esse valor quando o tema tem `accent = "auto"`.
-  - O calendário fica só na barra; a ilha embutida não tem essa aba.
+- **Sem ilha C++ (ADR-0026):** o fork do Dynamic Island for Windows e o `engine = "externa"` saíram. Uma config com `[island] engine` ou `exe` abre normalmente com a ilha em Rust, e o log avisa uma vez (`removed_island_keys`). O `island.ini` e o `island-state.ini` antigos em `%APPDATA%\zefiro` não são lidos nem apagados. O destaque da capa (`accent = "auto"`) vem do `island_loop`, e o calendário fica só na barra.
 
 ## Fluxo de trabalho
 
