@@ -66,6 +66,18 @@ pub fn enable_per_monitor_dpi() -> bool {
     }
 }
 
+/// Mantém o MTA (o apartamento COM das threads de serviço) vivo até o processo acabar. As threads
+/// que usam WinRT (clima, Spotify, Terminal…) entram e saem dele; quando a última sai, ele é
+/// desmontado, e as fábricas que a crate `windows` guarda em cache (a do `HttpClient`, por exemplo)
+/// ficam inválidas: o próximo uso caía com STATUS_ACCESS_VIOLATION (reproduzido no teste
+/// `spotify_platform`). Chamar uma vez, no começo do `main`.
+pub fn keep_mta_alive() {
+    // SAFETY: só incrementa o uso do MTA; o cookie nunca é devolvido (vale até o processo acabar).
+    if let Err(e) = unsafe { windows::Win32::System::Com::CoIncrementMTAUsage() } {
+        tracing::warn!("não consegui manter o MTA vivo: {e}");
+    }
+}
+
 /// Uma janela comum (não a área de trabalho, a barra de tarefas nem o Zefiro) cobrindo o monitor inteiro.
 pub fn is_fullscreen(class: &str, window: Rect, monitor: Rect) -> bool {
     // A área de trabalho e a barra de tarefas cobrem o monitor sem ser app; as janelas do próprio

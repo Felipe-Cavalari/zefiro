@@ -41,6 +41,8 @@ fn main() {
     let log_dir = default_log_dir();
     install_panic_hook(log_dir.clone(), VERSION);
     let _guard = init_logging(&log_dir, "info").ok();
+    // O MTA não pode ser desmontado entre um serviço e outro (fábricas WinRT em cache).
+    system::keep_mta_alive();
     if let Some(guard) = &_guard {
         debug_loop::set_recent(guard.recent.clone());
     }

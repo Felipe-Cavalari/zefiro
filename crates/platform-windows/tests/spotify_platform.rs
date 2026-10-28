@@ -2,11 +2,21 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::mpsc;
 use std::time::Duration;
+use windows::Win32::System::Com::CoIncrementMTAUsage;
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize};
 use zefiro_platform_windows::spotify_auth::{ListenResult, listen, listen_on};
 use zefiro_platform_windows::{http, secret};
 
+/// O MTA vivo até o processo acabar. Cada teste roda numa thread que termina: quando a última thread
+/// do MTA sai, ele é desmontado, e a fábrica do `HttpClient` que a crate `windows` guardou em cache
+/// fica inválida (o 2º teste HTTP caía com STATUS_ACCESS_VIOLATION com 4 threads ou menos, como no CI).
+static MTA: std::sync::Once = std::sync::Once::new();
+
 fn winrt() {
+    MTA.call_once(|| {
+        // SAFETY: só incrementa o uso do MTA; o cookie nunca é devolvido (o processo acaba).
+        let _ = unsafe { CoIncrementMTAUsage() };
+    });
     // SAFETY: inicializa o WinRT na thread do teste (HttpClient); nunca desfeito, o processo acaba.
     let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
 }
