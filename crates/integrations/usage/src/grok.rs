@@ -50,10 +50,18 @@ pub fn parse_billing(result: &Value) -> Result<GrokUsage, UsageError> {
     Ok(GrokUsage { percent, period_end, period_minutes, plan, prepaid_cents })
 }
 
-/// O texto de um erro do `_x.ai/billing`: sem login vira `Missing`; o resto, formato desconhecido.
+/// O texto de um erro do `_x.ai/billing`: sem login vira `Missing`; método que sumiu, formato
+/// desconhecido; o resto (o serviço de cobrança da xAI falha às vezes, "meter unavailable") é
+/// passageiro, e o chip fica com o último valor.
 pub fn billing_error(message: &str) -> UsageError {
     let lower = message.to_lowercase();
-    if ["auth", "login", "token", "credential"].iter().any(|w| lower.contains(w)) { UsageError::Missing } else { UsageError::UnknownFormat }
+    if lower.contains("method not found") {
+        UsageError::UnknownFormat
+    } else if ["auth", "login", "token", "credential"].iter().any(|w| lower.contains(w)) {
+        UsageError::Missing
+    } else {
+        UsageError::Network
+    }
 }
 
 /// Uma conta do Grok: o e-mail, o plano, o último resultado e o último bom.
@@ -165,7 +173,9 @@ mod tests {
         assert_eq!(id, GrokIdentity { key: Some("444495b0".into()), email: Some("a@b.c".into()) });
         assert_eq!(parse_identity(&json!(null)), GrokIdentity::default());
         assert_eq!(billing_error("Authentication required"), UsageError::Missing);
-        assert_eq!(billing_error("Method not found"), UsageError::UnknownFormat);
+        assert_eq!(billing_error("Method not found"), UsageError::UnknownFormat, "a extensão sumiu");
+        // Visto em 2026-10-28, uma consulta em três: passageiro, o chip fica com o último valor.
+        assert_eq!(billing_error("Internal error: Billing service error: cursor billing: meter unavailable"), UsageError::Network);
         assert_eq!(format_usd(400), "US$ 4,00");
         assert_eq!(format_usd(1234), "US$ 12,34");
     }
