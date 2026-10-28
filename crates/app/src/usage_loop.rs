@@ -18,7 +18,8 @@ use zefiro_platform_windows::{window, wsl};
 use zefiro_platform::geometry::Point;
 use zefiro_ui::paint::DisplayList;
 
-use crate::event_loop::{Loop, USER_CLAUDE, USER_CODEX, USER_GROK};
+use crate::event_loop::{Loop, TIMER_AI_SLIDE, USER_CLAUDE, USER_CODEX, USER_GROK};
+use zefiro_bar::ai::{AI_CHIP, AiHit, hit_at, nudge, pencil_ops, pencil_rect, slides_panel, toggle};
 
 pub const CODEX_GLYPH: &str = "\u{E943}";
 pub const CLAUDE_GLYPH: &str = "\u{E945}";
@@ -36,6 +37,10 @@ pub struct UsageRuntime {
     grok_refreshing: bool,
     /// O mouse está sobre o botão de atualizar do painel aberto.
     refresh_hover: bool,
+    /// O painel do chip `ia` está na lista de slides (lápis).
+    ai_editing: bool,
+    /// O que os slides do chip `ia` mostravam: a barra só é refeita quando isso muda.
+    ai_shown: Vec<(String, Option<i32>)>,
 }
 
 pub fn now_unix() -> i64 {
@@ -254,7 +259,7 @@ impl Loop {
     /// Liga ou desliga o Claude, o Codex e o Grok conforme os chips estão na barra: sem o chip, o
     /// `/usage` do Claude Code e o `grok` não rodam, e a pasta do Codex não é varrida.
     pub fn usage_services(&mut self) {
-        match (self.ctx.config.bar.uses("grok"), self.usage.grok.is_some()) {
+        match (self.ctx.config.bar.uses("grok") || self.ctx.config.bar.uses(AI_CHIP), self.usage.grok.is_some()) {
             (true, false) => {
                 tracing::info!("uso do Grok: serviço ligado");
                 self.usage.grok = GrokUsageService::start(Arc::new(|| window::post_user(USER_GROK))).map_err(|e| tracing::warn!("uso do Grok indisponível: {e}")).ok();
@@ -266,7 +271,15 @@ impl Loop {
             }
             _ => {}
         }
-        let (claude, codex) = (self.ctx.config.bar.uses("claude"), self.ctx.config.bar.uses("codex"));
+        // O chip `ia` precisa das três IAs.
+        let bar = &self.ctx.config.bar;
+        let ai = bar.uses(AI_CHIP);
+        if ai {
+            window::set_timer(TIMER_AI_SLIDE, self.ctx.config.ai.interval_ms());
+        } else {
+            window::kill_timer(TIMER_AI_SLIDE);
+        }
+        let (claude, codex) = (bar.uses("claude") || ai, bar.uses("codex") || ai);
         match (claude, self.usage.claude.is_some()) {
             (true, false) => {
                 tracing::info!("uso do Claude: serviço ligado");
@@ -307,10 +320,11 @@ impl Loop {
     pub fn usage_codex_changed(&mut self) -> Result<()> {
         self.usage.codex_refreshing = false;
         let latest = self.usage.codex.as_ref().and_then(CodexService::latest);
-        if self.ctx.usage.set_codex(latest, now_unix()) {
+        let chip = self.ctx.usage.set_codex(latest, now_unix());
+        if self.ai_changed() || chip {
             self.apply_bars(true)?;
         }
-        if self.usage_panel_open(PanelKind::Codex) {
+        if self.usage_panel_open(PanelKind::Codex) || self.usage_panel_open(PanelKind::Ai) {
             self.redraw_open_panel()?;
         }
         Ok(())
@@ -321,10 +335,11 @@ impl Loop {
     pub fn usage_claude_changed(&mut self) -> Result<()> {
         self.usage.claude_refreshing = false;
         let latest = self.usage.claude.as_ref().and_then(ClaudeService::latest);
-        if self.ctx.usage.set_claude(latest, now_unix()) {
+        let chip = self.ctx.usage.set_claude(latest, now_unix());
+        if self.ai_changed() || chip {
             self.apply_bars(true)?;
         }
-        if self.usage_panel_open(PanelKind::Claude) {
+        if self.usage_panel_open(PanelKind::Claude) || self.usage_panel_open(PanelKind::Ai) {
             self.redraw_open_panel()?;
         }
         Ok(())
@@ -334,22 +349,100 @@ impl Loop {
     pub fn usage_grok_changed(&mut self) -> Result<()> {
         self.usage.grok_refreshing = false;
         let latest = self.usage.grok.as_ref().and_then(GrokUsageService::latest);
-        if self.ctx.usage.set_grok(latest, now_unix()) {
+        let chip = self.ctx.usage.set_grok(latest, now_unix());
+        if self.ai_changed() || chip {
             self.apply_bars(true)?;
         }
-        if self.usage_panel_open(PanelKind::Grok) {
+        if self.usage_panel_open(PanelKind::Grok) || self.usage_panel_open(PanelKind::Ai) {
             self.redraw_open_panel()?;
+        }
+        Ok(())
+    }
+
+    /// Os slides do chip `ia` mudaram (conta nova, outro número, outra ordem)? Guarda o novo.
+    fn ai_changed(&mut self) -> bool {
+        let a = self.ctx.usage.ai_slides(&self.ctx.config.ai, now_unix());
+        let shown: Vec<(String, Option<i32>)> = a.visible.iter().chain(&a.hidden).map(|s| (s.key.clone(), s.percent.map(|p| p.round() as i32))).collect();
+        std::mem::replace(&mut self.usage.ai_shown, shown.clone()) != shown
+    }
+
+    /// Próximo slide do chip `ia` em cada barra (`TIMER_AI_SLIDE`).
+    pub fn ai_tick(&mut self) -> Result<()> {
+        for b in &mut self.bars {
+            b.advance_ai(&self.ctx)?;
         }
         Ok(())
     }
 
     /// Algum painel de uso aberto (o botão de atualizar e o hover valem nele).
     fn usage_any_open(&self) -> bool {
-        [PanelKind::Claude, PanelKind::Codex, PanelKind::Grok].into_iter().any(|k| self.usage_panel_open(k))
+        [PanelKind::Claude, PanelKind::Codex, PanelKind::Grok, PanelKind::Ai].into_iter().any(|k| self.usage_panel_open(k))
+    }
+
+    /// Clique no painel do chip `ia`: atualizar as três, lápis e, na lista, olho, setas e
+    /// "Concluir". A ordem e os ocultos vão para o `[ia]` na hora (o painel não fecha).
+    fn ai_click(&mut self, p: Point, scale: f32) -> Result<bool> {
+        if !self.usage.ai_editing {
+            if refresh_button_rect(scale).contains(p) {
+                if self.claude_refresh_enabled()
+                    && let Some(s) = &self.usage.claude
+                {
+                    s.refresh_now();
+                    self.usage.claude_refreshing = true;
+                }
+                if !self.usage.codex_refreshing
+                    && let Some(s) = &self.usage.codex
+                {
+                    s.refresh();
+                    self.usage.codex_refreshing = true;
+                }
+                if !self.usage.grok_refreshing
+                    && let Some(s) = &self.usage.grok
+                {
+                    s.refresh_now();
+                    self.usage.grok_refreshing = true;
+                }
+                self.redraw_open_panel()?;
+                return Ok(true);
+            }
+            if pencil_rect(scale).contains(p) {
+                self.usage.ai_editing = true;
+                self.redraw_open_panel()?;
+                return Ok(true);
+            }
+            return Ok(false);
+        }
+        let arranged = self.ctx.usage.ai_slides(&self.ctx.config.ai, now_unix());
+        let (_, hits) = slides_panel(&arranged, scale, &self.ctx.theme.tokens);
+        let Some(hit) = hit_at(&hits, p) else { return Ok(false) };
+        let visible: Vec<String> = arranged.visible.iter().map(|s| s.key.clone()).collect();
+        let ai = &mut self.ctx.config.ai;
+        match &hit {
+            AiHit::Done | AiHit::Edit => self.usage.ai_editing = hit == AiHit::Edit,
+            AiHit::Toggle(key) => toggle(ai, &visible, key),
+            AiHit::Up(key) => nudge(ai, &visible, key, true),
+            AiHit::Down(key) => nudge(ai, &visible, key, false),
+        }
+        if !matches!(hit, AiHit::Done | AiHit::Edit) {
+            tracing::info!(slides = self.ctx.config.ai.order.len(), ocultos = self.ctx.config.ai.hidden.len(), "chip ia: slides mudados");
+            if let Err(e) = zefiro_core::config::set_ai(&self.ctx.config_path, &self.ctx.config.ai) {
+                tracing::warn!("chip ia: não consegui gravar os slides no config: {e}");
+            }
+            self.ai_changed();
+            self.apply_bars(true)?;
+        }
+        self.redraw_open_panel()?;
+        Ok(true)
     }
 
     /// Ao abrir o painel: confere o dado agora.
     pub fn usage_prepare(&mut self, kind: PanelKind) {
+        if kind == PanelKind::Ai {
+            self.usage.ai_editing = false;
+            for k in [PanelKind::Claude, PanelKind::Codex, PanelKind::Grok] {
+                self.usage_prepare(k);
+            }
+        }
         if kind == PanelKind::Grok
             && let Some(s) = &self.usage.grok
         {
@@ -370,6 +463,9 @@ impl Loop {
 
     /// Botão de atualizar dos painéis do Claude, do Codex e do Grok. `true` se o clique foi nele.
     pub fn usage_click(&mut self, p: Point, scale: f32) -> Result<bool> {
+        if self.usage_panel_open(PanelKind::Ai) {
+            return self.ai_click(p, scale);
+        }
         if !refresh_button_rect(scale).contains(p) {
             return Ok(false);
         }
@@ -456,8 +552,31 @@ impl Loop {
                 }
             };
         }
+        if kind == PanelKind::Ai {
+            return self.ai_panel_list(scale);
+        }
         let blocks = codex_blocks(self.ctx.usage.codex.as_ref().unwrap_or(&CodexSnapshot::default()), now, offset);
         usage_panel(&blocks, "", Some(RefreshButton { enabled: !self.usage.codex_refreshing, hovered }), scale, tokens, text)
+    }
+
+    /// Painel do chip `ia`: os blocos das três IAs (com o lápis ao lado do atualizar) ou, no lápis,
+    /// a lista dos slides.
+    fn ai_panel_list(&self, scale: f32) -> DisplayList {
+        let (tokens, text) = (&self.ctx.theme.tokens, &self.ctx.text);
+        let (now, offset) = (now_unix(), utc_offset_seconds());
+        if self.usage.ai_editing {
+            return slides_panel(&self.ctx.usage.ai_slides(&self.ctx.config.ai, now), scale, tokens).0;
+        }
+        let loading = |name: &str| vec![block(name.into(), String::new(), Vec::new(), Some("Carregando…".into()))];
+        let u = &self.ctx.usage;
+        let mut blocks = u.claude.as_ref().map_or_else(|| loading("Claude"), |s| claude_blocks(s, now, offset));
+        blocks.extend(u.codex.as_ref().map_or_else(|| loading("Codex"), |s| codex_blocks(s, now, offset)));
+        blocks.extend(u.grok.as_ref().map_or_else(|| loading("Grok"), |s| grok_blocks(s, now, offset)));
+        let refreshing = self.usage.claude_refreshing || self.usage.codex_refreshing || self.usage.grok_refreshing;
+        let enabled = !refreshing;
+        let mut list = usage_panel(&blocks, if refreshing { "Atualizando…" } else { "" }, Some(RefreshButton { enabled, hovered: self.usage.refresh_hover }), scale, tokens, text);
+        list.ops.extend(pencil_ops(scale, false, tokens));
+        list
     }
 }
 

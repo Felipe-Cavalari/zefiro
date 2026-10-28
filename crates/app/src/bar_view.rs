@@ -24,8 +24,10 @@ use zefiro_ui::paint::{DisplayList, DrawOp};
 use zefiro_platform::geometry::Size;
 use zefiro_platform::text::{Align, Family, FontWeight, TextStyle};
 
+use crate::ai_carousel::AiCarousel;
 use crate::app::AppCtx;
 use crate::island_view::IslandView;
+use zefiro_bar::ai::{AI_CHIP, slide_chips};
 use crate::theme_state::SurfaceKind;
 use zefiro_island::view::{Collapsed, PillContent, RESERVE_DESIGN_W, activity_pill, idle_pill, media_pill, player_idle_pill, timer_pill, with_privacy};
 
@@ -64,6 +66,8 @@ pub struct BarView {
     player: Option<IslandView>,
     /// Mouse em cima do player desta barra (espia só ele).
     player_hover: bool,
+    /// Os slides do chip `ia`, quando ele está nesta barra.
+    ai: Option<AiCarousel>,
     hidden: bool,
     /// O app em tela cheia que escondeu a barra (o HWND); ela volta quando ele sai, mesmo com o foco em outro monitor.
     fullscreen_window: isize,
@@ -183,7 +187,7 @@ impl BarView {
         root.Children()?.InsertAtTop(&divider)?;
         let slide = ctx.comp.spring_offset(&root.cast::<Visual>()?, 0.0, 0.0)?;
         let groups = Vec::new();
-        let mut view = BarView { hwnd, monitor: monitor.clone(), scale, _target: target, root, strip, divider, groups, rails: Vec::new(), chips: Vec::new(), layout: None, appbar: false, hover: None, active: None, guides: None, drag_ghost: None, drag_marker: None, island: None, player: None, player_hover: false, hidden: false, fullscreen_window: 0, auto: Default::default(), retracted: false, slide, window_h: h, slide_generation: Default::default(), interactive_base: Vec::new() };
+        let mut view = BarView { hwnd, monitor: monitor.clone(), scale, _target: target, root, strip, divider, groups, rails: Vec::new(), chips: Vec::new(), layout: None, appbar: false, hover: None, active: None, guides: None, drag_ghost: None, drag_marker: None, island: None, player: None, player_hover: false, ai: None, hidden: false, fullscreen_window: 0, auto: Default::default(), retracted: false, slide, window_h: h, slide_generation: Default::default(), interactive_base: Vec::new() };
         view.apply(ctx, false)?;
         window::set_bounds(hwnd, bounds, true);
         Ok(view)
@@ -217,12 +221,22 @@ impl BarView {
         // O chip da ilha só aparece com a ilha ligada.
         let shown = |id: &&str| zefiro_bar::catalog::descriptor(id).is_some() && (*id != ISLAND_CHIP || ctx.config.island.embedded());
         let island_reserve = (RESERVE_DESIGN_W * (m.island_pill * self.scale).round() / 44.0).round();
+        // Os slides do chip `ia`: todos da mesma largura, a do chip.
+        let ai = sections.ids().any(|id| id == AI_CHIP).then(|| {
+            let arranged = ctx.usage.ai_slides(&ctx.config.ai, crate::usage_loop::now_unix());
+            let keys: Vec<String> = arranged.visible.iter().map(|s| s.key.clone()).collect();
+            let (lists, w) = slide_chips(&arranged.visible, chip_h, font_px, self.scale, &ctx.theme.tokens, &ctx.text);
+            (keys, lists, w)
+        });
         let mut contents: Vec<(String, ChipContent)> = sections
             .ids()
             .filter(shown)
             .map(|id| {
                 let content = if id == PLAYER_CHIP {
                     player_chip(&player_content(ctx, chip_h, self.player_hover), pad, chip_h, font_px, &ctx.theme.tokens)
+                } else if let (AI_CHIP, Some((_, lists, w))) = (id, &ai) {
+                    // Quem aparece são os slides; a superfície guarda o primeiro, para o arraste.
+                    ChipContent { content_w: *w, list: lists[0].clone() }
                 } else if id == ISLAND_CHIP {
                     // O chip reserva a largura máxima da ilha: os vizinhos não andam quando ela espia.
                     let pill = island_content(ctx, (m.island_pill * self.scale).round());
@@ -398,8 +412,8 @@ impl BarView {
                 hover.set_opacity(0.0)?;
                 let surface = ctx.comp.surface(content.list.size.w, content.list.size.h)?;
                 let sprite = ctx.comp.sprite_for(&surface, content.list.size.w, content.list.size.h)?;
-                if id == PLAYER_CHIP || id == ISLAND_CHIP {
-                    // Quem aparece é a pílula; a nota da superfície é só para o arraste.
+                if id == PLAYER_CHIP || id == ISLAND_CHIP || id == AI_CHIP {
+                    // Quem aparece é a pílula (ou os slides); a superfície é só para o arraste.
                     sprite.SetOpacity(0.0)?;
                 }
                 self.root.Children()?.InsertAtTop(&sprite)?;
@@ -417,6 +431,23 @@ impl BarView {
             let r = Shape { rect: b.rect, radius: layout.chip_radius.unwrap_or_else(|| pill_radius(b.rect.h, radius_max, style, self.scale)) };
             if animate { chip.hover.animate(&ctx.comp, r, spring)? } else { chip.hover.set(r)? }
             chip.rect = b.rect;
+        }
+
+        // Slides do chip `ia`, presos à posição dele.
+        match (self.chips.iter().find(|c| c.id == AI_CHIP), &ai) {
+            (Some(chip), Some((keys, lists, w))) => {
+                if self.ai.is_none() {
+                    self.ai = Some(AiCarousel::new(ctx, &self.root, &chip.pos)?);
+                }
+                if let Some(carousel) = &mut self.ai {
+                    carousel.sync(ctx, lists, keys, Size { w: *w, h: chip_h })?;
+                }
+            }
+            _ => {
+                if let Some(carousel) = self.ai.take() {
+                    self.root.Children()?.Remove(carousel.root())?;
+                }
+            }
         }
 
         // Clique: chips + faixa (ou grupos) recebem clique; o resto passa para baixo.
@@ -716,8 +747,27 @@ impl BarView {
         Ok(())
     }
 
+    /// Próximo slide do chip `ia`, se ele está nesta barra, a barra está à vista e o mouse não
+    /// está em cima dele (nem o painel dele aberto).
+    pub fn advance_ai(&mut self, ctx: &AppCtx) -> Result<()> {
+        let held = [&self.hover, &self.active].iter().any(|c| c.as_deref() == Some(AI_CHIP));
+        if held || !self.is_visible() {
+            return Ok(());
+        }
+        match &mut self.ai {
+            Some(carousel) => carousel.advance(ctx),
+            None => Ok(()),
+        }
+    }
+
     /// Esconde (ao abrir o painel) ou mostra (ao fechar) o conteúdo do chip em 0,17 s.
     pub fn fade_chip(&self, ctx: &AppCtx, chip: &str, visible: bool) -> Result<()> {
+        if chip == AI_CHIP {
+            if let Some(carousel) = &self.ai {
+                carousel.fade(ctx, visible)?;
+            }
+            return Ok(());
+        }
         if chip == ISLAND_CHIP {
             if let Some(view) = &self.island {
                 view.fade_content(ctx, visible)?;

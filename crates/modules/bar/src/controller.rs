@@ -1,7 +1,7 @@
 //! Quem abre e quem fecha: um painel por vez.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PanelKind { Menu, Settings, Calendar, Overflow, Island, Audio, Mic, Brightness, Claude, Codex, Grok, VsCode, Terminal, Chat, Power, Player, Weather, Hardware, Tray, Spotify }
+pub enum PanelKind { Menu, Settings, Calendar, Overflow, Island, Audio, Mic, Brightness, Claude, Codex, Grok, Ai, VsCode, Terminal, Chat, Power, Player, Weather, Hardware, Tray, Spotify }
 
 /// Configurações não são um chip: o menu do Z abre o painel como se fosse, preso ao chip `zefiro`.
 pub const SETTINGS_CHIP: &str = "__settings";
@@ -35,6 +35,7 @@ pub fn panel_kind_for(chip: &str) -> Option<PanelKind> {
         "claude" => Some(PanelKind::Claude),
         "codex" => Some(PanelKind::Codex),
         "grok" => Some(PanelKind::Grok),
+        "ia" => Some(PanelKind::Ai),
         "vscode" => Some(PanelKind::VsCode),
         "terminal" => Some(PanelKind::Terminal),
         "chat" => Some(PanelKind::Chat),
@@ -103,6 +104,7 @@ mod tests {
         assert_eq!(panel_kind_for("claude"), Some(PanelKind::Claude));
         assert_eq!(panel_kind_for("codex"), Some(PanelKind::Codex));
         assert_eq!(panel_kind_for("grok"), Some(PanelKind::Grok));
+        assert_eq!(panel_kind_for("ia"), Some(PanelKind::Ai));
         assert_eq!(panel_kind_for("vscode"), Some(PanelKind::VsCode));
         assert_eq!(panel_kind_for("terminal"), Some(PanelKind::Terminal));
         assert_eq!(panel_kind_for("tray"), Some(PanelKind::Tray));

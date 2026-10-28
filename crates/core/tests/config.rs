@@ -205,6 +205,26 @@ fn chat_choices_are_written_without_touching_the_rest() {
 }
 
 #[test]
+fn ai_section_parses_and_is_written_by_the_panel() {
+    let c = parse_config(DEFAULT_CONFIG).unwrap();
+    assert_eq!((c.ai.interval, c.ai.interval_ms(), c.ai.order.len()), (5, 5000, 0));
+    let c = parse_config("[ia]\ninterval = 1\norder = [\"grok:Ubuntu-24.04\"]\nhidden = [\"claude:windows\"]\n").unwrap();
+    assert_eq!((c.ai.interval_ms(), c.ai.order.as_slice(), c.ai.hidden.as_slice()), (2000, &["grok:Ubuntu-24.04".to_string()][..], &["claude:windows".to_string()][..]));
+    assert_eq!(parse_config("[ia]\ninterval = 600\n").unwrap().ai.interval_ms(), 60_000);
+    let mut b = c.clone();
+    b.ai.hidden.clear();
+    assert!(c.same_except_panels(&b), "o painel do chip não fecha ao gravar");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, DEFAULT_CONFIG).unwrap();
+    set_ai(&path, &AiConfig { order: vec!["codex:windows".into(), "claude:windows".into()], hidden: vec!["grok:Ubuntu-24.04".into()], interval: 99 }).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("# segundos entre os slides"), "comentário mantido");
+    let c = parse_config(&text).unwrap();
+    assert_eq!((c.ai.order.len(), c.ai.hidden[0].as_str(), c.ai.interval), (2, "grok:Ubuntu-24.04", 5), "o interval do arquivo fica");
+}
+
+#[test]
 fn spotify_section_parses_and_defaults_empty() {
     assert_eq!(parse_config(DEFAULT_CONFIG).unwrap().spotify, SpotifyConfig::default());
     assert_eq!(SpotifyConfig::default().client_id, "");

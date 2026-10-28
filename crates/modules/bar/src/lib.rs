@@ -1,5 +1,6 @@
 //! Barra: chips, menu do Zefiro, calendário e regras dos painéis.
 
+pub mod ai;
 pub mod calendar;
 pub mod chat;
 pub mod chips;

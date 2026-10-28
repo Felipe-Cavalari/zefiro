@@ -97,6 +97,31 @@ impl UsageState {
         self.grok.as_ref().and_then(|s| zefiro_integration_usage::grok::grok_chip_percent(&s.accounts, crate::usage_loop::now_unix()))
     }
 
+    /// Os slides do chip `ia`: uma conta por slide (Claude, Codex e Grok, cada um com as suas
+    /// origens), arrumados pelo `[ia]`. Uma IA sem resposta ainda não tem slide.
+    pub fn ai_slides(&self, ai: &zefiro_core::config::AiConfig, now_unix: i64) -> zefiro_bar::ai::Arranged {
+        use zefiro_bar::ai::{Slide, arrange, origin_tag, slide_key};
+        use zefiro_integration_chat::agent::Agent;
+        use zefiro_integration_usage::origins::{Account, many_distros, origins_label};
+        fn slide<T>(agent: Agent, a: &Account<T>, many: bool, percent: Option<f32>) -> Slide {
+            Slide { key: slide_key(agent, &a.origins), agent, origin: origins_label(&a.origins, many), tag: origin_tag(&a.origins), percent }
+        }
+        let mut slides = Vec::new();
+        if let Some(s) = &self.claude {
+            let many = many_distros(&s.accounts);
+            slides.extend(s.accounts.iter().map(|a| slide(Agent::Claude, a, many, zefiro_integration_usage::claude::chip_percent_accounts(std::slice::from_ref(a), now_unix))));
+        }
+        if let Some(s) = &self.codex {
+            let many = many_distros(&s.accounts);
+            slides.extend(s.accounts.iter().map(|a| slide(Agent::Codex, a, many, zefiro_integration_usage::codex::codex_chip_percent(std::slice::from_ref(a), now_unix))));
+        }
+        if let Some(s) = &self.grok {
+            let many = many_distros(&s.accounts);
+            slides.extend(s.accounts.iter().map(|a| slide(Agent::Grok, a, many, zefiro_integration_usage::grok::grok_chip_percent(std::slice::from_ref(a), now_unix))));
+        }
+        arrange(slides, ai)
+    }
+
     /// % do chip do Codex: a maior janela primária entre as contas.
     pub fn codex_chip(&self) -> Option<f32> {
         self.codex.as_ref().and_then(|s| zefiro_integration_usage::codex::codex_chip_percent(&s.accounts, crate::usage_loop::now_unix()))
@@ -123,6 +148,26 @@ mod tests {
     use super::*;
     use zefiro_integration_usage::codex::{CodexEntry, CodexSnapshot, CodexUsage, Window};
     use zefiro_integration_usage::origins::{Account, OriginKind};
+
+    #[test]
+    fn ai_slides_have_one_account_each_with_its_origin() {
+        use zefiro_integration_usage::grok::{GrokEntry, GrokSnapshot, GrokUsage};
+        let t = 1_792_000_000;
+        let wsl = OriginKind::Wsl("Ubuntu-24.04".into());
+        let codex = |origins: Vec<OriginKind>, p: f32| Account { key: format!("{origins:?}"), origins, stopped: false, data: CodexEntry { modified: std::time::SystemTime::UNIX_EPOCH, usage: CodexUsage { primary: Some(Window { used_percent: p, window_minutes: 300, resets_at: t + 60 }), ..Default::default() } } };
+        let grok = GrokEntry { result: Some(Ok(GrokUsage { percent: Some(25.0), period_end: Some(t + 60), ..Default::default() })), ..Default::default() };
+        let state = UsageState {
+            codex: Some(CodexSnapshot { accounts: vec![codex(vec![OriginKind::Windows], 1.0), codex(vec![wsl.clone()], 7.0)], wsl_stopped: false }),
+            grok: Some(GrokSnapshot { accounts: vec![Account { key: "p1".into(), origins: vec![wsl.clone()], stopped: false, data: grok }], ..Default::default() }),
+            ..Default::default()
+        };
+        let a = state.ai_slides(&zefiro_core::config::AiConfig::default(), t);
+        let shown: Vec<(String, &str, Option<f32>)> = a.visible.iter().map(|s| (s.name(), s.tag, s.percent)).collect();
+        assert_eq!(shown, [("Codex · Windows".to_string(), "Win", Some(1.0)), ("Codex · WSL".to_string(), "WSL", Some(7.0)), ("Grok · WSL".to_string(), "WSL", Some(25.0))], "sem o Claude (ainda sem resposta)");
+        let hidden = zefiro_core::config::AiConfig { hidden: vec!["codex:windows".into()], ..Default::default() };
+        let a = state.ai_slides(&hidden, t);
+        assert_eq!((a.visible.len(), a.hidden[0].key.as_str()), (2, "codex:windows"));
+    }
 
     #[test]
     fn codex_chip_redraws_when_window_resets() {

@@ -1,5 +1,6 @@
 #![windows_subsystem = "windows"]
 
+mod ai_carousel;
 mod app;
 mod autohide_loop;
 mod bar_view;

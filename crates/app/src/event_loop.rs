@@ -102,6 +102,8 @@ pub const TIMER_AUTOHIDE: usize = 16;
 pub const TIMER_SPOTIFY_TICK: usize = 17;
 /// Busca do Spotify: 300 ms depois da última tecla.
 pub const TIMER_SPOTIFY_SEARCH: usize = 18;
+/// Próximo slide do chip `ia` (`[ia] interval`).
+pub const TIMER_AI_SLIDE: usize = 19;
 const CYCLE_HALF_MS: u32 = 450;
 
 const VK_ESCAPE: u32 = 0x1B;
@@ -204,7 +206,7 @@ impl Loop {
             }
             PanelKind::Island | PanelKind::Player | PanelKind::Weather | PanelKind::Hardware => self.island_panel_list(scale),
             PanelKind::Audio | PanelKind::Mic | PanelKind::Brightness => self.devices_panel_list(kind, scale),
-            PanelKind::Claude | PanelKind::Codex | PanelKind::Grok => self.usage_panel_list(kind, scale),
+            PanelKind::Claude | PanelKind::Codex | PanelKind::Grok | PanelKind::Ai => self.usage_panel_list(kind, scale),
             PanelKind::VsCode => self.vscode_panel_list(scale),
             PanelKind::Terminal => self.terminal_panel_list(scale),
             PanelKind::Chat => self.chat_panel_list(scale),
@@ -756,6 +758,7 @@ impl Loop {
             WinEvent::User { code: USER_SPOTIFY } => self.spotify_replies()?,
             WinEvent::Timer { id: TIMER_SPOTIFY_TICK } => self.spotify_tick()?,
             WinEvent::Timer { id: TIMER_SPOTIFY_SEARCH } => self.spotify_search_timer(),
+            WinEvent::Timer { id: TIMER_AI_SLIDE } => self.ai_tick()?,
             WinEvent::Tray { mouse } => self.tray_event(mouse)?,
             WinEvent::Character { code, .. } => {
                 if !self.chat_char(code)? && !self.spotify_char(code)? {

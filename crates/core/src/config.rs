@@ -46,6 +46,9 @@ model  = ""           # vazio = o padrão da versão instalada do Codex
 origin = "auto"
 prefer = "windows"
 model  = ""           # vazio = o padrão que o Grok Build anunciar
+
+[ia]
+interval = 5          # segundos entre os slides do chip "ia" (2 a 60); o painel do chip escolhe e ordena os slides
 "#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -90,6 +93,30 @@ pub struct Config {
     pub terminal: TerminalConfig,
     pub chat: ChatConfig,
     pub spotify: SpotifyConfig,
+    /// `[ia]`: os slides do chip `ia`.
+    #[serde(rename = "ia")]
+    pub ai: AiConfig,
+}
+
+/// Chip `ia` (ADR-0028): o uso do Claude, do Codex e do Grok num chip só, um slide por conta
+/// (IA e origem). `order` e `hidden` têm as chaves dos slides (`claude:windows`,
+/// `grok:Ubuntu-24.04`, `codex:windows+Ubuntu-24.04`), gravadas pelo painel do chip; os que faltam
+/// em `order` vão para o fim. `interval`: segundos entre um slide e o próximo (2 a 60).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct AiConfig { pub order: Vec<String>, pub hidden: Vec<String>, pub interval: u64 }
+
+impl Default for AiConfig {
+    fn default() -> Self {
+        AiConfig { order: Vec::new(), hidden: Vec::new(), interval: 5 }
+    }
+}
+
+impl AiConfig {
+    /// O intervalo entre os slides, dentro de 2 a 60 s.
+    pub fn interval_ms(&self) -> u32 {
+        (self.interval.clamp(2, 60) * 1000) as u32
+    }
 }
 
 /// Chip `spotify` (ADR-0024): o Client ID do app que o usuário criou no Spotify. Escrito pelo
@@ -267,7 +294,7 @@ impl Config {
     /// Só `[terminal]`, `[chat]` ou `[spotify]` mudaram? Os painéis do Terminal, do chat e do
     /// Spotify gravam nelas e não devem se fechar.
     pub fn same_except_panels(&self, other: &Config) -> bool {
-        Config { terminal: other.terminal.clone(), chat: other.chat.clone(), spotify: other.spotify.clone(), ..self.clone() } == *other
+        Config { terminal: other.terminal.clone(), chat: other.chat.clone(), spotify: other.spotify.clone(), ai: other.ai.clone(), ..self.clone() } == *other
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
@@ -318,7 +345,7 @@ pub struct ClockConfig { pub format: String, pub seconds: bool }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { theme: "obsidian".into(), acrylic: None, bar: BarConfig::default(), island: IslandConfig::default(), clock: ClockConfig::default(), update: UpdateConfig::default(), terminal: TerminalConfig::default(), chat: ChatConfig::default(), spotify: SpotifyConfig::default() }
+        Config { theme: "obsidian".into(), acrylic: None, bar: BarConfig::default(), island: IslandConfig::default(), clock: ClockConfig::default(), update: UpdateConfig::default(), terminal: TerminalConfig::default(), chat: ChatConfig::default(), spotify: SpotifyConfig::default(), ai: AiConfig::default() }
     }
 }
 
@@ -396,6 +423,19 @@ pub fn set_terminal(path: &Path, terminal: &TerminalConfig) -> std::io::Result<(
     let mut doc: toml_edit::DocumentMut = text.parse().map_err(std::io::Error::other)?;
     let table = doc.entry("terminal").or_insert(toml_edit::table()).as_table_mut().ok_or_else(|| std::io::Error::other("`terminal` não é uma tabela"))?;
     for (key, values) in [("order", &terminal.order), ("hidden", &terminal.hidden)] {
+        table.insert(key, toml_edit::value(values.iter().map(String::as_str).collect::<toml_edit::Array>()));
+    }
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, doc.to_string())?;
+    std::fs::rename(&tmp, path)
+}
+
+/// Grava `[ia] order` e `hidden` de uma vez, mantendo comentários, o `interval` e o resto do arquivo.
+pub fn set_ai(path: &Path, ai: &AiConfig) -> std::io::Result<()> {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let mut doc: toml_edit::DocumentMut = text.parse().map_err(std::io::Error::other)?;
+    let table = doc.entry("ia").or_insert(toml_edit::table()).as_table_mut().ok_or_else(|| std::io::Error::other("`ia` não é uma tabela"))?;
+    for (key, values) in [("order", &ai.order), ("hidden", &ai.hidden)] {
         table.insert(key, toml_edit::value(values.iter().map(String::as_str).collect::<toml_edit::Array>()));
     }
     let tmp = path.with_extension("toml.tmp");

@@ -12,6 +12,7 @@ pub const ITEMS: &[ItemDescriptor] = &[
     ItemDescriptor { id: "claude", name: "Claude", description: "Uso do Claude (5 h e 7 dias)" },
     ItemDescriptor { id: "codex", name: "Codex", description: "Uso do Codex (janelas de uso)" },
     ItemDescriptor { id: "grok", name: "Grok", description: "Uso do Grok (cota semanal)" },
+    ItemDescriptor { id: "ia", name: "Uso das IAs", description: "Claude, Codex e Grok num chip só, alternando entre as contas" },
     ItemDescriptor { id: "vscode", name: "VS Code", description: "Projetos recentes do VS Code" },
     ItemDescriptor { id: "terminal", name: "Terminal", description: "Perfis do Windows Terminal; o lápis escolhe e ordena" },
     ItemDescriptor { id: "chat", name: "Chat com IA", description: "Pergunte ao Claude, ao Codex ou ao Grok direto da barra" },
@@ -36,7 +37,7 @@ mod tests {
 
     #[test]
     fn new_items_are_in_the_catalog() {
-        for id in ["claude", "codex", "grok", "vscode", "terminal", "chat", "notifications", "dnd", "power", "player", "weather", "hardware", "island", "tray", "spotify"] {
+        for id in ["claude", "codex", "grok", "ia", "vscode", "terminal", "chat", "notifications", "dnd", "power", "player", "weather", "hardware", "island", "tray", "spotify"] {
             assert!(descriptor(id).is_some(), "{id} fora do catálogo");
         }
         let names: std::collections::HashSet<_> = ITEMS.iter().map(|i| i.name).collect();
