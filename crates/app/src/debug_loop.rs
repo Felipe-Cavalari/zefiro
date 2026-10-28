@@ -177,7 +177,7 @@ impl Loop {
         }).collect::<Vec<_>>().join("\n");
         let integrations = INTEGRATIONS.iter().filter_map(|(code, name)| self.debug.last.get(code).map(|t| format!("  {name}: {}", ago(t.elapsed().as_secs_f64())))).collect::<Vec<_>>().join("\n");
         format!(
-            "Zefiro {}\n{}\nLigado há {} s\nMemória: {:.1} MB privada, {:.1} MB working set\nTema: {}\nBarra: {} / {}, layout {:?}\nIlha: {} ({:?})\nMonitores:\n{monitors}\nÚltimo dado de cada integração:\n{integrations}\n",
+            "Zefiro {}\n{}\nLigado há {} s\nMemória: {:.1} MB privada, {:.1} MB working set\nTema: {}\nBarra: {} / {}, layout {:?}\nIlha: {}\nMonitores:\n{monitors}\nÚltimo dado de cada integração:\n{integrations}\n",
             env!("CARGO_PKG_VERSION"),
             diagnostics::windows_version(),
             self.debug.started.elapsed().as_secs(),
@@ -188,7 +188,6 @@ impl Loop {
             c.bar.format.as_str(),
             c.bar.layout_mode,
             if c.island.enabled { "ligada" } else { "desligada" },
-            c.island.engine,
         )
     }
 

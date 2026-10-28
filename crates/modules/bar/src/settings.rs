@@ -7,14 +7,13 @@ use zefiro_resources::tokens::Tokens;
 use zefiro_ui::paint::{DisplayList, DrawOp};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SettingsAction { Back, ToggleAutostart, ToggleHud, RestartIsland, ExportDiagnostics }
+pub enum SettingsAction { Back, ToggleAutostart, ToggleHud, ExportDiagnostics }
 
 /// A primeira linha volta ao menu do Z, como o "‹ Tema" da tela de temas.
-const ITEMS: [(&str, SettingsAction); 5] = [
+const ITEMS: [(&str, SettingsAction); 4] = [
     ("‹ Configurações", SettingsAction::Back),
     ("Iniciar com o Windows", SettingsAction::ToggleAutostart),
     ("HUD de debug", SettingsAction::ToggleHud),
-    ("Reiniciar a ilha", SettingsAction::RestartIsland),
     ("Exportar diagnóstico", SettingsAction::ExportDiagnostics),
 ];
 
@@ -111,7 +110,7 @@ mod tests {
     #[test]
     fn lists_the_rare_items_in_order_with_the_version() {
         let m = SettingsModel::new(false, false, "1.3.0");
-        assert_eq!(m.layout(1.0).iter().map(|b| b.action).collect::<Vec<_>>(), [SettingsAction::Back, SettingsAction::ToggleAutostart, SettingsAction::ToggleHud, SettingsAction::RestartIsland, SettingsAction::ExportDiagnostics]);
+        assert_eq!(m.layout(1.0).iter().map(|b| b.action).collect::<Vec<_>>(), [SettingsAction::Back, SettingsAction::ToggleAutostart, SettingsAction::ToggleHud, SettingsAction::ExportDiagnostics]);
         let t = texts(&m.paint(1.0, &tokens()));
         assert!(t.contains(&"‹ Configurações".to_string()) && t.contains(&"Zefiro 1.3.0".to_string()), "como o ‹ Tema: {t:?}");
         for b in m.layout(1.0) {
@@ -138,7 +137,7 @@ mod tests {
         }
         assert_eq!(m.key(None), Some(SettingsAction::ExportDiagnostics));
         m.key(Some(false));
-        assert_eq!(m.key(None), Some(SettingsAction::RestartIsland));
+        assert_eq!(m.key(None), Some(SettingsAction::ToggleHud));
         for _ in 0..9 {
             m.key(Some(false));
         }

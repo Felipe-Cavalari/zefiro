@@ -9,10 +9,7 @@ fn default_config_parses_to_the_spec_defaults() {
     assert_eq!(c.bar.sections.start, vec!["zefiro".to_string()]);
     assert_eq!(c.bar.sections.end, vec!["clock".to_string()]);
     assert!(c.island.enabled);
-    assert_eq!(c.island.exe, "");
-    assert_eq!(c.island.engine, IslandEngine::Embutida);
-    assert!(c.island.embedded() && !c.island.external());
-    assert!(parse_config("[island]\nengine = \"externa\"\n").unwrap().island.external());
+    assert!(c.island.embedded());
     assert_eq!(c.clock.format, "");
     assert!(!c.clock.seconds);
 }
@@ -26,8 +23,6 @@ fn the_island_is_a_chip_and_only_shows_where_it_is_placed() {
     assert!(no_center_key.shows_embedded_island(), "sem a chave center, o centro padrão tem a ilha");
     let free = parse_config("[bar.sections]\ncenter = [\"hardware\"]\n").unwrap();
     assert!(!free.shows_embedded_island(), "centro com outros chips: sem ilha");
-    let external = parse_config("[island]\nengine = \"externa\"\n").unwrap();
-    assert!(!external.shows_embedded_island(), "a externa não é o chip");
     let monitors = parse_config("[bar]\nlayout_mode = \"per_monitor\"\n[bar.sections]\ncenter = []\n[bar.monitors.a.sections]\nstart = [\"island\"]\ncenter = []\nend = []\n").unwrap();
     assert!(monitors.shows_embedded_island(), "em qualquer seção de qualquer monitor");
 }
@@ -48,12 +43,19 @@ fn acrylic_choice_is_optional_and_written_as_a_bool() {
 }
 
 #[test]
-fn island_engine_choice_needs_the_island_enabled() {
-    let c = parse_config("[island]\nengine = \"embutida\"\n").unwrap();
-    assert!(c.island.embedded() && !c.island.external());
-    let off = parse_config("[island]\nenabled = false\nengine = \"embutida\"\n").unwrap();
-    assert!(!off.island.embedded() && !off.island.external());
-    assert!(parse_config("[island]\nengine = \"outra\"\n").is_err());
+fn legacy_island_keys_are_ignored() {
+    // A ilha externa (C++) saiu (ADR-0026): uma config antiga continua abrindo, com a ilha embutida.
+    let legacy = "[island]\nengine = \"externa\"\nexe = \"x\"\n";
+    let c = parse_config(legacy).unwrap();
+    assert!(c.island.embedded() && c.shows_embedded_island());
+    assert!(parse_config("[island]\nengine = \"outra\"\n").is_ok(), "o valor também não importa mais");
+    assert!(removed_island_keys(legacy));
+    assert!(removed_island_keys("[island]\nengine = \"embutida\"\n"));
+    assert!(!removed_island_keys("[island]\nenabled = true\n"));
+    assert!(!removed_island_keys(DEFAULT_CONFIG), "o modelo novo não tem as chaves antigas");
+    assert!(!removed_island_keys("não é toml ["));
+    let off = parse_config("[island]\nenabled = false\n").unwrap();
+    assert!(!off.island.embedded());
 }
 
 #[test]

@@ -16,7 +16,7 @@ use zefiro_platform_windows::compositor::ui_color;
 use zefiro_platform_windows::monitors::Monitor;
 use zefiro_platform_windows::fillet::FilletShape;
 use zefiro_platform_windows::morph::MorphShape;
-use zefiro_platform_windows::{appbar, island_zorder, window};
+use zefiro_platform_windows::{appbar, window};
 use zefiro_ui::bar_layout::{BarLayout, ChipBacking, ChipSpec, FilletSide, layout_sections, metrics};
 use zefiro_ui::panel_layout::{CHIP_FADE_S, SHADOW_MARGIN_DIP, Shape, pill_radius};
 use zefiro_ui::spring::SpringParams;
@@ -212,7 +212,7 @@ impl BarView {
         let chip_h = (m.chip_h * self.scale).round();
         let font_px = m.font * self.scale * ctx.theme.theme.font.scale;
         let pad = (m.chip_pad_x * self.scale).round();
-        // O chip da ilha só existe com a ilha embutida; a externa (C++) mora no centro do principal.
+        // O chip da ilha só aparece com a ilha ligada.
         let shown = |id: &&str| zefiro_bar::catalog::descriptor(id).is_some() && (*id != ISLAND_CHIP || ctx.config.island.embedded());
         let island_reserve = (RESERVE_DESIGN_W * (m.island_pill * self.scale).round() / 44.0).round();
         let mut contents: Vec<(String, ChipContent)> = sections
@@ -237,8 +237,7 @@ impl BarView {
                 .collect::<Vec<_>>()
         };
         let specs = [spec(&sections.start), spec(&sections.center), spec(&sections.end)];
-        let reservation = (self.monitor.primary && ctx.config.island.external()).then(|| window::island_reservation().unwrap_or(self.monitor.rect.w));
-        let layout = layout_sections(self.monitor.rect.w, self.scale, cfg.height, cfg.format, [&specs[0], &specs[1], &specs[2]], reservation);
+        let layout = layout_sections(self.monitor.rect.w, self.scale, cfg.height, cfg.format, [&specs[0], &specs[1], &specs[2]], None);
         // Um grupo por seção (início, centro, fim) e um pedaço do trilho por vão entre as ilhas.
         while self.groups.len() < 3 {
             let shape = MorphShape::new(&ctx.comp, &self.root, &ctx.theme.morph_style(self.scale, SurfaceKind::Pill))?;
@@ -459,12 +458,10 @@ impl BarView {
                 let raw = hwnd.0 as isize; // HWND não é Send
                 let batch = ctx.comp.on_settled(move || {
                     appbar::set_pos(HWND(raw as *mut _), mon, height_px);
-                    island_zorder::raise_island();
                 })?;
                 batch.End()?;
             } else {
                 appbar::set_pos(hwnd, mon, height_px);
-                island_zorder::raise_island();
             }
         }
         Ok(())
@@ -479,7 +476,6 @@ impl BarView {
         if let Some(l) = &self.layout {
             appbar::register(self.hwnd, self.monitor.rect, l.band.h as i32);
             self.appbar = true;
-            island_zorder::raise_island();
         }
     }
 

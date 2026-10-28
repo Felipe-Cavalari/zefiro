@@ -12,7 +12,7 @@ use zefiro_integration_clock::grid::{month_grid, ms_to_next_minute, shift_month}
 use zefiro_integration_clock::windows::now_local;
 use zefiro_platform::geometry::Point;
 use zefiro_platform_windows::window::{self, WinEvent};
-use zefiro_platform_windows::{island_zorder, system};
+use zefiro_platform_windows::system;
 use zefiro_resources::registry::export_builtin;
 use zefiro_ui::paint::DisplayList;
 use zefiro_ui::paint::DrawOp;
@@ -25,9 +25,6 @@ use crate::panel_view::PanelView;
 
 pub const USER_CONFIG_CHANGED: u32 = 2;
 pub const USER_THEMES_CHANGED: u32 = 3;
-pub const USER_ISLAND: u32 = 4;
-/// O `island-state.ini` mudou: a ilha pode ter publicado outro destaque.
-pub const USER_ISLAND_ACCENT: u32 = 5;
 pub const USER_EDITOR_IO: u32 = 6;
 /// As sessões de mídia mudaram (ilha embutida).
 pub const USER_MEDIA: u32 = 7;
@@ -75,7 +72,6 @@ pub const USER_TRAY: u32 = 27;
 pub const USER_SPOTIFY: u32 = 28;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
-pub const TIMER_RAISE: usize = 3;
 /// Modo de medição (`ZEFIRO_CYCLES=N`): abre e fecha o calendário N vezes e sai.
 pub const TIMER_CYCLE: usize = 4;
 pub const TIMER_GRAPHICS_TRIM: usize = 5;
@@ -290,26 +286,6 @@ impl Loop {
         Ok(())
     }
 
-    /// Lê o destaque que a ilha publicou (capa do álbum ou o dela) e, se mudou, redesenha a barra
-    /// e o painel aberto — o calendário usa o mesmo destaque da ilha.
-    pub fn refresh_island_accent(&mut self) -> Result<()> {
-        // A ilha embutida publica o destaque direto (island_loop), sem passar pelo .ini.
-        if self.ctx.config.island.embedded() {
-            return Ok(());
-        }
-        let accent = if self.ctx.config.island.external() {
-            let path = self.ctx.config_path.with_file_name("island-state.ini");
-            std::fs::read_to_string(path).ok().and_then(|t| zefiro_island_host::ini::read_accent(&t))
-        } else {
-            None
-        };
-        if self.ctx.theme.set_cover_accent(accent) {
-            self.apply_bars(true)?;
-            self.redraw_open_panel()?;
-        }
-        Ok(())
-    }
-
     /// Fecha o painel aberto, se houver (como o Esc).
     pub fn close_open_panel(&mut self) -> Result<()> {
         let fx = self.controller.handle(PanelInput::Escape);
@@ -365,7 +341,6 @@ impl Loop {
         for b in &mut self.bars {
             b.apply(&self.ctx, animate)?;
         }
-        island_zorder::raise_island();
         Ok(())
     }
 
@@ -441,7 +416,6 @@ impl Loop {
             m.set_themes(themes);
         }
         self.apply_bars(true)?;
-        crate::island::sync(&self.ctx);
         self.redraw_open_panel()
     }
 
@@ -461,7 +435,6 @@ impl Loop {
                 }
             }
             SettingsAction::ToggleHud => self.toggle_hud()?,
-            SettingsAction::RestartIsland => window::post_user(USER_ISLAND),
             SettingsAction::ExportDiagnostics => {
                 self.close_open_panel()?;
                 return self.export_diagnostics();
@@ -814,12 +787,6 @@ impl Loop {
             WinEvent::PanelSettled { hwnd, ticket } => {
                 if let Some(index) = self.panel_index(hwnd) { self.panels[index].hide_if_closed(&self.ctx, ticket)?; }
             }
-            WinEvent::User { code: USER_ISLAND } => crate::island::restart(&self.ctx),
-            WinEvent::User { code } if code == USER_ISLAND + 100 => window::set_timer(TIMER_RAISE, 500),
-            WinEvent::Timer { id: TIMER_RAISE } => {
-                window::kill_timer(TIMER_RAISE);
-                island_zorder::raise_island();
-            }
             WinEvent::User { code: USER_CONFIG_CHANGED } => {
                 let text = std::fs::read_to_string(&self.ctx.config_path).unwrap_or_default();
                 match zefiro_core::config::parse_config(&text) {
@@ -835,22 +802,14 @@ impl Loop {
                         let fx = self.controller.handle(PanelInput::ConfigChanged);
                         self.run_effects(fx)?;
                         let theme_changed = new.theme != self.ctx.config.theme;
-                        let external = (self.ctx.config.island.external(), new.island.external());
                         self.ctx.theme.acrylic = new.acrylic;
                         self.ctx.config = new;
-                        // Trocar `[island] engine` liga uma ilha e desliga a outra sem reiniciar a barra.
-                        match external {
-                            (false, true) => crate::island::start(&self.ctx),
-                            (true, false) => crate::island::stop(),
-                            _ => {}
-                        }
                         if theme_changed {
                             let (id, dir) = (self.ctx.config.theme.clone(), self.ctx.themes_dir.clone());
                             self.ctx.theme.reload(&id, &dir);
                             self.ctx.text.set_family(&self.ctx.theme.theme.font.family);
                         }
                         self.apply_bars(true)?;
-                        crate::island::sync(&self.ctx);
                         self.refresh_services();
                         self.schedule_clock();
                         self.clean_bar_sync()?;
@@ -859,8 +818,6 @@ impl Loop {
                     Err(e) => tracing::warn!(line = ?e.line, "config.toml inválido: {}; mantendo a configuração anterior", e.message),
                 }
             }
-            WinEvent::User { code: USER_ISLAND_ACCENT } => self.refresh_island_accent()?,
-            WinEvent::IslandGeometryChanged => self.apply_bars(true)?,
             WinEvent::User { code: USER_THEMES_CHANGED } => {
                 let (id, dir) = (self.ctx.config.theme.clone(), self.ctx.themes_dir.clone());
                 for e in self.ctx.theme.reload(&id, &dir) {
@@ -868,7 +825,6 @@ impl Loop {
                 }
                 self.ctx.text.set_family(&self.ctx.theme.theme.font.family);
                 self.apply_bars(true)?;
-                crate::island::sync(&self.ctx);
                 self.menu = None;
                 self.redraw_open_panel()?;
             }
@@ -887,15 +843,14 @@ pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
         tracing::warn!("gancho de foco indisponível: a barra só sai da frente da tela cheia pelo aviso do Windows");
     }
     l.schedule_clock();
-    if let Err(e) = l.refresh_island_accent() {
-        tracing::warn!(error = %e, "não consegui aplicar o destaque da ilha");
+    if zefiro_core::config::removed_island_keys(&std::fs::read_to_string(&l.ctx.config_path).unwrap_or_default()) {
+        tracing::warn!("a ilha externa foi removida; usando a ilha embutida (as chaves engine e exe de [island] são ignoradas)");
     }
     if let Some(n) = std::env::var("ZEFIRO_CYCLES").ok().and_then(|v| v.parse::<u32>().ok()) {
         tracing::info!(ciclos = n, "modo de medição: abrindo e fechando o calendário");
         l.cycles = Some((n, 0));
         window::set_timer(TIMER_CYCLE, 2000);
     }
-    crate::island::start(&l.ctx);
     crate::tray_loop::show_icon();
     if !zefiro_platform_windows::diagnostics::register_hud_hotkey() {
         tracing::warn!("Ctrl+Alt+Shift+D já é usado por outro app; o HUD fica só no menu do Z");
@@ -923,8 +878,7 @@ pub fn run(ctx: AppCtx, bars: Vec<BarView>) -> Result<()> {
     Ok(())
 }
 
-/// Saída por qualquer caminho: primeiro as AppBars saem da tela (a área reservada volta na hora),
-/// depois a ilha, que pode levar até 3 s para fechar.
+/// Saída por qualquer caminho: as AppBars saem da tela primeiro (a área reservada volta na hora).
 fn shutdown(l: &mut Loop) {
     l.debug_shutdown();
     l.chat_shutdown();
@@ -935,6 +889,5 @@ fn shutdown(l: &mut Loop) {
         p.destroy();
     }
     zefiro_platform_windows::tray::remove();
-    crate::island::stop();
 }
 

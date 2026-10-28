@@ -39,9 +39,6 @@ impl Loop {
     pub fn autohide_sync(&mut self) -> Result<()> {
         let on = self.ctx.config.autohide();
         self.autohide.display = self.ctx.config.bar.display;
-        if self.ctx.config.bar.autohide && !on {
-            tracing::warn!("ocultar automaticamente ignorado: indisponível com a ilha externa");
-        }
         self.autohide.screens = if on { monitors::list().into_iter().map(|m| m.rect).collect() } else { Vec::new() };
         for b in &mut self.bars {
             b.sync_appbar(&self.ctx);

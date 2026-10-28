@@ -21,8 +21,6 @@ end    = ["clock"]
 
 [island]
 enabled = true
-engine  = "embutida"  # embutida (desenhada pela barra) | externa (zefiro-island.exe, C++)
-exe     = ""          # vazio = ao lado do zefiro.exe
 
 [clock]
 format  = ""          # vazio = formato do Windows; ou um padrão de data do Windows, ex.: "ddd d MMM"
@@ -273,35 +271,31 @@ impl Config {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
-pub struct IslandConfig { pub enabled: bool, pub exe: String, pub engine: IslandEngine }
+pub struct IslandConfig { pub enabled: bool }
 
-/// `embutida` (padrão desde a 1c) = a ilha desenhada pela própria barra (Rust); `externa` = o
-/// `zefiro-island.exe` (C++), que continua disponível para quem precisar de algo que só ele tem.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum IslandEngine { Externa, #[default] Embutida }
+/// A config tem as chaves da ilha externa (`[island] engine` e `exe`), removida na ADR-0026. Elas
+/// são ignoradas; o app só avisa no log.
+pub fn removed_island_keys(text: &str) -> bool {
+    let Ok(table) = text.parse::<toml::Table>() else { return false };
+    table.get("island").and_then(toml::Value::as_table).is_some_and(|island| island.contains_key("engine") || island.contains_key("exe"))
+}
 
 impl Config {
-    /// A ilha embutida aparece em algum layout: engine embutida e o chip `island` na barra. Os
+    /// A ilha embutida aparece em algum layout: ilha ligada e o chip `island` na barra. Os
     /// serviços que só servem a ela (avisos, privacidade, timer) seguem isto.
     pub fn shows_embedded_island(&self) -> bool {
         self.island.embedded() && self.bar.uses(ISLAND_CHIP)
     }
 
-    /// Ocultar automaticamente vale agora? Com a ilha externa, não: ela é outro processo e não
-    /// acompanharia a barra.
+    /// Ocultar automaticamente vale agora?
     pub fn autohide(&self) -> bool {
-        self.bar.autohide && !self.island.external()
+        self.bar.autohide
     }
 }
 
 impl IslandConfig {
     pub fn embedded(&self) -> bool {
-        self.enabled && self.engine == IslandEngine::Embutida
-    }
-
-    pub fn external(&self) -> bool {
-        self.enabled && self.engine == IslandEngine::Externa
+        self.enabled
     }
 }
 
@@ -329,7 +323,7 @@ impl Default for Sections {
 
 impl Default for IslandConfig {
     fn default() -> Self {
-        IslandConfig { enabled: true, exe: String::new(), engine: IslandEngine::Embutida }
+        IslandConfig { enabled: true }
     }
 }
 

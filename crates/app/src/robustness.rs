@@ -2,7 +2,7 @@
 
 use windows::core::Result;
 use zefiro_platform_windows::window::{self, WinEvent};
-use zefiro_platform_windows::{island_zorder, monitors, system};
+use zefiro_platform_windows::{monitors, system};
 
 use crate::bar_view::BarView;
 use crate::event_loop::{Loop, TIMER_AUTOHIDE, TIMER_DISPLAY, TIMER_FULLSCREEN};
@@ -22,7 +22,6 @@ pub fn handle(l: &mut Loop, e: WinEvent) -> Result<bool> {
             }
             // A bandeja nova não conhece o ícone antigo.
             crate::tray_loop::show_icon();
-            island_zorder::raise_island();
             l.editor_topology_changed()?;
         }
         WinEvent::DisplayChanged | WinEvent::DpiChanged { .. } => window::set_timer(TIMER_DISPLAY, 400),
@@ -44,7 +43,6 @@ pub fn handle(l: &mut Loop, e: WinEvent) -> Result<bool> {
                 l.panels.push(PanelView::create(&l.ctx, &m)?);
                 l.bars.push(b);
             }
-            island_zorder::raise_island();
             l.editor_topology_changed()?;
             // Monitores novos ou religados: o DDC/CI reabre os handles e relê o brilho.
             l.devices_displays_changed();
@@ -123,7 +121,6 @@ pub fn reconcile_fullscreen(l: &mut Loop) -> Result<()> {
         l.island_visibility_changed();
     }
     if revealed {
-        island_zorder::raise_island();
         l.suspend_editor(false)?;
     }
     if l.bars.iter().any(|b| b.is_hidden()) {

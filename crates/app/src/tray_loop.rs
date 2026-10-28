@@ -5,16 +5,15 @@ use windows::Win32::UI::WindowsAndMessaging::PostQuitMessage;
 use windows::core::Result;
 use zefiro_bar::controller::PanelInput;
 use zefiro_island::menu::MenuEntry;
-use zefiro_platform_windows::{island_zorder, popup_menu, system, tray, window};
+use zefiro_platform_windows::{popup_menu, system, tray};
 
-use crate::event_loop::{Loop, USER_ISLAND};
+use crate::event_loop::Loop;
 
 const WM_LBUTTONUP: u32 = 0x0202;
 const WM_RBUTTONUP: u32 = 0x0205;
 
 const SHOW: u32 = 1;
 const EDIT: u32 = 2;
-const ISLAND: u32 = 3;
 const LOGS: u32 = 4;
 const EXIT: u32 = 5;
 const AUTOSTART: u32 = 6;
@@ -68,7 +67,6 @@ impl Loop {
         if revealed {
             tracing::info!("barra trazida de volta pela bandeja");
             self.island_visibility_changed();
-            island_zorder::raise_island();
         }
         revealed
     }
@@ -77,7 +75,6 @@ impl Loop {
         let entries = [
             item("Mostrar a barra", SHOW),
             item("Editar barra", EDIT),
-            item("Reiniciar a ilha", ISLAND),
             item("Abrir pasta de logs", LOGS),
             MenuEntry { checked: system::autostart_enabled(), ..item("Iniciar com o Windows", AUTOSTART) },
             MenuEntry { separator: true, ..Default::default() },
@@ -91,7 +88,6 @@ impl Loop {
                 self.autohide_reveal(primary)?;
             }
             Some(EDIT) => self.start_editor(primary)?,
-            Some(ISLAND) => window::post_user(USER_ISLAND),
             Some(LOGS) => {
                 let dir = zefiro_core::observability::log_dir_from(std::env::var_os("LOCALAPPDATA"), std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"));
                 system::open_folder(&dir);

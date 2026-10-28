@@ -65,9 +65,9 @@ fn clean_bar_options_default_to_todays_behavior() {
     assert!(config.autohide());
     assert!(parse_config("[bar]\ndisplay = 'segundo'").is_err(), "valor errado é erro, como height e format");
 
-    // Ilha externa: outro processo, não acompanha a barra; ocultar automaticamente não vale.
-    let external = parse_config("[bar]\nautohide = true\n[island]\nengine = 'externa'").unwrap();
-    assert!(!external.autohide());
+    // Config antiga com a ilha externa (removida, ADR-0026): ocultar automaticamente vale.
+    let legacy = parse_config("[bar]\nautohide = true\n[island]\nengine = 'externa'").unwrap();
+    assert!(legacy.autohide());
 }
 
 #[test]

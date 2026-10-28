@@ -36,7 +36,6 @@ pub enum WinEvent {
     CaptureLost { hwnd: isize },
     Character { hwnd: isize, code: u32 },
     ControlChanged { hwnd: isize, control: isize },
-    IslandGeometryChanged,
     /// A área de transferência mudou (qualquer app copiou algo).
     ClipboardChanged,
     /// Caps Lock (`caps`) ou Num Lock foi solto em qualquer app.
@@ -83,7 +82,6 @@ const MESSAGE: PCWSTR = w!("ZefiroMessage");
 const INPUT: PCWSTR = w!("ZefiroInput");
 static TASKBAR_CREATED: OnceLock<u32> = OnceLock::new();
 static MESSAGE_HWND: AtomicIsize = AtomicIsize::new(0);
-static ISLAND_GEOMETRY: OnceLock<u32> = OnceLock::new();
 
 thread_local! {
     static EVENTS: RefCell<Vec<WinEvent>> = const { RefCell::new(Vec::new()) };
@@ -233,7 +231,6 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         m if m == WM_MENU_END => push(WinEvent::MenuEnded),
         m if (WM_USER_BASE..WM_USER_BASE + 0x100).contains(&m) => push(WinEvent::User { code: m - WM_USER_BASE }),
         m if Some(&m) == TASKBAR_CREATED.get() => push(taskbar_created(lp.0)),
-        m if Some(&m) == ISLAND_GEOMETRY.get() => push(WinEvent::IslandGeometryChanged),
         // SAFETY: mensagens não tratadas vão para o Windows.
         _ => return unsafe { DefWindowProcW(hwnd, msg, wp, lp) },
     }
@@ -261,7 +258,6 @@ pub fn register_classes() -> Result<()> {
                 }
             }
             let _ = TASKBAR_CREATED.set(RegisterWindowMessageW(w!("TaskbarCreated")));
-            let _ = ISLAND_GEOMETRY.set(RegisterWindowMessageW(w!("Zefiro.IslandGeometry")));
         }
         Ok(())
     });
@@ -471,16 +467,6 @@ pub fn release_capture() {
 pub fn shift_pressed() -> bool {
     // SAFETY: consulta estado de uma tecla virtual válida.
     (unsafe { GetKeyState(0x10) }) < 0
-}
-
-/// Limite visual publicado pelo fork; não usa a largura da janela transparente.
-pub fn island_reservation() -> Option<f32> {
-    // SAFETY: apenas procura a janela conhecida e lê uma propriedade inteira, sem desreferenciar.
-    unsafe {
-        let hwnd = FindWindowW(w!("Windhawk.DynamicIslandForWindows"), PCWSTR::null()).ok()?;
-        let value = GetPropW(hwnd, w!("Zefiro.ReservedWidth")).0 as usize;
-        (value > 0 && value <= 65536).then_some(value as f32)
-    }
 }
 
 /// Dá o foco do teclado (o clique que abriu o painel dá ao processo o direito de fazer isso).

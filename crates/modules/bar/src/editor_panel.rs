@@ -40,7 +40,7 @@ pub enum ButtonKind { Plain, Primary, Segment { selected: bool }, Row, Switch { 
 pub struct Button { pub action: EditorAction, pub rect: Rect, pub label: String, pub enabled: bool, pub kind: ButtonKind }
 
 #[derive(Debug, Clone)]
-pub struct ChipBox { pub id: String, pub label: String, pub rect: Rect, pub zone: Zone, pub locked: bool }
+pub struct ChipBox { pub id: String, pub label: String, pub rect: Rect, pub zone: Zone }
 
 /// Tudo o que o painel desenha e onde, num tamanho de painel (px).
 #[derive(Debug, Clone)]
@@ -51,7 +51,6 @@ pub struct EditorLayout {
     pub chips: Vec<ChipBox>,
     labels: Vec<(Rect, String)>,
     empty_shelf: Option<Rect>,
-    center_locked: bool,
     scale: f32,
 }
 
@@ -64,14 +63,10 @@ pub struct EditorContext<'a> {
     pub session: &'a EditorSession,
     pub monitors: &'a [String],
     pub monitor: usize,
-    /// Ilha ligada neste monitor: o Centro mostra a ilha travada e não aceita soltura.
-    pub island_locked: bool,
     pub scale: f32,
     pub width: f32,
 }
 
-/// Chip da ilha no Centro: aparece, mas não se move.
-pub const ISLAND_CHIP: &str = "__island";
 /// Largura do painel em DIP (limitada à largura do monitor).
 pub const WIDTH_DIP: f32 = 560.0;
 
@@ -106,7 +101,7 @@ impl EditorPanel {
         let session = cx.session;
         let inner = cx.width - s(2.0 * PAD);
         let enabled = !session.saving;
-        let mut out = EditorLayout { size: Size { w: cx.width, h: 0.0 }, buttons: Vec::new(), zones: Vec::new(), chips: Vec::new(), labels: Vec::new(), empty_shelf: None, center_locked: cx.island_locked, scale: cx.scale };
+        let mut out = EditorLayout { size: Size { w: cx.width, h: 0.0 }, buttons: Vec::new(), zones: Vec::new(), chips: Vec::new(), labels: Vec::new(), empty_shelf: None, scale: cx.scale };
         // O título volta ao menu do Z, como o "‹ Tema" e o "‹ Configurações".
         out.buttons.push(Button { action: EditorAction::BackToMenu, rect: Rect::new(s(PAD - 8.0), s(4.0), s(150.0), s(28.0)), label: "‹ Editar barra".into(), enabled, kind: ButtonKind::Back });
         let mut y = s(54.0);
@@ -135,13 +130,9 @@ impl EditorPanel {
                 let mut heights = Vec::new();
                 for (i, section) in Section::ALL.into_iter().enumerate() {
                     out.labels.push((Rect::new(x + s(4.0), y, widths[i], s(LABEL_H)), section.label().into()));
-                    let mut ids: Vec<(String, bool)> = Vec::new();
-                    if section == Section::Center && cx.island_locked {
-                        ids.push((ISLAND_CHIP.into(), true));
-                    }
-                    ids.extend(section.items(session.sections()).iter().map(|id| (id.clone(), false)));
+                    let ids = section.items(session.sections());
                     let zone = Rect::new(x, zone_y, widths[i], 0.0);
-                    heights.push(flow(&mut out.chips, &ids, zone, Zone::Section(section), cx.scale, m));
+                    heights.push(flow(&mut out.chips, ids, zone, Zone::Section(section), cx.scale, m));
                     out.zones.push((Zone::Section(section), zone));
                     x += widths[i] + gap;
                 }
@@ -154,7 +145,7 @@ impl EditorPanel {
                 out.labels.push((Rect::new(s(PAD + 4.0), y, inner, s(LABEL_H)), "Fora da barra · arraste para cá para remover".into()));
                 let shelf_y = y + s(LABEL_H + 4.0);
                 let present: Vec<&str> = session.sections().ids().collect();
-                let ids: Vec<(String, bool)> = crate::catalog::ITEMS.iter().filter(|item| !present.contains(&item.id)).map(|item| (item.id.to_string(), false)).collect();
+                let ids: Vec<String> = crate::catalog::ITEMS.iter().filter(|item| !present.contains(&item.id)).map(|item| item.id.to_string()).collect();
                 let shelf = Rect::new(s(PAD), shelf_y, inner, 0.0);
                 let shelf_h = flow(&mut out.chips, &ids, shelf, Zone::Shelf, cx.scale, m).max(s(40.0));
                 if ids.is_empty() {
@@ -201,9 +192,7 @@ impl EditorPanel {
 
         // Onde e quando a barra aparece: valem ao concluir, como o resto.
         y += s(14.0);
-        let external = session.draft.island.external();
-        let autohide_label = if external { "Ocultar automaticamente · indisponível com a ilha externa" } else { "Ocultar automaticamente" };
-        let mut switches = vec![(EditorAction::ToggleAutohide, autohide_label, session.draft.bar.autohide && !external, enabled && !external)];
+        let mut switches = vec![(EditorAction::ToggleAutohide, "Ocultar automaticamente", session.draft.bar.autohide, enabled)];
         // Com a opção ligada só existe a barra do principal (um monitor na lista): a chave continua
         // para dar para desligar.
         let primary_only = session.confirmed.bar.display == BarDisplay::Principal || session.draft.bar.display == BarDisplay::Principal;
@@ -223,17 +212,17 @@ impl EditorPanel {
         out
     }
 
-    /// Botão ou chip sob o ponto. A ilha travada não é alvo.
+    /// Botão ou chip sob o ponto.
     pub fn hit(layout: &EditorLayout, p: Point) -> Option<Target> {
         if let Some(b) = layout.buttons.iter().find(|b| b.rect.contains(p)) {
             return Some(Target::Button(b.action.clone()));
         }
-        layout.chips.iter().find(|c| !c.locked && c.rect.contains(p)).map(|c| Target::Chip(c.id.clone()))
+        layout.chips.iter().find(|c| c.rect.contains(p)).map(|c| Target::Chip(c.id.clone()))
     }
 
-    /// Seção (ou prateleira) que aceita soltar no ponto. Com a ilha, o Centro não aceita.
+    /// Seção (ou prateleira) que aceita soltar no ponto.
     pub fn zone_at(layout: &EditorLayout, p: Point) -> Option<Zone> {
-        layout.zones.iter().find(|(z, r)| r.contains(p) && !(layout.center_locked && *z == Zone::Section(Section::Center))).map(|(z, _)| *z)
+        layout.zones.iter().find(|(_, r)| r.contains(p)).map(|(z, _)| *z)
     }
 
     /// Posição de inserção na zona, contando só os outros chips (o arrastado sai de onde estava).
@@ -242,7 +231,7 @@ impl EditorPanel {
         layout
             .chips
             .iter()
-            .filter(|c| c.zone == zone && !c.locked && c.id != dragged)
+            .filter(|c| c.zone == zone && c.id != dragged)
             .filter(|c| {
                 let cy = c.rect.y + c.rect.h / 2.0;
                 cy < p.y - half || ((cy - p.y).abs() <= half && c.rect.center_x() < p.x)
@@ -257,9 +246,9 @@ impl EditorPanel {
         Some((zone, Self::drop_index(layout, zone, d.point, &d.id)))
     }
 
-    /// Ordem do Tab: chips (menos a ilha) e depois os botões habilitados.
+    /// Ordem do Tab: chips e depois os botões habilitados.
     pub fn focusables(layout: &EditorLayout) -> Vec<Target> {
-        let chips = layout.chips.iter().filter(|c| !c.locked).map(|c| Target::Chip(c.id.clone()));
+        let chips = layout.chips.iter().map(|c| Target::Chip(c.id.clone()));
         let buttons = layout.buttons.iter().filter(|b| b.enabled).map(|b| Target::Button(b.action.clone()));
         chips.chain(buttons).collect()
     }
@@ -304,11 +293,6 @@ impl EditorPanel {
         let dragging = self.drag.as_ref().filter(|d| d.active).map(|d| d.id.as_str());
         let chip_text = text(12.0, FontWeight::Regular);
         for c in &layout.chips {
-            if c.locked {
-                list.push(DrawOp::RoundRect { rect: c.rect, radius: c.rect.h / 2.0, color: tokens.accent_soft });
-                list.push(DrawOp::Text { rect: c.rect, text: c.label.clone(), style: chip_text, color: tokens.accent, align: Align::Center });
-                continue;
-            }
             let target = Target::Chip(c.id.clone());
             let lit = self.hover.as_ref() == Some(&target) || self.focus.as_ref() == Some(&target);
             let ghosted = dragging == Some(c.id.as_str());
@@ -325,7 +309,7 @@ impl EditorPanel {
         if let (Some((zone, index)), Some(d)) = (target, self.drag.as_ref())
             && zone != Zone::Shelf
         {
-            let others: Vec<&ChipBox> = layout.chips.iter().filter(|c| c.zone == zone && !c.locked && c.id != d.id).collect();
+            let others: Vec<&ChipBox> = layout.chips.iter().filter(|c| c.zone == zone && c.id != d.id).collect();
             let zone_rect = layout.zones.iter().find(|(z, _)| *z == zone).map(|(_, r)| *r).unwrap_or_default();
             let (x, y) = match (others.get(index), others.last()) {
                 (Some(c), _) => (c.rect.x - s(4.0), c.rect.y),
@@ -407,19 +391,19 @@ fn on_accent(accent: Rgba) -> Rgba {
 }
 
 /// Distribui chips da esquerda para a direita dentro da zona, quebrando linha. Devolve a altura.
-fn flow(out: &mut Vec<ChipBox>, ids: &[(String, bool)], zone: Rect, kind: Zone, scale: f32, m: &dyn TextMeasurer) -> f32 {
+fn flow(out: &mut Vec<ChipBox>, ids: &[String], zone: Rect, kind: Zone, scale: f32, m: &dyn TextMeasurer) -> f32 {
     let s = |v: f32| v * scale;
     let style = TextStyle { size: s(12.0), weight: FontWeight::Regular, family: Family::Text };
     let (left, right) = (zone.x + s(GAP), zone.right() - s(GAP));
     let (mut x, mut y) = (left, zone.y + s(GAP));
-    for (id, locked) in ids {
-        let label = if *locked { "Ilha · fixa".to_string() } else { crate::catalog::name(id).to_string() };
+    for id in ids {
+        let label = crate::catalog::name(id).to_string();
         let w = (m.measure(&label, &style).w + s(24.0)).max(s(44.0)).min(right - left);
         if x + w > right && x > left {
             x = left;
             y += s(CHIP_H + GAP);
         }
-        out.push(ChipBox { id: id.clone(), label, rect: Rect::new(x, y, w, s(CHIP_H)), zone: kind, locked: *locked });
+        out.push(ChipBox { id: id.clone(), label, rect: Rect::new(x, y, w, s(CHIP_H)), zone: kind });
         x += w + s(GAP);
     }
     if ids.is_empty() { s(CHIP_H + 2.0 * GAP) } else { y + s(CHIP_H + GAP) - zone.y }
