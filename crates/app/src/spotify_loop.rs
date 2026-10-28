@@ -9,12 +9,12 @@ use std::time::{Duration, Instant};
 use windows::core::Result;
 use zefiro_bar::controller::PanelKind;
 use zefiro_bar::spotify::{Auth, Effect, Filter, Key, SpotifyPanel, closed_panel_effects};
-use zefiro_bar::spotify_view::{Hit, hit_at, spotify_panel};
+use zefiro_bar::spotify_view::{DASHBOARD_URL, Hit, hit_at, spotify_panel};
 use zefiro_core::config::{SpotifyConfig, set_spotify};
 use zefiro_integration_spotify::auth::REDIRECT_URI;
 use zefiro_platform::geometry::{Point, Rect};
 use zefiro_platform_windows::spotify::{AuthState, Job, Reply, SpotifyService};
-use zefiro_platform_windows::{system_events, window};
+use zefiro_platform_windows::{system, system_events, window};
 use zefiro_ui::paint::DisplayList;
 
 use crate::event_loop::{Loop, TIMER_SPOTIFY_SEARCH, TIMER_SPOTIFY_TICK, USER_SPOTIFY};
@@ -175,6 +175,7 @@ impl Loop {
                 Effect::LoadPlaylists => self.spotify.send(Job::Playlists),
                 Effect::Copy(text) => self.spotify_copy(&text),
                 Effect::CopyRedirect => self.spotify_copy(REDIRECT_URI),
+                Effect::OpenDashboard => system::open_uri(DASHBOARD_URL),
                 Effect::Close => return self.close_open_panel(),
                 Effect::Login => self.spotify.send(Job::Login),
                 Effect::Logout => self.spotify.send(Job::Logout),

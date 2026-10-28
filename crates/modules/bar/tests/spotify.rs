@@ -506,3 +506,11 @@ fn nothing_goes_to_the_network_with_the_panel_closed() {
     let fx = vec![Effect::Refresh, Effect::Load { depth: 1, source: Source::Devices, offset: 0, after: None }, Effect::Send(api::pause()), Effect::CheckLiked("u".into()), Effect::Copy("x".into())];
     assert!(closed_panel_effects(fx).is_empty());
 }
+
+
+#[test]
+fn the_dashboard_link_opens_in_the_browser() {
+    let mut p = SpotifyPanel::new(Auth::NeedsClientId);
+    p.opened();
+    assert_eq!(p.click(Some(zefiro_bar::spotify_view::Hit::OpenDashboard), false), vec![Effect::OpenDashboard]);
+}

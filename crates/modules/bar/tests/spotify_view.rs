@@ -207,3 +207,25 @@ fn long_submenus_draw_at_most_ten_lines() {
     assert!(items.contains(&15), "a linha escolhida está entre as desenhadas: {items:?}");
     assert!(d.list.size.h < 700.0, "o painel não cresce com o submenu: {}", d.list.size.h);
 }
+
+
+#[test]
+fn setup_links_to_the_dashboard_and_shows_the_logo() {
+    let p = SpotifyPanel::new(Auth::NeedsClientId);
+    let d = draw(&p);
+    assert!(d.hits.iter().any(|(_, h)| *h == Hit::OpenDashboard), "o passo 1 abre o painel do desenvolvedor");
+    assert!(has(&d.list, "developer.spotify.com ↗"), "o endereço é o próprio botão");
+    let logo = |l: &DisplayList| l.ops.iter().any(|o| matches!(o, DrawOp::Svg { svg, color, .. } if *svg == zefiro_resources::icons::SPOTIFY && *color == SPOTIFY_GREEN));
+    assert!(logo(&d.list), "logo oficial no título");
+    assert!(logo(&draw(&SpotifyPanel::new(Auth::NeedsLogin)).list));
+}
+
+#[test]
+fn chip_uses_the_official_logo_in_spotify_green() {
+    use zefiro_bar::chips::ChipContent;
+    use zefiro_platform::geometry::Size;
+    use zefiro_platform::text::{Align, Family, FontWeight, TextStyle};
+    let glyph = DrawOp::Text { rect: Rect::new(0.0, 0.0, 20.0, 20.0), text: "\u{EC4F}".into(), style: TextStyle { size: 12.0, weight: FontWeight::Regular, family: Family::Icons }, color: Rgba::rgb(255, 255, 255), align: Align::Center };
+    let chip = spotify_chip(ChipContent { content_w: 20.0, list: DisplayList { size: Size { w: 20.0, h: 20.0 }, ops: vec![glyph] } });
+    assert!(matches!(&chip.list.ops[0], DrawOp::Svg { svg, color, .. } if *svg == zefiro_resources::icons::SPOTIFY && *color == SPOTIFY_GREEN), "{:?}", chip.list.ops[0]);
+}

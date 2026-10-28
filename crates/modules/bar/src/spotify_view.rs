@@ -9,12 +9,19 @@ use zefiro_platform::color::Rgba;
 use zefiro_platform::geometry::{Point, Rect, Size};
 use zefiro_platform::image::Image;
 use zefiro_platform::text::{Align, Family, FontWeight, TextMeasurer, TextStyle};
+use zefiro_resources::icons;
 use zefiro_resources::tokens::Tokens;
 use zefiro_ui::paint::{DisplayList, DrawOp};
 
+use crate::chips::ChipContent;
+use crate::devices::with_svg_icon;
 use crate::spotify::{Auth, Entry, Filter, MENU_VISIBLE, MenuTarget, Row, Screen, SpotifyPanel, SubMenu, VISIBLE};
 
 pub const WIDTH: f32 = 400.0;
+/// Verde do Spotify (#1ED760), a cor do logo oficial.
+pub const SPOTIFY_GREEN: Rgba = Rgba { r: 30.0 / 255.0, g: 215.0 / 255.0, b: 96.0 / 255.0, a: 1.0 };
+/// Onde se cria o app (passo 1 da configuração).
+pub const DASHBOARD_URL: &str = "https://developer.spotify.com/dashboard";
 const ROW_H: f32 = 44.0;
 const CARD_H: f32 = 68.0;
 const LABEL_H: f32 = 24.0;
@@ -29,10 +36,19 @@ const MENU_ROW: f32 = 30.0;
 pub enum CardButton { Previous, PlayPause, Next, Like }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Hit { Row(usize), Filter(Filter), Back, MenuItem(usize), Card(CardButton), ClientField, CopyRedirect, SaveClientId, Login }
+pub enum Hit { Row(usize), Filter(Filter), Back, MenuItem(usize), Card(CardButton), ClientField, CopyRedirect, SaveClientId, Login, OpenDashboard }
 
 /// O desenho, as áreas de clique (o menu primeiro: ele fica por cima) e as URLs de capa sem imagem.
 pub struct Drawn { pub list: DisplayList, pub hits: Vec<(Rect, Hit)>, pub missing: Vec<String> }
+
+/// O chip da barra: o logo oficial do Spotify, no verde da marca, no lugar do glifo.
+pub fn spotify_chip(chip: ChipContent) -> ChipContent {
+    let mut chip = with_svg_icon(chip, icons::SPOTIFY);
+    if let Some(DrawOp::Svg { color, .. }) = chip.list.ops.first_mut() {
+        *color = SPOTIFY_GREEN;
+    }
+    chip
+}
 
 /// `216000` → `3:36`; com hora, `1:02:03`.
 pub fn mmss(ms: u64) -> String {
@@ -178,7 +194,9 @@ fn setup(c: &mut Ctx, p: &SpotifyPanel) -> f32 {
     let w = c.list.size.w;
     let x = c.px(20.0);
     let inner = w - c.px(40.0);
-    c.text(Rect::new(x, c.px(14.0), inner, c.px(22.0)), "Spotify", 13.0, FontWeight::SemiBold, c.t.text_secondary, Align::Leading);
+    let logo = Rect::new(x, c.px(15.0), c.px(20.0), c.px(20.0));
+    c.list.push(DrawOp::Svg { rect: logo, svg: icons::SPOTIFY, color: SPOTIFY_GREEN });
+    c.text(Rect::new(logo.right() + c.px(8.0), c.px(14.0), inner - c.px(28.0), c.px(22.0)), "Spotify", 13.0, FontWeight::SemiBold, c.t.text_secondary, Align::Leading);
     let mut y = c.px(44.0);
     let line = |c: &mut Ctx, y: &mut f32, text: &str| {
         let r = Rect::new(x, *y, inner, c.px(18.0));
@@ -187,7 +205,11 @@ fn setup(c: &mut Ctx, p: &SpotifyPanel) -> f32 {
     };
     match p.auth {
         Auth::NeedsClientId => {
-            line(c, &mut y, "1. Crie um app em developer.spotify.com, com a Web API.");
+            // Passo 1 com o botão que abre o painel do desenvolvedor no navegador.
+            c.text(Rect::new(x, y, inner - c.px(176.0), c.px(18.0)), "1. Crie um app com a Web API em", 12.0, FontWeight::Regular, c.t.text, Align::Leading);
+            let open = Rect::new(x + inner - c.px(168.0), y - c.px(5.0), c.px(168.0), c.px(28.0));
+            c.button(open, "developer.spotify.com ↗", Hit::OpenDashboard, false);
+            y += c.px(30.0);
             line(c, &mut y, "2. Cadastre este Redirect URI no app:");
             let boxr = Rect::new(x, y, inner, c.px(32.0));
             c.rect(boxr, c.px(10.0), c.t.raised);

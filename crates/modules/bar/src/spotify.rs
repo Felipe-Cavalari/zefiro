@@ -212,6 +212,8 @@ pub enum Effect {
     Logout,
     SaveClientId(String),
     CopyRedirect,
+    /// Abrir o painel do desenvolvedor do Spotify no navegador.
+    OpenDashboard,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -948,6 +950,7 @@ impl SpotifyPanel {
             }
             Hit::SaveClientId => self.key(Key::Enter),
             Hit::Login => vec![Effect::Login],
+            Hit::OpenDashboard => vec![Effect::OpenDashboard],
         }
     }
 
