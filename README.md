@@ -48,7 +48,7 @@ Os chips de uso juntam as contas do Windows e das distros do WSL que estão roda
 > O Zefiro não é um produto da xAI. Ele nunca lê o login do Grok (`~/.grok/auth.json`) nem fala com a xAI por conta própria: os dois recursos abaixo rodam o Grok Build (`grok`) que você instalou e com o qual fez login.
 >
 > - **Chip de uso do Grok:** pede a cota da assinatura ao `grok` (`_x.ai/billing`). Não abre conversa, não chama o modelo e não gasta nada da sua cota.
-> - **Chat com o Grok:** roda o `grok agent stdio` com um perfil sem ferramentas, como um chat dentro da barra. Com a assinatura (SuperGrok, X Premium+ ou X Subscription), cada pergunta sai da mesma cota semanal do grok.com, do Imagine e do Grok Build; com `XAI_API_KEY`, você paga por token. O Grok 4.7 Fast custa o dobro.
+> - **Chat com o Grok:** roda o `grok agent stdio` com um perfil que só libera a geração de imagens (sem ler arquivos, terminal ou web), como um chat dentro da barra. As imagens saem da mesma cota do Imagine. Com a assinatura (SuperGrok, X Premium+ ou X Subscription), cada pergunta sai da mesma cota semanal do grok.com, do Imagine e do Grok Build; com `XAI_API_KEY`, você paga por token. O Grok 4.7 Fast custa o dobro.
 >
 > Rodar o Grok Build por script ou pelo ACP é um uso documentado pela xAI, mas os termos não dizem nada explícito sobre outro app usar o Grok Build como chat com a assinatura. É uma zona cinzenta, e as regras dos planos da xAI mudaram duas vezes em 2026. O risco fica com a sua conta: no pior caso, a xAI pode limitar ou suspender o acesso. Se não quiser correr esse risco, deixe o chip `grok` fora da barra e o chat no Claude ou no Codex.
 

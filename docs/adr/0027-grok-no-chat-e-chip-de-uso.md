@@ -109,5 +109,24 @@ O Zefiro nunca lê o `~/.grok/auth.json`, nunca guarda chave e nunca faz pedido 
 - **Esforço de raciocínio:** o Grok 4.7 usa `high` por padrão, e respostas longas demoram para
   começar (53,7 s medidos). Um esforço menor no chat (`--reasoning-effort` ou o `configId`
   `reasoning_effort`) fica para depois.
-- **Sondas:** `chat_probe` com `ZEFIRO_CHAT_AGENT=grok` (inclui o pedido para ler um arquivo) e
-  `grok_usage_probe`.
+- **Sondas:** `chat_probe` com `ZEFIRO_CHAT_AGENT=grok` (inclui o pedido para ler um arquivo e o
+  de uma imagem) e `grok_usage_probe`.
+
+## Adendo de 2026-10-28: imagens geradas
+
+A pedido do usuário, o perfil do chat libera também o `image_gen` (`tools: todo_write, image_gen`),
+e o texto do perfil manda usá-lo quando pedirem uma imagem. Ler arquivos, terminal, busca na web,
+vídeo e MCP continuam fora.
+
+- O `tool_call` do `image_gen` vira `Event::ImageStarted` ("Gerando imagem…" na resposta). O
+  `tool_call_update` concluído traz o arquivo em `rawOutput` (`{"type":"ImageGen","path":
+  ".../.grok/sessions/<pasta>/<sessão>/images/1.jpg"}`), um JPG na origem do Grok. Uma falha vira
+  `Event::ImageFailed`.
+- A thread do chat lê o arquivo na hora (poucos ms, para chegar antes do fim do turno): no Windows,
+  direto; no WSL, por `\\wsl.localhost\<distro>` (a distro está rodando, porque o Grok está
+  nela). Só é lido arquivo de imagem dentro de `.grok`, sem `..`, com até 30 MB. Os bytes vão em
+  base64 pelo mesmo `Event::Image` do Codex: o laço converte para PNG, grava em `chat\imagens` e mostra
+  na resposta, na biblioteca e no visualizador.
+- Sonda (`chat_probe`, Ubuntu-24.04): a imagem chegou em 6,9 s (~70 KB de JPG) e o pedido para ler
+  um arquivo continuou sem ferramenta.
+- Cada imagem sai da mesma cota semanal do SuperGrok (a do Imagine).
