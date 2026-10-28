@@ -37,8 +37,10 @@ cada conta é do Windows ou do WSL e deixe escolher quais contas entram no slide
   divididos pela velocidade das animações do tema. O `TIMER_AI_SLIDE` pede a troca a cada
   `[ia] interval` (5 s; 2 a 60). Com o mouse em cima do chip, o painel dele aberto ou a barra
   escondida, o slide fica parado.
-- **Painel:** os blocos das três IAs (os dos painéis individuais), com um botão de atualizar que
-  consulta as três e um lápis. O lápis abre a lista dos slides: o olho tira do slide ou põe de volta
+- **Painel:** um bloco por slide visível, na ordem do chip (o mesmo bloco dos painéis
+  individuais, só com a origem do slide: a conta do Codex no Windows e no WSL são dois blocos, e um
+  slide tirado pelo olho sai do painel também), com um botão de atualizar que consulta as três e
+  um lápis. O lápis abre a lista dos slides: o olho tira do slide ou põe de volta
   (no fim) e as setas mudam a ordem. Cada clique grava `[ia] order` e `hidden` na hora
   (`config::set_ai`); mudar só o `[ia]` não fecha o painel (`Config::same_except_panels`).
 

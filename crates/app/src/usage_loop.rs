@@ -250,6 +250,31 @@ fn grok_blocks(s: &GrokSnapshot, now: i64, offset: i32) -> Vec<UsageBlock> {
         .collect()
 }
 
+/// Os blocos do painel do chip `ia`: um por slide visível, na ordem do chip. A conta de cada
+/// slide entra só com a origem dele (a mesma conta no Windows e no WSL são dois blocos, como no
+/// chip).
+fn ai_blocks(usage: &crate::app::UsageState, ai: &zefiro_core::config::AiConfig, now: i64, offset: i32) -> Vec<UsageBlock> {
+    use zefiro_bar::ai::slide_key;
+    use zefiro_integration_chat::agent::Agent;
+    use zefiro_integration_usage::origins::Account;
+    fn only<T: Clone>(accounts: &[Account<T>], agent: Agent, key: &str) -> Option<Vec<Account<T>>> {
+        accounts.iter().find_map(|a| a.origins.iter().find(|o| slide_key(agent, std::slice::from_ref(*o)) == key).map(|o| vec![Account { origins: vec![o.clone()], ..a.clone() }]))
+    }
+    usage
+        .ai_slides(ai, now)
+        .visible
+        .iter()
+        .filter_map(|s| {
+            let blocks = match s.agent {
+                Agent::Claude => usage.claude.as_ref().and_then(|snap| Some(claude_blocks(&ClaudeSnapshot { accounts: only(&snap.accounts, s.agent, &s.key)?, ..snap.clone() }, now, offset)))?,
+                Agent::Codex => usage.codex.as_ref().and_then(|snap| Some(codex_blocks(&CodexSnapshot { accounts: only(&snap.accounts, s.agent, &s.key)?, ..snap.clone() }, now, offset)))?,
+                Agent::Grok => usage.grok.as_ref().and_then(|snap| Some(grok_blocks(&GrokSnapshot { accounts: only(&snap.accounts, s.agent, &s.key)?, ..snap.clone() }, now, offset)))?,
+            };
+            blocks.into_iter().next()
+        })
+        .collect()
+}
+
 fn capitalized(s: &str) -> String {
     let mut c = s.chars();
     c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
@@ -567,11 +592,15 @@ impl Loop {
         if self.usage.ai_editing {
             return slides_panel(&self.ctx.usage.ai_slides(&self.ctx.config.ai, now), scale, tokens).0;
         }
-        let loading = |name: &str| vec![block(name.into(), String::new(), Vec::new(), Some("Carregando…".into()))];
-        let u = &self.ctx.usage;
-        let mut blocks = u.claude.as_ref().map_or_else(|| loading("Claude"), |s| claude_blocks(s, now, offset));
-        blocks.extend(u.codex.as_ref().map_or_else(|| loading("Codex"), |s| codex_blocks(s, now, offset)));
-        blocks.extend(u.grok.as_ref().map_or_else(|| loading("Grok"), |s| grok_blocks(s, now, offset)));
+        // Um bloco por slide visível; sem nenhum ainda, as três IAs (carregando ou o motivo).
+        let mut blocks = ai_blocks(&self.ctx.usage, &self.ctx.config.ai, now, offset);
+        if blocks.is_empty() {
+            let loading = |name: &str| vec![block(name.into(), String::new(), Vec::new(), Some("Carregando…".into()))];
+            let u = &self.ctx.usage;
+            blocks = u.claude.as_ref().map_or_else(|| loading("Claude"), |s| claude_blocks(s, now, offset));
+            blocks.extend(u.codex.as_ref().map_or_else(|| loading("Codex"), |s| codex_blocks(s, now, offset)));
+            blocks.extend(u.grok.as_ref().map_or_else(|| loading("Grok"), |s| grok_blocks(s, now, offset)));
+        }
         let refreshing = self.usage.claude_refreshing || self.usage.codex_refreshing || self.usage.grok_refreshing;
         let enabled = !refreshing;
         let mut list = usage_panel(&blocks, if refreshing { "Atualizando…" } else { "" }, Some(RefreshButton { enabled, hovered: self.usage.refresh_hover }), scale, tokens, text);
@@ -741,6 +770,23 @@ Abra o Claude Code no WSL para renovar."));
         flaky.data.result = Some(Err(UsageError::Network));
         let b = &grok_blocks(&GrokSnapshot { accounts: vec![flaky], ..Default::default() }, NOW, 0)[0];
         assert_eq!((b.message.as_deref(), b.rows[0].percent), (None, Some(30.0)), "falha passageira mostra o último valor");
+    }
+
+    #[test]
+    fn ai_panel_has_one_block_per_visible_slide() {
+        // A conta do Codex é a mesma no Windows e no WSL: dois slides, dois blocos.
+        let codex_snapshot = CodexSnapshot { accounts: vec![codex(vec![OriginKind::Windows, wsl()], false)], wsl_stopped: false };
+        let mut usage = crate::app::UsageState::default();
+        usage.codex = Some(codex_snapshot);
+        usage.grok = Some(GrokSnapshot { accounts: vec![grok(vec![wsl()], Ok(week(25.0, 0)), false)], wsl_stopped: false, at: None });
+        let blocks = ai_blocks(&usage, &zefiro_core::config::AiConfig::default(), NOW, 0);
+        let shown: Vec<(&str, bool)> = blocks.iter().map(|b| (b.title.as_str(), b.subtitle.ends_with(" · Windows"))).collect();
+        assert_eq!(shown, [("Codex · Plus", true), ("Codex · Plus", false), ("Grok · SuperGrok", false)]);
+        assert!(blocks[1].subtitle.ends_with(" · WSL"), "{}", blocks[1].subtitle);
+        // O olho tira o slide do painel também; a ordem é a do chip.
+        let ai = zefiro_core::config::AiConfig { order: vec!["grok:Ubuntu-24.04".into()], hidden: vec!["codex:windows".into()], interval: 5 };
+        let titles: Vec<String> = ai_blocks(&usage, &ai, NOW, 0).into_iter().map(|b| b.title).collect();
+        assert_eq!(titles, ["Grok · SuperGrok", "Codex · Plus"]);
     }
 
     #[test]
