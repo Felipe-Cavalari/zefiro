@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use windows::core::Result;
 use zefiro_bar::controller::PanelKind;
-use zefiro_bar::spotify::{Auth, Effect, Filter, Key, SpotifyPanel};
+use zefiro_bar::spotify::{Auth, Effect, Filter, Key, SpotifyPanel, closed_panel_effects};
 use zefiro_bar::spotify_view::{Hit, hit_at, spotify_panel};
 use zefiro_core::config::{SpotifyConfig, set_spotify};
 use zefiro_integration_spotify::auth::REDIRECT_URI;
@@ -36,13 +36,15 @@ pub struct SpotifyRuntime {
     pending_search: Option<(u64, String, Filter, u32)>,
     toast_at: Option<Instant>,
     started: Instant,
+    /// O painel do Spotify está aberto (os ganchos de fechar rodam para qualquer painel).
+    open: bool,
 }
 
 impl Default for SpotifyRuntime {
     fn default() -> Self {
         let mut panel = SpotifyPanel::new(Auth::NeedsLogin);
         panel.opened();
-        SpotifyRuntime { service: None, client_id: String::new(), panel, hits: Vec::new(), requested: HashSet::new(), pending_search: None, toast_at: None, started: Instant::now() }
+        SpotifyRuntime { service: None, client_id: String::new(), panel, hits: Vec::new(), requested: HashSet::new(), pending_search: None, toast_at: None, started: Instant::now(), open: false }
     }
 }
 
@@ -108,6 +110,7 @@ impl Loop {
         if let Some(s) = &self.spotify.service {
             s.set_panel_open(true);
         }
+        self.spotify.open = true;
         self.spotify.panel.now_ms = self.spotify.now_ms();
         self.spotify.requested.clear();
         let fx = self.spotify.panel.opened();
@@ -117,6 +120,9 @@ impl Loop {
 
     pub fn spotify_panel_closed(&mut self) {
         let s = &mut self.spotify;
+        if !std::mem::take(&mut s.open) {
+            return;
+        }
         if let Some(service) = &s.service {
             service.set_panel_open(false);
         }
@@ -305,18 +311,12 @@ impl Loop {
             let now = self.spotify.now_ms();
             let panel = &mut self.spotify.panel;
             match reply {
-                Reply::Auth(state) => {
-                    let was_ready = panel.auth == Auth::Ready;
-                    panel.auth = auth_of(state);
-                    if panel.auth == Auth::Ready && !was_ready {
-                        fx.extend(panel.opened());
-                    }
-                }
-                Reply::Player(Ok(player)) => panel.set_player(player.map(|p| *p), now),
+                Reply::Auth(state) => fx.extend(panel.set_auth(auth_of(state))),
+                Reply::Player(Ok(player)) => fx.extend(panel.set_player(player.map(|p| *p), now)),
                 Reply::Player(Err(_)) => {}
                 Reply::Recent(items) => panel.recent = items,
                 Reply::UpNext(next) => panel.up_next = next,
-                Reply::Loaded { depth, offset, result } => panel.loaded(depth, offset, result),
+                Reply::Loaded { depth, source, offset, result } => panel.loaded(depth, &source, offset, result),
                 Reply::Searched { seq, offset, result } => panel.searched(seq, offset, result),
                 Reply::Sent(result) => {
                     acted |= result.is_ok();
@@ -332,8 +332,8 @@ impl Loop {
             }
         }
         if !self.spotify_open() {
-            // Fechado: só guarda o estado; o `Refresh` de um login roda ao abrir.
-            fx.retain(|e| !matches!(e, Effect::Refresh));
+            // Fechado: só guarda o estado; nada vai à rede (o `Refresh` de um login roda ao abrir).
+            fx = closed_panel_effects(fx);
         } else if acted {
             // Depois de uma ação, o cartão e a fila mostram o resultado.
             self.spotify.send(Job::Player);

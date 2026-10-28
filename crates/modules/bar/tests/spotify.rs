@@ -48,16 +48,16 @@ fn into_playlists(p: &mut SpotifyPanel, playlists: Vec<Item>) {
     select(p, Row::Entry(Entry::Playlists));
     p.key(Key::Enter);
     let depth = p.stack.len() - 1;
-    p.loaded(depth, 0, Ok(Some(page(playlists))));
+    p.loaded(depth, &Source::Playlists, 0, Ok(Some(page(playlists))));
 }
 
 fn into_playlist(p: &mut SpotifyPanel, playlist: Item, tracks: Option<Vec<Item>>) {
     into_playlists(p, vec![playlist]);
     select(p, Row::Item(0));
     let fx = p.key(Key::Enter);
-    assert!(fx.iter().any(|e| matches!(e, Effect::Load { source: Source::Playlist(_), .. })), "{fx:?}");
+    let source = fx.iter().find_map(|e| if let Effect::Load { source: s @ Source::Playlist(_), .. } = e { Some(s.clone()) } else { None }).expect("{fx:?}");
     let depth = p.stack.len() - 1;
-    p.loaded(depth, 0, Ok(tracks.map(page)));
+    p.loaded(depth, &source, 0, Ok(tracks.map(page)));
 }
 
 fn mine(id: &str, name: &str) -> Item {
@@ -170,7 +170,7 @@ fn liked_tracks_play_the_loaded_list_from_the_chosen_one() {
     p.key(Key::Enter);
     select(&mut p, Row::Entry(Entry::Liked));
     p.key(Key::Enter);
-    p.loaded(2, 0, Ok(Some(page(vec![track("a", "A"), track("b", "B"), track("c", "C")]))));
+    p.loaded(2, &Source::Liked, 0, Ok(Some(page(vec![track("a", "A"), track("b", "B"), track("c", "C")]))));
     select(&mut p, Row::Item(1));
     assert_eq!(sends(&p.key(Key::Enter)), vec![api::play(&PlayTarget::Uris(vec!["spotify:track:b".into(), "spotify:track:c".into()]), None)]);
 }
@@ -200,7 +200,7 @@ fn actions_menu_per_kind() {
     let mut d = ready();
     select(&mut d, Row::Entry(Entry::Devices));
     d.key(Key::Enter);
-    d.loaded(1, 0, Ok(Some(page(vec![item(Kind::Device, "d1", "Notebook")]))));
+    d.loaded(1, &Source::Devices, 0, Ok(Some(page(vec![item(Kind::Device, "d1", "Notebook")]))));
     assert_eq!(d.actions_for(MenuTarget::Row(0)), vec![Action::PlayHere, Action::Volume]);
 
     let mut c = ready();
@@ -300,13 +300,13 @@ fn scroll_near_end_loads_next_page_once() {
     select(&mut p, Row::Entry(Entry::Liked));
     p.key(Key::Enter);
     let tracks: Vec<Item> = (0..12).map(|i| track(&format!("t{i}"), "x")).collect();
-    p.loaded(2, 0, Ok(Some(Page { items: tracks, next_offset: Some(50), after: None })));
+    p.loaded(2, &Source::Liked, 0, Ok(Some(Page { items: tracks, next_offset: Some(50), after: None })));
     let mut loads = 0;
     for _ in 0..4 {
         loads += p.wheel(-1).iter().filter(|e| matches!(e, Effect::Load { offset: 50, .. })).count();
     }
     assert_eq!(loads, 1);
-    p.loaded(2, 50, Ok(Some(page(vec![track("t99", "y")]))));
+    p.loaded(2, &Source::Liked, 50, Ok(Some(page(vec![track("t99", "y")]))));
     assert_eq!(p.stack[2].items.as_ref().unwrap().len(), 13, "a página nova vai para o fim");
 }
 
@@ -346,7 +346,7 @@ fn album_from_a_track_inherits_its_cover() {
     let mut bare = track("T", "Faixa");
     bare.album = None;
     bare.image = None;
-    p.loaded(2, 0, Ok(Some(page(vec![bare]))));
+    p.loaded(2, &Source::Album("al".into()), 0, Ok(Some(page(vec![bare]))));
     assert_eq!(p.stack[2].items.as_ref().unwrap()[0].image.as_deref(), Some("capa"));
 }
 
@@ -381,4 +381,128 @@ fn ctrl_l_toggles_like_of_the_selected_track() {
     p.searched(seq, 0, Ok(vec![(Kind::Track, page(vec![track("T", "Faixa")]))]));
     p.select(0);
     assert_eq!(p.key(Key::CtrlL), vec![Effect::ToggleLike("spotify:track:T".into())]);
+}
+
+
+#[test]
+fn a_late_page_does_not_land_on_another_list() {
+    let mut p = ready();
+    // B lida e guardada em memória.
+    into_playlist(&mut p, mine("B", "Lista B"), Some(vec![track("b1", "Da B")]));
+    p.key(Key::Esc);
+    // A abre (carregando) e o usuário volta antes de chegar.
+    p.stack.last_mut().unwrap().items = Some(vec![mine("A", "Lista A"), mine("B", "Lista B")]);
+    select(&mut p, Row::Item(0));
+    p.key(Key::Enter);
+    let depth = p.stack.len() - 1;
+    p.key(Key::Esc);
+    select(&mut p, Row::Item(1));
+    assert!(!p.key(Key::Enter).iter().any(|e| matches!(e, Effect::Load { .. })), "B veio da memória");
+    p.loaded(depth, &Source::Playlist("A".into()), 0, Ok(Some(page(vec![track("a1", "Da A")]))));
+    assert_eq!(p.stack[depth].items.as_ref().unwrap()[0].name, "Da B", "a página de A não cai em B");
+    p.key(Key::Esc);
+    select(&mut p, Row::Item(1));
+    p.key(Key::Enter);
+    assert_eq!(p.stack.last().unwrap().items.as_ref().unwrap()[0].name, "Da B", "nem estraga a memória de B");
+}
+
+#[test]
+fn a_new_track_asks_whether_it_is_liked() {
+    let mut p = ready();
+    let player = |id: &str| Some(Player { item: Some(track(id, "Faixa")), playing: true, progress_ms: 0, device: None, shuffle: false, repeat: Repeat::Off, context_uri: None });
+    assert_eq!(p.set_player(player("T"), 0), vec![Effect::CheckLiked("spotify:track:T".into())]);
+    assert!(p.set_player(player("T"), 5000).is_empty(), "a mesma faixa não pergunta de novo");
+    assert_eq!(p.set_player(player("U"), 9000), vec![Effect::CheckLiked("spotify:track:U".into())]);
+}
+
+#[test]
+fn card_menu_works_with_nothing_playing() {
+    let mut p = ready();
+    assert_eq!(p.rows()[0], Row::Card);
+    p.select(0);
+    p.key(Key::Tab);
+    let menu = p.menu.as_ref().expect("o menu do cartão abre sem música");
+    let at = menu.actions.iter().position(|a| *a == Action::Logout).unwrap();
+    p.menu.as_mut().unwrap().selected = at;
+    assert_eq!(p.key(Key::Enter), vec![Effect::Logout]);
+    p.select(0);
+    p.key(Key::Tab);
+    let at = p.menu.as_ref().unwrap().actions.iter().position(|a| *a == Action::Next).unwrap();
+    p.menu.as_mut().unwrap().selected = at;
+    assert_eq!(sends(&p.key(Key::Enter)), vec![api::next()]);
+}
+
+#[test]
+fn long_menus_scroll_with_the_selection() {
+    let mut p = ready();
+    type_text(&mut p, "x");
+    let seq = p.seq;
+    p.searched(seq, 0, Ok(vec![(Kind::Track, page(vec![track("T", "Faixa")]))]));
+    p.select(0);
+    p.key(Key::CtrlP);
+    p.set_playlists((0..40).map(|i| mine(&format!("p{i}"), &format!("Lista {i}"))).collect());
+    for _ in 0..15 {
+        p.key(Key::Down);
+    }
+    let menu = p.menu.as_ref().unwrap();
+    assert_eq!(menu.selected, 15);
+    assert!(menu.scroll <= 15 && 15 < menu.scroll + MENU_VISIBLE, "a escolhida fica à vista: {}", menu.scroll);
+    p.wheel(1);
+    assert_eq!(p.menu.as_ref().unwrap().scroll, menu_scroll_after_wheel_up(15));
+}
+
+fn menu_scroll_after_wheel_up(selected: usize) -> usize {
+    (selected + 1 - MENU_VISIBLE).saturating_sub(1)
+}
+
+#[test]
+fn arrow_keys_load_the_next_page_too() {
+    let mut p = ready();
+    select(&mut p, Row::Entry(Entry::Library));
+    p.key(Key::Enter);
+    select(&mut p, Row::Entry(Entry::Liked));
+    p.key(Key::Enter);
+    let tracks: Vec<Item> = (0..12).map(|i| track(&format!("t{i}"), "x")).collect();
+    p.loaded(2, &Source::Liked, 0, Ok(Some(Page { items: tracks, next_offset: Some(50), after: None })));
+    let loads: usize = (0..11).map(|_| p.key(Key::Down).iter().filter(|e| matches!(e, Effect::Load { offset: 50, .. })).count()).sum();
+    assert_eq!(loads, 1);
+}
+
+#[test]
+fn device_volume_menu_stops_at_its_last_step() {
+    let mut d = ready();
+    select(&mut d, Row::Entry(Entry::Devices));
+    d.key(Key::Enter);
+    d.loaded(1, &Source::Devices, 0, Ok(Some(page(vec![item(Kind::Device, "d1", "Notebook")]))));
+    d.select(0);
+    d.key(Key::Tab);
+    let at = d.menu.as_ref().unwrap().actions.iter().position(|a| *a == Action::Volume).unwrap();
+    d.menu.as_mut().unwrap().selected = at;
+    d.key(Key::Enter);
+    for _ in 0..10 {
+        d.key(Key::Down);
+    }
+    assert_eq!(d.menu.as_ref().unwrap().selected, 4, "só os 5 passos absolutos");
+    assert_eq!(sends(&d.key(Key::Enter)), vec![api::volume(100, Some("d1"))]);
+}
+
+#[test]
+fn leaving_the_account_forgets_its_data() {
+    let mut p = ready();
+    into_playlists(&mut p, vec![mine("p1", "A")]);
+    p.recent = vec![mine("r", "R")];
+    p.set_player(Some(Player { item: Some(track("T", "Faixa")), playing: true, progress_ms: 0, device: None, shuffle: false, repeat: Repeat::Off, context_uri: None }), 0);
+    p.set_auth(Auth::NeedsLogin);
+    assert!(p.player.is_none() && p.recent.is_empty() && p.liked.is_none());
+    assert_eq!(p.set_auth(Auth::Ready), vec![Effect::Refresh], "entrar de novo abre na raiz");
+    select(&mut p, Row::Entry(Entry::Library));
+    p.key(Key::Enter);
+    select(&mut p, Row::Entry(Entry::Playlists));
+    assert!(p.key(Key::Enter).iter().any(|e| matches!(e, Effect::Load { .. })), "as listas da outra conta saíram da memória");
+}
+
+#[test]
+fn nothing_goes_to_the_network_with_the_panel_closed() {
+    let fx = vec![Effect::Refresh, Effect::Load { depth: 1, source: Source::Devices, offset: 0, after: None }, Effect::Send(api::pause()), Effect::CheckLiked("u".into()), Effect::Copy("x".into())];
+    assert!(closed_panel_effects(fx).is_empty());
 }

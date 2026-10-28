@@ -8,6 +8,8 @@ use crate::model::{ApiError, api_error};
 
 /// Renova quando faltar menos que isto para o token de acesso vencer.
 const MARGIN_S: u64 = 60;
+/// Esperas de um 429 maiores que isto ficam neste teto.
+const MAX_BACKOFF_S: u64 = 60;
 const FORM: &str = "application/x-www-form-urlencoded";
 const JSON: &str = "application/json";
 
@@ -28,6 +30,8 @@ pub struct Session {
     refresh: String,
     access: Option<(String, u64)>,
     new_refresh: Option<String>,
+    /// Depois de um 429, nada vai à rede até esta hora (s).
+    blocked_until: Option<u64>,
 }
 
 fn token_request(t: &dyn Transport, body: &str) -> Result<Tokens, ApiError> {
@@ -46,7 +50,7 @@ pub fn exchange_code(t: &dyn Transport, client_id: &str, code: &str, verifier: &
 
 impl Session {
     pub fn new(client_id: String, refresh: String) -> Session {
-        Session { client_id, refresh, access: None, new_refresh: None }
+        Session { client_id, refresh, access: None, new_refresh: None, blocked_until: None }
     }
 
     fn renew(&mut self, t: &dyn Transport, now_s: u64) -> Result<String, ApiError> {
@@ -65,8 +69,15 @@ impl Session {
         t.send(req.method.as_str(), &url, &[("Authorization", &auth)], req.body.as_deref().map(|b| (JSON, b))).map_err(|NetworkError| ApiError::Network)
     }
 
-    /// Manda `req`; 2xx volta como (status, corpo), o resto como erro.
+    /// Manda `req`; 2xx volta como (status, corpo), o resto como erro. Depois de um 429, os pedidos
+    /// voltam `RateLimited` com o que falta da espera, sem ir à rede.
     pub fn execute(&mut self, t: &dyn Transport, req: &Request, now_s: u64) -> Result<(u16, String), ApiError> {
+        if let Some(until) = self.blocked_until {
+            if now_s < until {
+                return Err(ApiError::RateLimited(until - now_s));
+            }
+            self.blocked_until = None;
+        }
         let access = match &self.access {
             Some((token, until)) if now_s + MARGIN_S < *until => token.clone(),
             _ => self.renew(t, now_s)?,
@@ -82,7 +93,14 @@ impl Session {
                 if status == 401 {
                     self.access = None;
                 }
-                Err(api_error(status, &body, retry))
+                match api_error(status, &body, retry) {
+                    ApiError::RateLimited(n) => {
+                        let wait = n.min(MAX_BACKOFF_S);
+                        self.blocked_until = Some(now_s + wait);
+                        Err(ApiError::RateLimited(wait))
+                    }
+                    e => Err(e),
+                }
             }
         }
     }

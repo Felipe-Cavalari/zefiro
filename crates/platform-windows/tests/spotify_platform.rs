@@ -127,3 +127,12 @@ fn listener_times_out() {
     listen_on(port, "s".into(), Duration::from_millis(200), move |r| tx.send(r).unwrap()).unwrap();
     assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), ListenResult::TimedOut);
 }
+
+#[test]
+fn send_without_body_still_says_content_length_zero() {
+    winrt();
+    let (port, rx) = one_shot("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n");
+    http::send("POST", &format!("http://127.0.0.1:{port}/v1/me/player/next"), &[], None, Duration::from_secs(5)).unwrap();
+    let request = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(request.to_ascii_lowercase().contains("content-length: 0"), "o Spotify responde 411 sem isso: {request}");
+}

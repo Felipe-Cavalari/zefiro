@@ -187,3 +187,23 @@ fn list_shows_at_most_ten_rows_and_scrolls() {
     let d = draw(&p);
     assert!(!has(&d.list, "Faixa 0") && has(&d.list, "Faixa 1"));
 }
+
+
+#[test]
+fn long_submenus_draw_at_most_ten_lines() {
+    let mut p = ready();
+    p.char('x' as u32, None);
+    let seq = p.seq;
+    p.searched(seq, 0, Ok(vec![(Kind::Track, Page { items: vec![track("a", "A", 1000)], next_offset: None, after: None })]));
+    p.select(0);
+    p.key(Key::CtrlP);
+    p.set_playlists((0..40).map(|i| Item { kind: Kind::Playlist, editable: true, ..track(&format!("p{i}"), &format!("Lista {i}"), 0) }).collect());
+    for _ in 0..15 {
+        p.key(Key::Down);
+    }
+    let d = draw(&p);
+    let items: Vec<usize> = d.hits.iter().filter_map(|(_, h)| if let Hit::MenuItem(i) = h { Some(*i) } else { None }).collect();
+    assert_eq!(items.len(), MENU_VISIBLE);
+    assert!(items.contains(&15), "a linha escolhida está entre as desenhadas: {items:?}");
+    assert!(d.list.size.h < 700.0, "o painel não cresce com o submenu: {}", d.list.size.h);
+}

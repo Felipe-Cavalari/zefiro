@@ -137,3 +137,21 @@ fn cover_cache_evicts_least_recent() {
     c.clear();
     assert_eq!(c.len(), 0);
 }
+
+#[test]
+fn rate_limit_holds_further_calls_without_touching_the_network() {
+    let t = Fake::new(vec![token("A1", None), Ok((429, String::new(), Some(7))), ok("{}")]);
+    let mut s = Session::new("abc".into(), "R1".into());
+    assert_eq!(s.execute(&t, &api::me(), 1000), Err(ApiError::RateLimited(7)));
+    assert_eq!(s.execute(&t, &api::me(), 1003), Err(ApiError::RateLimited(4)), "ainda esperando");
+    assert_eq!(t.urls().len(), 2, "a espera não manda nada");
+    assert_eq!(s.execute(&t, &api::me(), 1007), Ok((200, "{}".into())));
+}
+
+#[test]
+fn rate_limit_wait_is_capped_at_a_minute() {
+    let t = Fake::new(vec![token("A1", None), Ok((429, String::new(), Some(300))), ok("{}")]);
+    let mut s = Session::new("abc".into(), "R1".into());
+    assert_eq!(s.execute(&t, &api::me(), 1000), Err(ApiError::RateLimited(60)));
+    assert_eq!(s.execute(&t, &api::me(), 1060), Ok((200, "{}".into())));
+}

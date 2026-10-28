@@ -69,7 +69,7 @@ fn dump(client_id: &str, out: &PathBuf) -> Result<(), String> {
     if stored.client_id != client_id {
         return Err("o token é de outro client_id".into());
     }
-    let mut s = Session::new(stored.client_id, stored.refresh);
+    let mut s = Session::new(stored.client_id.clone(), stored.refresh);
     let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
     let mut get = |name: &str, req: api::Request| -> Option<String> {
         match s.execute(&HttpTransport, &req, now()) {
@@ -100,6 +100,16 @@ fn dump(client_id: &str, out: &PathBuf) -> Result<(), String> {
     }
     if let Some(id) = playlists.iter().find(|p| !p.editable).and_then(|p| api::id_of(&p.uri)) {
         get("playlist_metadata_only", api::list(&Source::Playlist(id.into()), 0, None));
+    }
+    // O Spotify pode ter trocado o token de renovação: grava o novo, senão o login cai.
+    if let Some(refresh) = s.take_new_refresh() {
+        let fresh = Stored { client_id: stored.client_id, refresh };
+        match secret::protect(&fresh.to_bytes()) {
+            Ok(sealed) => {
+                let _ = std::fs::write(data_dir().join("token.bin"), sealed);
+            }
+            Err(e) => eprintln!("não consegui gravar o token novo: {}", e.message()),
+        }
     }
     println!("respostas cruas em {}", out.display());
     Ok(())

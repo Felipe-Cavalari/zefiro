@@ -20,8 +20,6 @@ const POLL: Duration = Duration::from_secs(5);
 const IDLE: Duration = Duration::from_secs(600);
 const LOGIN_WAIT: Duration = Duration::from_secs(300);
 const COVER_TIMEOUT: Duration = Duration::from_secs(10);
-/// Esperas de um 429 maiores que isto ficam neste teto.
-const MAX_BACKOFF_S: u64 = 60;
 /// Páginas de `/me/playlists` lidas para "Adicionar a playlist…" (50 cada).
 const PLAYLIST_PAGES: u32 = 10;
 
@@ -51,7 +49,7 @@ pub enum Reply {
     Player(Result<Option<Box<Player>>, ApiError>),
     Recent(Vec<Item>),
     UpNext(Option<String>),
-    Loaded { depth: usize, offset: u32, result: Result<Option<Page>, ApiError> },
+    Loaded { depth: usize, source: Source, offset: u32, result: Result<Option<Page>, ApiError> },
     Searched { seq: u64, offset: u32, result: Result<Vec<(Kind, Page)>, ApiError> },
     Sent(Result<(), ApiError>),
     Liked { uri: String, liked: bool },
@@ -113,7 +111,6 @@ struct Worker {
     session: Option<Session>,
     me: Option<String>,
     pkce: Option<Pkce>,
-    blocked_until: Option<Instant>,
     replies: Arc<Mutex<Vec<Reply>>>,
     covers: Covers,
     notify: Arc<dyn Fn() + Send + Sync>,
@@ -133,7 +130,7 @@ impl Worker {
     }
 
     fn load_token(&mut self) {
-        let stored = std::fs::read(self.token_path()).ok().and_then(|b| crate::secret::unprotect(&b).ok()).and_then(|b| Stored::from_bytes(&b));
+        let stored = self.read_token();
         self.session = match stored {
             Some(s) if s.client_id == self.client_id && !self.client_id.is_empty() => Some(Session::new(s.client_id, s.refresh)),
             _ => None,
@@ -169,33 +166,37 @@ impl Worker {
         }
     }
 
-    /// Um pedido à API, esperando um 429 anterior e gravando o token de renovação novo.
+    fn read_token(&self) -> Option<Stored> {
+        std::fs::read(self.token_path()).ok().and_then(|b| crate::secret::unprotect(&b).ok()).and_then(|b| Stored::from_bytes(&b))
+    }
+
+    /// Um pedido à API, gravando o token de renovação novo. Um 429 deixa a sessão esperando (os
+    /// pedidos seguintes voltam na hora, sem rede).
     fn call(&mut self, req: &Request) -> Result<(u16, String), ApiError> {
-        if let Some(until) = self.blocked_until.take() {
-            let now = Instant::now();
-            if until > now {
-                std::thread::sleep(until - now);
+        // Sem sessão não há o que recusar: nada de log nem de apagar o arquivo de novo.
+        let Some(mut session) = self.session.take() else { return Err(ApiError::Unauthorized) };
+        let mut result = session.execute(&HttpTransport, req, now_s());
+        if result == Err(ApiError::Unauthorized) {
+            // Outro processo (a sonda) pode ter renovado e gravado um token novo: usa ele uma vez.
+            if let Some(newer) = newer_on_disk(self.read_token(), &session.stored()) {
+                session = Session::new(newer.client_id, newer.refresh);
+                result = session.execute(&HttpTransport, req, now_s());
             }
         }
-        let Some(session) = &mut self.session else { return Err(ApiError::Unauthorized) };
-        let result = session.execute(&HttpTransport, req, now_s());
         if let Some(refresh) = session.take_new_refresh() {
-            let stored = Stored { client_id: self.client_id.clone(), refresh };
-            self.save_token(&stored);
+            self.save_token(&Stored { client_id: self.client_id.clone(), refresh });
         }
         match result {
             Err(ApiError::Unauthorized) => {
                 tracing::warn!("spotify: renovação recusada, saindo");
                 self.forget_token();
                 self.reply(Reply::Auth(AuthState::NeedsLogin));
+                return result;
             }
-            Err(ApiError::RateLimited(n)) => {
-                let wait = n.min(MAX_BACKOFF_S);
-                tracing::info!("spotify: 429, esperando {wait} s");
-                self.blocked_until = Some(Instant::now() + Duration::from_secs(wait));
-            }
+            Err(ApiError::RateLimited(n)) => tracing::info!("spotify: 429, esperando {n} s"),
             _ => {}
         }
+        self.session = Some(session);
         result
     }
 
@@ -256,7 +257,7 @@ impl Worker {
                 }
             },
             (other, _) => {
-                tracing::info!("spotify: login não concluído ({other:?})");
+                tracing::info!("spotify: login não concluído ({})", outcome(&other));
                 AuthState::NeedsLogin
             }
         };
@@ -348,7 +349,7 @@ impl Worker {
                     Err(e) => Err(e),
                 };
                 tracing::debug!("spotify: lista em {} ms", started.elapsed().as_millis());
-                self.reply(Reply::Loaded { depth, offset, result });
+                self.reply(Reply::Loaded { depth, source, offset, result });
             }
             Job::Search { seq, query, kinds, limit, offset } => {
                 let me = self.me();
@@ -397,6 +398,21 @@ impl Worker {
             }
             Job::Cover { url, side } => self.cover(&url, side),
         }
+    }
+}
+
+/// O token gravado por outro processo (a sonda), se for do mesmo app e diferente do que a sessão
+/// usa: a renovação recusada pode ter sido só porque ele trocou o token antes.
+fn newer_on_disk(disk: Option<Stored>, current: &Stored) -> Option<Stored> {
+    disk.filter(|d| d.client_id == current.client_id && d.refresh != current.refresh)
+}
+
+/// O resultado do listener para o log, sem o código de autorização.
+fn outcome(r: &ListenResult) -> &'static str {
+    match r {
+        ListenResult::Code(_) => "código recebido",
+        ListenResult::Denied => "cancelado no navegador",
+        ListenResult::TimedOut => "tempo esgotado",
     }
 }
 
@@ -465,7 +481,7 @@ impl SpotifyService {
         let (tx, rx) = mpsc::channel();
         let replies = Arc::new(Mutex::new(Vec::new()));
         let covers: Covers = Arc::new(Mutex::new(CoverCache::new(COVERS)));
-        let worker = Worker { dir, client_id, session: None, me: None, pkce: None, blocked_until: None, replies: replies.clone(), covers: covers.clone(), notify, tx: tx.clone() };
+        let worker = Worker { dir, client_id, session: None, me: None, pkce: None, replies: replies.clone(), covers: covers.clone(), notify, tx: tx.clone() };
         let thread = std::thread::Builder::new().name("zefiro-spotify".into()).spawn(move || {
             // SAFETY: WinRT nesta thread (HttpClient, imagens), desfeito no fim.
             let inited = unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.is_ok();
@@ -495,12 +511,12 @@ impl SpotifyService {
     }
 }
 
+/// Quem solta o serviço é a thread da UI: ela não espera a thread terminar o HTTP em curso (até
+/// 15 s por pedido). A thread sai sozinha no próximo `Stop` que ler.
 impl Drop for SpotifyService {
     fn drop(&mut self) {
         let _ = self.tx.send(Wake::Stop);
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
+        drop(self.thread.take());
     }
 }
 
@@ -525,6 +541,23 @@ mod tests {
         assert!(serde_contains(" [ true ] "));
         assert!(!serde_contains("[false]"));
         assert!(!serde_contains(""));
+    }
+
+    #[test]
+    fn token_written_by_someone_else_is_adopted() {
+        let current = Stored { client_id: "abc".into(), refresh: "R1".into() };
+        let newer = Stored { client_id: "abc".into(), refresh: "R2".into() };
+        assert_eq!(newer_on_disk(Some(newer.clone()), &current), Some(newer));
+        assert_eq!(newer_on_disk(Some(current.clone()), &current), None, "o mesmo token: a renovação foi recusada de verdade");
+        assert_eq!(newer_on_disk(Some(Stored { client_id: "outro".into(), refresh: "R3".into() }), &current), None);
+        assert_eq!(newer_on_disk(None, &current), None);
+    }
+
+    #[test]
+    fn login_outcome_in_the_log_never_has_the_code() {
+        assert_eq!(outcome(&ListenResult::Code("segredo".into())), "código recebido");
+        assert_eq!(outcome(&ListenResult::Denied), "cancelado no navegador");
+        assert_eq!(outcome(&ListenResult::TimedOut), "tempo esgotado");
     }
 
     #[test]

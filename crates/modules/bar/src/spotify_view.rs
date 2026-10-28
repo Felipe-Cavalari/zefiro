@@ -12,7 +12,7 @@ use zefiro_platform::text::{Align, Family, FontWeight, TextMeasurer, TextStyle};
 use zefiro_resources::tokens::Tokens;
 use zefiro_ui::paint::{DisplayList, DrawOp};
 
-use crate::spotify::{Auth, Entry, Filter, MenuTarget, Row, Screen, SpotifyPanel, SubMenu, VISIBLE};
+use crate::spotify::{Auth, Entry, Filter, MENU_VISIBLE, MenuTarget, Row, Screen, SpotifyPanel, SubMenu, VISIBLE};
 
 pub const WIDTH: f32 = 400.0;
 const ROW_H: f32 = 44.0;
@@ -478,7 +478,8 @@ fn draw_menu(c: &mut Ctx, p: &SpotifyPanel, anchor: Rect, content_bottom: f32) {
     };
     let w = c.list.size.w;
     let pad = c.px(6.0);
-    let h = lines.len() as f32 * c.px(MENU_ROW) + pad * 2.0;
+    let shown = lines.len().saturating_sub(menu.scroll).min(MENU_VISIBLE);
+    let h = shown as f32 * c.px(MENU_ROW) + pad * 2.0;
     let x = w - c.px(10.0) - c.px(MENU_W);
     let below = anchor.bottom() + c.px(4.0);
     // Abaixo da linha se couber até o fim das linhas (o painel cresce no máximo um pouco); senão,
@@ -488,8 +489,8 @@ fn draw_menu(c: &mut Ctx, p: &SpotifyPanel, anchor: Rect, content_bottom: f32) {
     c.rect(box_r, c.px(12.0), c.t.fill.with_alpha(1.0));
     c.rect(box_r, c.px(12.0), c.t.raised_strong);
     c.list.push(DrawOp::RoundRectStroke { rect: box_r, radius: c.px(12.0), color: c.t.hairline, width: c.px(1.0) });
-    for (i, (label, key, enabled)) in lines.into_iter().enumerate() {
-        let r = Rect::new(x + pad, y + pad + i as f32 * c.px(MENU_ROW), c.px(MENU_W) - pad * 2.0, c.px(MENU_ROW));
+    for (row, (i, (label, key, enabled))) in lines.into_iter().enumerate().skip(menu.scroll).take(MENU_VISIBLE).enumerate() {
+        let r = Rect::new(x + pad, y + pad + row as f32 * c.px(MENU_ROW), c.px(MENU_W) - pad * 2.0, c.px(MENU_ROW));
         if enabled && i == menu.selected {
             c.rect(r, c.px(8.0), c.t.raised_strong);
         }

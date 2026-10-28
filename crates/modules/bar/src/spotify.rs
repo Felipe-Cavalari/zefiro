@@ -13,6 +13,8 @@ use crate::vscode::{edit_query, matches};
 pub const VISIBLE: usize = 10;
 /// Faltando isto para o fim, a próxima página é pedida.
 const PREFETCH: usize = 3;
+/// Linhas visíveis do menu de ações e dos submenus (o resto rola).
+pub const MENU_VISIBLE: usize = 10;
 /// Passos do submenu de volume; os dois últimos são relativos (−10 e +10).
 pub const VOLUME_STEPS: [i8; 7] = [0, 25, 50, 75, 100, -10, 10];
 
@@ -166,7 +168,29 @@ pub enum MenuTarget { Row(usize), Card }
 pub enum SubMenu { Volume, Playlists(Option<Vec<Item>>) }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Menu { pub target: MenuTarget, pub actions: Vec<Action>, pub selected: usize, pub sub: Option<SubMenu> }
+pub struct Menu { pub target: MenuTarget, pub actions: Vec<Action>, pub selected: usize, pub sub: Option<SubMenu>, pub scroll: usize }
+
+impl Menu {
+    fn new(target: MenuTarget, actions: Vec<Action>, sub: Option<SubMenu>) -> Menu {
+        Menu { target, actions, selected: 0, sub, scroll: 0 }
+    }
+
+    /// Abre um submenu no lugar da lista de ações.
+    fn enter(&mut self, sub: SubMenu) {
+        self.sub = Some(sub);
+        self.selected = 0;
+        self.scroll = 0;
+    }
+
+    /// A linha escolhida fica à vista.
+    fn follow(&mut self) {
+        if self.selected < self.scroll {
+            self.scroll = self.selected;
+        } else if self.selected >= self.scroll + MENU_VISIBLE {
+            self.scroll = self.selected + 1 - MENU_VISIBLE;
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key { Up, Down, Enter, CtrlEnter, ShiftEnter, Tab, CtrlTab, CtrlShiftTab, Esc, CtrlL, CtrlP, CtrlC }
@@ -518,12 +542,22 @@ impl SpotifyPanel {
         }
     }
 
+    /// O item de uma ação do menu. O cartão sem nada tocando age sobre um item vazio: as ações dele
+    /// nessa hora (tocar, próxima, aleatório, volume, sair) não usam o item.
+    fn action_item(&self, target: MenuTarget) -> Option<Item> {
+        match (self.target_item(target), target) {
+            (Some(item), _) => Some(item),
+            (None, MenuTarget::Card) => Some(Item { kind: Kind::Track, uri: String::new(), name: String::new(), subtitle: String::new(), duration_ms: None, image: None, album: None, artists: Vec::new(), show: None, editable: false, owner: None, total: None, active: false }),
+            (None, MenuTarget::Row(_)) => None,
+        }
+    }
+
     fn open_menu(&mut self, target: MenuTarget) -> Vec<Effect> {
         let actions = self.actions_for(target);
         if actions.is_empty() {
             return Vec::new();
         }
-        self.menu = Some(Menu { target, actions, selected: 0, sub: None });
+        self.menu = Some(Menu::new(target, actions, None));
         match self.target_item(target) {
             Some(item) if item.kind == Kind::Track => vec![Effect::CheckLiked(item.uri)],
             _ => Vec::new(),
@@ -556,11 +590,9 @@ impl SpotifyPanel {
                 fx.push(Effect::ToggleLike(item.uri.clone()));
             }
             Action::AddToPlaylist => {
-                if let Some(menu) = &mut self.menu {
-                    menu.sub = Some(SubMenu::Playlists(None));
-                    menu.selected = 0;
-                } else {
-                    self.menu = Some(Menu { target, actions: vec![Action::AddToPlaylist], selected: 0, sub: Some(SubMenu::Playlists(None)) });
+                match &mut self.menu {
+                    Some(menu) => menu.enter(SubMenu::Playlists(None)),
+                    None => self.menu = Some(Menu::new(target, vec![Action::AddToPlaylist], Some(SubMenu::Playlists(None)))),
                 }
                 return vec![Effect::LoadPlaylists];
             }
@@ -609,8 +641,7 @@ impl SpotifyPanel {
             Action::PlayHere => fx.push(Effect::Send(api::transfer(&item.uri))),
             Action::Volume => {
                 if let Some(menu) = &mut self.menu {
-                    menu.sub = Some(SubMenu::Volume);
-                    menu.selected = 0;
+                    menu.enter(SubMenu::Volume);
                 }
                 return Vec::new();
             }
@@ -634,7 +665,7 @@ impl SpotifyPanel {
     /// Escolha no submenu aberto.
     fn run_sub(&mut self) -> Vec<Effect> {
         let Some(menu) = self.menu.clone() else { return Vec::new() };
-        let Some(item) = self.target_item(menu.target) else { return Vec::new() };
+        let Some(item) = self.action_item(menu.target) else { return Vec::new() };
         let fx = match &menu.sub {
             Some(SubMenu::Volume) => {
                 let Some(&step) = VOLUME_STEPS.get(menu.selected) else { return Vec::new() };
@@ -660,7 +691,7 @@ impl SpotifyPanel {
 
     fn menu_len(&self) -> usize {
         match &self.menu {
-            Some(Menu { sub: Some(SubMenu::Volume), .. }) => VOLUME_STEPS.len(),
+            Some(Menu { sub: Some(SubMenu::Volume), .. }) => self.volume_steps().len(),
             Some(Menu { sub: Some(SubMenu::Playlists(list)), .. }) => list.as_ref().map_or(0, Vec::len),
             Some(m) => m.actions.len(),
             None => 0,
@@ -711,7 +742,7 @@ impl SpotifyPanel {
                 let cur = self.top().selected;
                 let next = if k == Key::Up { cur.saturating_sub(1) } else { (cur + 1).min(len.saturating_sub(1)) };
                 self.select(next);
-                Vec::new()
+                self.more()
             }
             Key::Enter => self.primary(false),
             Key::ShiftEnter => self.primary(true),
@@ -769,12 +800,19 @@ impl SpotifyPanel {
         let len = self.menu_len();
         let Some(menu) = &mut self.menu else { return Vec::new() };
         match k {
-            Key::Up => menu.selected = menu.selected.saturating_sub(1),
-            Key::Down => menu.selected = (menu.selected + 1).min(len.saturating_sub(1)),
+            Key::Up => {
+                menu.selected = menu.selected.saturating_sub(1);
+                menu.follow();
+            }
+            Key::Down => {
+                menu.selected = (menu.selected + 1).min(len.saturating_sub(1));
+                menu.follow();
+            }
             Key::Esc => {
                 if menu.sub.is_some() && menu.actions.len() > 1 {
                     menu.sub = None;
                     menu.selected = 0;
+                    menu.scroll = 0;
                 } else {
                     self.menu = None;
                 }
@@ -784,7 +822,7 @@ impl SpotifyPanel {
                     return self.run_sub();
                 }
                 let (target, action) = (menu.target, menu.actions.get(menu.selected).copied());
-                let (Some(action), Some(item)) = (action, self.target_item(target)) else { return Vec::new() };
+                let (Some(action), Some(item)) = (action, self.action_item(target)) else { return Vec::new() };
                 return self.run(action, target, &item);
             }
             _ => {}
@@ -932,20 +970,33 @@ impl SpotifyPanel {
         }
     }
 
-    /// Roda: rola a lista; perto do fim de uma lista paginada, pede a próxima página uma vez.
+    /// Roda: rola a lista (ou o menu aberto); perto do fim de uma lista paginada, pede a próxima
+    /// página uma vez.
     pub fn wheel(&mut self, delta: i32) -> Vec<Effect> {
-        if self.menu.is_some() {
+        let len = self.menu_len();
+        if let Some(menu) = &mut self.menu {
+            let max = len.saturating_sub(MENU_VISIBLE);
+            menu.scroll = if delta > 0 { menu.scroll.saturating_sub(1) } else { (menu.scroll + 1).min(max) };
+            menu.selected = menu.selected.clamp(menu.scroll, (menu.scroll + MENU_VISIBLE).min(len).saturating_sub(1).max(menu.scroll));
             return Vec::new();
         }
+        let count = self.rows().len();
+        let layer = self.top_mut();
+        let max = count.saturating_sub(VISIBLE);
+        layer.scroll = if delta > 0 { layer.scroll.saturating_sub(1) } else { (layer.scroll + 1).min(max) };
+        layer.selected = layer.selected.clamp(layer.scroll, (layer.scroll + VISIBLE).min(count).saturating_sub(1).max(layer.scroll));
+        self.more()
+    }
+
+    /// Perto do fim de uma lista paginada (pela roda ou pelas setas), pede a próxima página uma vez.
+    fn more(&mut self) -> Vec<Effect> {
         let count = self.rows().len();
         let depth = self.stack.len() - 1;
         let screen = self.top().screen.clone();
         let one_kind = self.filter != Filter::All;
         let layer = self.top_mut();
-        let max = count.saturating_sub(VISIBLE);
-        layer.scroll = if delta > 0 { layer.scroll.saturating_sub(1) } else { (layer.scroll + 1).min(max) };
-        layer.selected = layer.selected.clamp(layer.scroll, (layer.scroll + VISIBLE).min(count).saturating_sub(1).max(layer.scroll));
-        if layer.loading_more || layer.scroll + VISIBLE + PREFETCH < count || !layer.filter.is_empty() {
+        let near_end = layer.scroll + VISIBLE + PREFETCH >= count || layer.selected + PREFETCH >= count;
+        if layer.loading_more || !near_end || !layer.filter.is_empty() {
             return Vec::new();
         }
         match screen {
@@ -977,10 +1028,15 @@ impl SpotifyPanel {
         }
     }
 
-    /// Chegou uma página da lista na profundidade `depth`.
-    pub fn loaded(&mut self, depth: usize, offset: u32, page: Result<Option<Page>, ApiError>) {
+    /// Chegou uma página de `source` para a profundidade `depth`. Se a camada ali já é outra lista
+    /// (o usuário voltou e abriu outra), a página é descartada.
+    pub fn loaded(&mut self, depth: usize, source: &Source, offset: u32, page: Result<Option<Page>, ApiError>) {
         let Some(layer) = self.stack.get_mut(depth) else { return };
-        let Screen::List { source, parent, .. } = &layer.screen else { return };
+        let Screen::List { source: here, parent, .. } = &layer.screen else { return };
+        if here != source {
+            return;
+        }
+        let source = here;
         let (source, parent) = (source.clone(), parent.clone());
         let more = offset > 0 || (source == Source::Artists && layer.loading_more);
         layer.loading_more = false;
@@ -1042,10 +1098,36 @@ impl SpotifyPanel {
         }
     }
 
-    pub fn set_player(&mut self, player: Option<Player>, now_ms: u64) {
+    /// Chegou o player. Uma faixa nova pede a conferência do coração (o cartão mostra se é curtida).
+    pub fn set_player(&mut self, player: Option<Player>, now_ms: u64) -> Vec<Effect> {
+        let uri = |p: &Option<Player>| p.as_ref().and_then(|p| p.item.as_ref()).filter(|i| i.kind == Kind::Track).map(|i| i.uri.clone());
+        let (before, after) = (uri(&self.player), uri(&player));
         self.player = player;
         self.player_at_ms = now_ms;
         self.now_ms = self.now_ms.max(now_ms);
+        match after {
+            Some(u) if before.as_ref() != Some(&u) => vec![Effect::CheckLiked(u)],
+            _ => Vec::new(),
+        }
+    }
+
+    /// O estado do login mudou. Saindo da conta, o painel esquece o que era dela; entrando, abre na
+    /// raiz.
+    pub fn set_auth(&mut self, auth: Auth) -> Vec<Effect> {
+        let was_ready = self.auth == Auth::Ready;
+        self.auth = auth;
+        match (was_ready, auth == Auth::Ready) {
+            (true, false) => {
+                self.idle();
+                self.player = None;
+                self.liked = None;
+                self.up_next = None;
+                self.opened();
+                Vec::new()
+            }
+            (false, true) => self.opened(),
+            _ => Vec::new(),
+        }
     }
 
     /// Resultado de uma ação mandada (`Effect::Send`).
@@ -1085,6 +1167,12 @@ impl SpotifyPanel {
             *slot = Some(list.into_iter().filter(|p| p.editable).collect());
         }
     }
+}
+
+/// Com o painel fechado, nada vai para a rede nem para a área de transferência: só gravar o
+/// `client_id` passa.
+pub fn closed_panel_effects(fx: Vec<Effect>) -> Vec<Effect> {
+    fx.into_iter().filter(|e| matches!(e, Effect::SaveClientId(_))).collect()
 }
 
 /// Mensagem de um erro da API para o painel.
