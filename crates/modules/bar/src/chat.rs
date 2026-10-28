@@ -581,7 +581,7 @@ fn on_accent(tokens: &Tokens) -> Rgba {
     if tokens.accent.relative_luminance() > 0.5 { Rgba::BLACK } else { Rgba::WHITE }
 }
 
-/// Cabeçalho: Claude | Codex, os botões de conversas antigas e de conversa nova, e embaixo os
+/// Cabeçalho: Claude | Codex | Grok, os botões de conversas antigas e de conversa nova, e embaixo os
 /// seletores de origem e de modelo.
 fn draw_header(ops: &mut Vec<DrawOp>, hits: &mut Vec<(Rect, Hit)>, view: &ChatView, scale: f32, tokens: &Tokens, m: &dyn TextMeasurer) {
     let px = |v: f32| (v * scale).round();
@@ -1340,6 +1340,17 @@ mod tests {
             assert!(has(&l, hit), "falta {hit:?}");
         }
         assert_eq!(l.list.size.w, WIDTH);
+    }
+
+    #[test]
+    fn three_agents_fit_before_the_header_buttons() {
+        let l = panel(&[], &Field::default(), 0.0);
+        let rect = |hit: Hit| l.hits.iter().find(|(_, h)| *h == hit).map(|(r, _)| *r).unwrap();
+        assert!(texts(&l.list).contains(&"Grok".to_string()));
+        let grok = rect(Hit::Agent(Agent::Grok));
+        assert!(rect(Hit::Agent(Agent::Codex)).right() <= grok.x, "Grok depois do Codex");
+        let first_button = [Hit::NewChat, Hit::History, Hit::Library].map(|h| rect(h).x).into_iter().fold(f32::MAX, f32::min);
+        assert!(grok.right() + 8.0 <= first_button, "{} vs {first_button}", grok.right());
     }
 
     #[test]

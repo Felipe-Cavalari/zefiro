@@ -172,9 +172,21 @@ fn chat_section_defaults_to_auto_and_is_parsed() {
     assert_eq!(c.chat, ChatConfig::default());
     assert_eq!((c.chat.agent.as_str(), c.chat.claude.origin.as_str(), c.chat.codex.model.as_str()), ("claude", "auto", ""));
     let c = parse_config("[chat]\nagent = \"codex\"\n[chat.codex]\norigin = \"Ubuntu-24.04\"\nmodel = \"gpt-5.6-sol\"\n").unwrap();
-    assert_eq!((c.chat.agent.as_str(), c.chat.of(true).origin.as_str(), c.chat.of(true).model.as_str()), ("codex", "Ubuntu-24.04", "gpt-5.6-sol"));
-    assert_eq!(c.chat.of(false), &ChatAgentConfig::default(), "o Claude fica no padrão");
-    assert_eq!(c.chat.of(true).prefer, "windows", "sem a chave, o automático prefere o Windows");
+    assert_eq!((c.chat.agent.as_str(), c.chat.of("codex").origin.as_str(), c.chat.of("codex").model.as_str()), ("codex", "Ubuntu-24.04", "gpt-5.6-sol"));
+    assert_eq!(c.chat.of("claude"), &ChatAgentConfig::default(), "o Claude fica no padrão");
+    assert_eq!(c.chat.of("codex").prefer, "windows", "sem a chave, o automático prefere o Windows");
+    let c = parse_config("[chat]
+agent = \"grok\"
+[chat.grok]
+origin = \"Ubuntu-24.04\"
+prefer = \"wsl\"
+model = \"grok-4.6\"
+").unwrap();
+    assert_eq!((c.chat.agent.as_str(), c.chat.of("grok").origin.as_str(), c.chat.of("grok").prefer.as_str(), c.chat.of("grok").model.as_str()), ("grok", "Ubuntu-24.04", "wsl", "grok-4.6"));
+    assert_eq!((c.chat.of("codex"), c.chat.of("claude")), (&ChatAgentConfig::default(), &ChatAgentConfig::default()));
+    let mut m = ChatConfig::default();
+    m.of_mut("grok").model = "grok-4.5".into();
+    assert_eq!((m.grok.model.as_str(), m.codex.model.as_str()), ("grok-4.5", ""));
     let c = parse_config("[chat.claude]\nprefer = \"wsl\"\n").unwrap();
     assert_eq!((c.chat.claude.prefer.as_str(), c.chat.claude.origin.as_str()), ("wsl", "auto"));
 }

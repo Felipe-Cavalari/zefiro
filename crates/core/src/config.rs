@@ -30,7 +30,7 @@ seconds = false
 check = true          # procura versão nova no GitHub Releases (1 vez por dia); instalar é pelo menu do Z
 
 [chat]
-agent = "claude"      # claude | codex: com quem o chip "chat" conversa (o painel troca e grava aqui)
+agent = "claude"      # claude | codex | grok: com quem o chip "chat" conversa (o painel troca e grava aqui)
 
 [chat.claude]
 origin = "auto"       # auto | windows | wsl | nome da distro
@@ -41,6 +41,11 @@ model  = ""           # vazio = o padrão do Claude Code; ou opus, sonnet, haiku
 origin = "auto"
 prefer = "windows"
 model  = ""           # vazio = o padrão da versão instalada do Codex
+
+[chat.grok]
+origin = "auto"
+prefer = "windows"
+model  = ""           # vazio = o padrão que o Grok Build anunciar
 "#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -93,11 +98,11 @@ pub struct Config {
 #[serde(default)]
 pub struct SpotifyConfig { pub client_id: String }
 
-/// Chat do chip `chat` (ADR-0020): o agente (`claude` ou `codex`) e, para cada um, a origem e o
-/// modelo. Escrito pelo próprio painel.
+/// Chat do chip `chat` (ADR-0020, ADR-0027): o agente (`claude`, `codex` ou `grok`) e, para cada
+/// um, a origem e o modelo. Escrito pelo próprio painel.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
-pub struct ChatConfig { pub agent: String, pub claude: ChatAgentConfig, pub codex: ChatAgentConfig }
+pub struct ChatConfig { pub agent: String, pub claude: ChatAgentConfig, pub codex: ChatAgentConfig, pub grok: ChatAgentConfig }
 
 /// `origin`: `auto`, `windows`, `wsl` (a distro padrão) ou o nome de uma distro. `prefer`: o que o
 /// automático tenta primeiro, `windows` (padrão) ou `wsl` (uma distro rodando que tenha o
@@ -108,7 +113,7 @@ pub struct ChatAgentConfig { pub origin: String, pub prefer: String, pub model: 
 
 impl Default for ChatConfig {
     fn default() -> Self {
-        ChatConfig { agent: "claude".into(), claude: ChatAgentConfig::default(), codex: ChatAgentConfig::default() }
+        ChatConfig { agent: "claude".into(), claude: ChatAgentConfig::default(), codex: ChatAgentConfig::default(), grok: ChatAgentConfig::default() }
     }
 }
 
@@ -119,13 +124,21 @@ impl Default for ChatAgentConfig {
 }
 
 impl ChatConfig {
-    /// A configuração do agente (`codex` ou o Claude).
-    pub fn of(&self, codex: bool) -> &ChatAgentConfig {
-        if codex { &self.codex } else { &self.claude }
+    /// A configuração do agente pelo nome do `[chat] agent` (`codex`, `grok`; o resto é o Claude).
+    pub fn of(&self, agent: &str) -> &ChatAgentConfig {
+        match agent {
+            "codex" => &self.codex,
+            "grok" => &self.grok,
+            _ => &self.claude,
+        }
     }
 
-    pub fn of_mut(&mut self, codex: bool) -> &mut ChatAgentConfig {
-        if codex { &mut self.codex } else { &mut self.claude }
+    pub fn of_mut(&mut self, agent: &str) -> &mut ChatAgentConfig {
+        match agent {
+            "codex" => &mut self.codex,
+            "grok" => &mut self.grok,
+            _ => &mut self.claude,
+        }
     }
 }
 

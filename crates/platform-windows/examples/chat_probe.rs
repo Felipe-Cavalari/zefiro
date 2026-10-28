@@ -1,9 +1,10 @@
-//! Sonda do chat: sobe o `claude` ou o `codex` pela origem pedida, faz duas perguntas (a segunda depende da
-//! primeira), para uma resposta longa no meio e retoma a sessão num processo novo. Imprime só
+//! Sonda do chat: sobe o `claude`, o `codex` ou o `grok` pela origem pedida, faz duas perguntas (a
+//! segunda depende da primeira), para uma resposta longa no meio e retoma a sessão num processo
+//! novo. No Grok, pede também para ler um arquivo: nenhuma ferramenta pode rodar. Imprime só
 //! eventos e tamanhos, nunca o texto. Sai com 1 se algo falhar.
 //!
-//! `ZEFIRO_CHAT_AGENT=claude|codex`, `ZEFIRO_CHAT_ORIGIN=auto|windows|wsl|<distro>` (padrão `auto`),
-//! `ZEFIRO_CHAT_MODEL=<modelo>`.
+//! `ZEFIRO_CHAT_AGENT=claude|codex|grok`, `ZEFIRO_CHAT_ORIGIN=auto|windows|wsl|<distro>` (padrão
+//! `auto`), `ZEFIRO_CHAT_MODEL=<modelo>`.
 
 use std::time::{Duration, Instant};
 use zefiro_integration_chat::conversation::Conversation;
@@ -82,6 +83,16 @@ fn run() -> Result<(), String> {
     ask(&service, &mut c, &model, "Qual era a palavra-chave? Responda só a palavra.", None)?;
     let remembered = c.last_reply().is_some_and(|r| r.to_lowercase().contains("girassol"));
     println!("   lembrou do contexto: {remembered}");
+    if agent == Agent::Grok {
+        println!("4. pedido para ler um arquivo (o perfil do chat tira as ferramentas)");
+        ask(&service, &mut c, &model, "Use a ferramenta read_file para ler o arquivo grok-perfil.md desta pasta e diga a segunda linha dele. Se não conseguir usar ferramenta nenhuma, responda só: sem ferramentas.", None)?;
+        let leaked = c.last_reply().is_some_and(|r| r.contains("zefiro-chat"));
+        println!("   leu o arquivo: {leaked}");
+        if leaked {
+            service.stop();
+            return Err("o Grok leu um arquivo".into());
+        }
+    }
     service.stop();
     std::thread::sleep(Duration::from_secs(2));
     if remembered { Ok(()) } else { Err("não lembrou da primeira pergunta".into()) }

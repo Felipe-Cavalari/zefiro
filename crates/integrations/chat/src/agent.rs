@@ -1,4 +1,5 @@
-//! Com quem o chat conversa: o Claude (`claude -p`) ou o Codex (`codex app-server`), e os modelos.
+//! Com quem o chat conversa: o Claude (`claude -p`), o Codex (`codex app-server`) ou o Grok
+//! (`grok agent stdio`, ADR-0027), e os modelos.
 
 use serde::{Deserialize, Serialize};
 
@@ -8,20 +9,26 @@ pub enum Agent {
     #[default]
     Claude,
     Codex,
+    Grok,
 }
 
 impl Agent {
-    pub const ALL: [Agent; 2] = [Agent::Claude, Agent::Codex];
+    pub const ALL: [Agent; 3] = [Agent::Claude, Agent::Codex, Agent::Grok];
 
-    /// `[chat] agent`: "codex" (sem diferenciar maiúsculas) ou o Claude.
+    /// `[chat] agent`: "codex" ou "grok" (sem diferenciar maiúsculas); o resto é o Claude.
     pub fn parse(value: &str) -> Agent {
-        if value.trim().eq_ignore_ascii_case("codex") { Agent::Codex } else { Agent::Claude }
+        match value.trim() {
+            v if v.eq_ignore_ascii_case("codex") => Agent::Codex,
+            v if v.eq_ignore_ascii_case("grok") => Agent::Grok,
+            _ => Agent::Claude,
+        }
     }
 
     pub fn as_str(self) -> &'static str {
         match self {
             Agent::Claude => "claude",
             Agent::Codex => "codex",
+            Agent::Grok => "grok",
         }
     }
 
@@ -29,12 +36,26 @@ impl Agent {
         match self {
             Agent::Claude => "Claude",
             Agent::Codex => "Codex",
+            Agent::Grok => "Grok",
         }
     }
 
-    /// Nome do executável (`claude`, `codex`), no Windows com `.exe`.
+    /// O que instalar quando o executável falta.
+    pub fn product(self) -> &'static str {
+        match self {
+            Agent::Grok => "Grok Build",
+            a => a.label(),
+        }
+    }
+
+    /// Nome do executável (`claude`, `codex`, `grok`), no Windows com `.exe`.
     pub fn binary(self) -> &'static str {
         self.as_str()
+    }
+
+    /// Os modelos vêm do próprio agente (Codex e Grok), não de uma lista fixa.
+    pub fn lists_models(self) -> bool {
+        self != Agent::Claude
     }
 }
 
@@ -75,6 +96,12 @@ mod tests {
         assert_eq!(Agent::parse(""), Agent::Claude);
         assert_eq!(Agent::parse("outro"), Agent::Claude);
         assert_eq!((Agent::Codex.as_str(), Agent::Codex.label(), Agent::Claude.binary()), ("codex", "Codex", "claude"));
+        assert_eq!(Agent::parse(" GROK "), Agent::Grok);
+        assert_eq!((Agent::Grok.as_str(), Agent::Grok.label(), Agent::Grok.binary(), Agent::Grok.product()), ("grok", "Grok", "grok", "Grok Build"));
+        assert_eq!(Agent::Codex.product(), "Codex");
+        assert_eq!(Agent::ALL.map(Agent::label), ["Claude", "Codex", "Grok"]);
+        assert!(Agent::Grok.lists_models() && Agent::Codex.lists_models() && !Agent::Claude.lists_models());
+        assert_eq!(serde_json::to_string(&Agent::Grok).unwrap(), "\"grok\"", "como vai no JSON da conversa");
     }
 
     #[test]

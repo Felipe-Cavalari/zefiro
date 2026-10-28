@@ -1,7 +1,7 @@
 //! A conversa do painel: as mensagens, em que pé está a resposta e a gravação em JSON.
 
 use crate::agent::Agent;
-use crate::protocol::{Event, Failure, failure_text};
+use crate::protocol::{Event, Failure, failure_text, failure_text_for};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,8 +79,8 @@ pub struct Conversation {
 }
 
 impl Conversation {
-    /// Conversa nova. No Claude o id do Zefiro é também o da sessão (o Zefiro escolhe); no Codex,
-    /// o `thread` só existe depois do `thread/start`.
+    /// Conversa nova. No Claude o id do Zefiro é também o da sessão (o Zefiro escolhe); no Codex e
+    /// no Grok, a sessão só existe depois do `thread/start` ou do `session/new`.
     pub fn new(id: String, agent: Agent) -> Self {
         let session = if agent == Agent::Claude { id.clone() } else { String::new() };
         Conversation { id, agent, session, ..Default::default() }
@@ -261,13 +261,14 @@ impl Conversation {
     pub fn fail(&mut self, failure: &Failure) {
         let stopping = std::mem::take(&mut self.stopping);
         self.generating = 0;
+        let agent = self.agent;
         if let Some(m) = self.reply_mut() {
             if stopping || *failure == Failure::Interrupted {
                 m.state = State::Stopped;
                 m.note = Some(failure_text(&Failure::Interrupted));
             } else {
                 m.state = State::Failed;
-                m.note = Some(failure_text(failure));
+                m.note = Some(failure_text_for(agent, failure));
             }
         }
     }
@@ -457,6 +458,17 @@ mod tests {
         assert_eq!(c.messages[1].state, State::Failed);
         assert!(c.messages[1].note.as_deref().unwrap().contains("login"));
         assert!(!c.busy());
+    }
+
+    #[test]
+    fn grok_conversation_starts_without_a_session_and_names_its_errors() {
+        let mut c = Conversation::new("z1".into(), Agent::Grok);
+        assert_eq!((c.session.as_str(), c.created), ("", false), "a sessão vem do session/new");
+        c.ask("oi");
+        c.apply(&Event::Started { session: "01a1".into() });
+        assert_eq!((c.session.as_str(), c.created), ("01a1", true));
+        c.fail(&Failure::NotLoggedIn);
+        assert!(c.messages[1].note.as_deref().unwrap().contains("grok login"));
     }
 
     #[test]

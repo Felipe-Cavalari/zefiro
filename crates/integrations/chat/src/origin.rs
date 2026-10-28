@@ -142,7 +142,7 @@ pub fn pick_with(choice: &Choice, prefer: Prefer, windows_exe: Option<PathBuf>, 
 pub fn pick_error_text(e: &PickError, agent: crate::agent::Agent) -> String {
     let bin = agent.binary();
     match e {
-        PickError::NotFound => format!("Não achei o `{bin}` no Windows nem numa distro do WSL rodando. Instale o {} ou escolha outra origem.", agent.label()),
+        PickError::NotFound => format!("Não achei o `{bin}` no Windows nem numa distro do WSL rodando. Instale o {} ou escolha outra origem.", agent.product()),
         PickError::WindowsMissing => format!("Não achei o {bin}.exe no Windows."),
     }
 }
@@ -225,6 +225,7 @@ mod tests {
         assert_eq!(choices(true, &["docker-desktop".into(), "Ubuntu".into()]), [Choice::Auto, Choice::Windows, Choice::Distro("Ubuntu".into())]);
         assert_eq!(choices(false, &[]), [Choice::Auto]);
         assert!(pick_error_text(&PickError::NotFound, crate::agent::Agent::Codex).contains("`codex`"));
+        assert_eq!(pick_error_text(&PickError::NotFound, crate::agent::Agent::Grok), "Não achei o `grok` no Windows nem numa distro do WSL rodando. Instale o Grok Build ou escolha outra origem.");
     }
 
     #[test]

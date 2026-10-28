@@ -1,4 +1,4 @@
-//! Chat com o Claude e o Codex no laço de eventos: o painel do chip `chat`, o campo (teclas e
+//! Chat com o Claude, o Codex e o Grok no laço de eventos: o painel do chip `chat`, o campo (teclas e
 //! `WM_CHAR`), a rolagem, os seletores de agente, origem e modelo, as conversas antigas e os sinais
 //! do processo (spec 2026-10-21-chat-claude, ADR-0020). O texto da conversa nunca vai para o log.
 
@@ -99,10 +99,10 @@ pub struct ChatRuntime {
     /// Origem real do processo (no automático, aparece no seletor).
     live_origin: Option<String>,
     page: ChatPage,
-    /// Origens encontradas, por agente (Claude, Codex).
-    origins: [Option<Vec<Choice>>; 2],
-    /// Modelos que o Codex desta origem aceita.
-    codex_models: Option<Vec<ModelOption>>,
+    /// Origens encontradas, por agente (Claude, Codex, Grok).
+    origins: [Option<Vec<Choice>>; 3],
+    /// Modelos que o Codex ou o Grok desta origem aceita (o processo vivo anuncia).
+    agent_models: Option<Vec<ModelOption>>,
     history: Vec<Summary>,
     history_scroll: usize,
     /// Biblioteca de imagens (lida ao abrir a página) e a rolagem, em fileiras.
@@ -121,7 +121,7 @@ fn now_unix() -> i64 {
 }
 
 fn slot(agent: Agent) -> usize {
-    usize::from(agent == Agent::Codex)
+    Agent::ALL.iter().position(|a| *a == agent).unwrap_or(0)
 }
 
 impl Loop {
@@ -134,23 +134,23 @@ impl Loop {
     }
 
     fn chat_choice(&self, agent: Agent) -> Choice {
-        parse_choice(&self.ctx.config.chat.of(agent == Agent::Codex).origin)
+        parse_choice(&self.ctx.config.chat.of(agent.as_str()).origin)
     }
 
     fn chat_prefer(&self, agent: Agent) -> Prefer {
-        Prefer::parse(&self.ctx.config.chat.of(agent == Agent::Codex).prefer)
+        Prefer::parse(&self.ctx.config.chat.of(agent.as_str()).prefer)
     }
 
     fn chat_models(&self, agent: Agent) -> Vec<ModelOption> {
         match agent {
             Agent::Claude => claude_models(),
-            Agent::Codex => self.chat.codex_models.clone().unwrap_or_default(),
+            Agent::Codex | Agent::Grok => self.chat.agent_models.clone().unwrap_or_default(),
         }
     }
 
-    /// O modelo que vai para o agente (no Codex, sempre um da lista dele).
+    /// O modelo que vai para o agente (no Codex e no Grok, sempre um da lista dele).
     fn chat_model(&self, agent: Agent) -> String {
-        effective_model(&self.chat_models(agent), &self.ctx.config.chat.of(agent == Agent::Codex).model)
+        effective_model(&self.chat_models(agent), &self.ctx.config.chat.of(agent.as_str()).model)
     }
 
     fn chat_conversation(&mut self) -> &mut Conversation {
@@ -293,8 +293,8 @@ impl Loop {
             _ => choice.label(),
         };
         let models = self.chat_models(agent);
-        let chosen_model = self.ctx.config.chat.of(agent == Agent::Codex).model.clone();
-        let model_text = if agent == Agent::Codex && self.chat.codex_models.is_none() && chosen_model.is_empty() { "Modelo".to_string() } else { model_label(&models, &chosen_model) };
+        let chosen_model = self.ctx.config.chat.of(agent.as_str()).model.clone();
+        let model_text = if agent.lists_models() && self.chat.agent_models.is_none() && chosen_model.is_empty() { "Modelo".to_string() } else { model_label(&models, &chosen_model) };
         let origin_options = self.chat_origin_options(agent);
         let prefer = self.chat_prefer(agent);
         let history_rows = self.chat_history_rows();
@@ -449,7 +449,7 @@ impl Loop {
         self.chat_start();
         let model = self.chat_model(agent);
         if let Some(c) = &mut self.chat.conversation {
-            c.model.clone_from(&self.ctx.config.chat.of(agent == Agent::Codex).model);
+            c.model.clone_from(&self.ctx.config.chat.of(agent.as_str()).model);
         }
         let images = Self::chat_image_data(&ids);
         if let Some(s) = &self.chat.service {
@@ -484,7 +484,7 @@ impl Loop {
         self.redraw_open_panel()
     }
 
-    /// Claude | Codex. Com a conversa vazia, ela só troca de agente; senão, começa outra.
+    /// Claude | Codex | Grok. Com a conversa vazia, ela só troca de agente; senão, começa outra.
     fn chat_set_agent(&mut self, agent: Agent) -> Result<()> {
         if agent == self.chat_conversation().agent {
             return Ok(());
@@ -492,6 +492,8 @@ impl Loop {
         self.ctx.config.chat.agent = agent.as_str().into();
         self.chat_write(&["chat", "agent"], agent.as_str());
         self.chat_stop_process();
+        // Os modelos eram do outro agente (Codex e Grok anunciam os seus).
+        self.chat.agent_models = None;
         self.chat_new_conversation();
         tracing::info!(agente = agent.label(), "chat: agente trocado");
         self.chat_start();
@@ -504,10 +506,10 @@ impl Loop {
         let agent = self.chat_conversation().agent;
         self.chat.page = ChatPage::Chat;
         if choice != self.chat_choice(agent) {
-            self.ctx.config.chat.of_mut(agent == Agent::Codex).origin = choice.value();
+            self.ctx.config.chat.of_mut(agent.as_str()).origin = choice.value();
             self.chat_write(&["chat", agent.as_str(), "origin"], &choice.value());
             self.chat_stop_process();
-            self.chat.codex_models = None;
+            self.chat.agent_models = None;
             if !self.chat_conversation().messages.is_empty() {
                 self.chat_new_conversation();
             }
@@ -524,12 +526,12 @@ impl Loop {
         if prefer == self.chat_prefer(agent) {
             return Ok(());
         }
-        self.ctx.config.chat.of_mut(agent == Agent::Codex).prefer = prefer.as_str().into();
+        self.ctx.config.chat.of_mut(agent.as_str()).prefer = prefer.as_str().into();
         self.chat_write(&["chat", agent.as_str(), "prefer"], prefer.as_str());
         tracing::info!(agente = agent.label(), primeiro = prefer.label(), "chat: preferência do automático trocada");
         if self.chat_choice(agent) == Choice::Auto {
             self.chat_stop_process();
-            self.chat.codex_models = None;
+            self.chat.agent_models = None;
             if !self.chat_conversation().messages.is_empty() {
                 self.chat_new_conversation();
                 self.chat.page = ChatPage::Origins;
@@ -539,12 +541,12 @@ impl Loop {
         self.redraw_open_panel()
     }
 
-    /// Outro modelo: a conversa continua (o Claude reinicia com `--resume --model`; o Codex usa o
-    /// modelo novo na próxima pergunta).
+    /// Outro modelo: a conversa continua (o Claude reinicia com `--resume --model`; o Codex e o
+    /// Grok usam o modelo novo na próxima pergunta).
     fn chat_set_model(&mut self, id: String) -> Result<()> {
         let agent = self.chat_conversation().agent;
         self.chat.page = ChatPage::Chat;
-        let cfg = self.ctx.config.chat.of_mut(agent == Agent::Codex);
+        let cfg = self.ctx.config.chat.of_mut(agent.as_str());
         if cfg.model != id {
             cfg.model.clone_from(&id);
             self.chat_write(&["chat", agent.as_str(), "model"], &id);
@@ -573,19 +575,19 @@ impl Loop {
         };
         self.chat_save();
         let agent = conv.agent;
-        let codex = agent == Agent::Codex;
         let choice = Choice::from_label(&conv.origin);
         if self.chat_agent() != agent {
             self.ctx.config.chat.agent = agent.as_str().into();
             self.chat_write(&["chat", "agent"], agent.as_str());
+            self.chat.agent_models = None;
         }
         if self.chat_choice(agent) != choice {
-            self.ctx.config.chat.of_mut(codex).origin = choice.value();
+            self.ctx.config.chat.of_mut(agent.as_str()).origin = choice.value();
             self.chat_write(&["chat", agent.as_str(), "origin"], &choice.value());
-            self.chat.codex_models = None;
+            self.chat.agent_models = None;
         }
-        if self.ctx.config.chat.of(codex).model != conv.model {
-            self.ctx.config.chat.of_mut(codex).model.clone_from(&conv.model);
+        if self.ctx.config.chat.of(agent.as_str()).model != conv.model {
+            self.ctx.config.chat.of_mut(agent.as_str()).model.clone_from(&conv.model);
             self.chat_write(&["chat", agent.as_str(), "model"], &conv.model);
         }
         self.chat_stop_process();
@@ -1100,7 +1102,7 @@ impl Loop {
                     changed = true;
                 }
                 Signal::Event(Event::Models(models)) => {
-                    self.chat.codex_models = Some(models);
+                    self.chat.agent_models = Some(models);
                     changed = true;
                 }
                 Signal::Event(Event::Finished { error: Some(e), .. }) => {

@@ -107,18 +107,32 @@ pub enum Failure {
 /// Classifica o texto de um erro (do `result` ou do stderr).
 pub fn classify(error: &str) -> Failure {
     let lower = error.to_lowercase();
-    if lower.contains("no conversation found") || lower.contains("no rollout found") || lower.contains("thread not found") {
+    if lower.contains("no conversation found") || lower.contains("no rollout found") || lower.contains("thread not found") || lower.contains("session not found") {
         Failure::SessionMissing
     } else if lower.contains("already in use") {
         Failure::SessionInUse
-    } else if lower.contains("not logged in") || lower.contains("/login") || lower.contains("invalid api key") || lower.contains("oauth token") {
+    } else if lower.contains("not logged in") || lower.contains("/login") || lower.contains("invalid api key") || lower.contains("oauth token") || lower.contains("unauthenticated") || lower.contains("not authenticated") || lower.contains("authentication required") {
         Failure::NotLoggedIn
-    } else if lower.contains("usage limit") || lower.contains("limit reached") || lower.contains("rate limit") {
+    } else if lower.contains("usage limit") || lower.contains("limit reached") || lower.contains("rate limit") || lower.contains("quota") || lower.contains("out of credits") {
         Failure::UsageLimit
     } else if lower == "error_during_execution" || lower.contains("interrupt") || lower.contains("aborted") {
         Failure::Interrupted
     } else {
         Failure::Other(error.trim().to_string())
+    }
+}
+
+/// Texto do erro para o painel, com o nome do agente onde importa (o login e a cota do Grok são
+/// outros; Claude e Codex mantêm os textos de sempre).
+pub fn failure_text_for(agent: crate::agent::Agent, f: &Failure) -> String {
+    if agent != crate::agent::Agent::Grok {
+        return failure_text(f);
+    }
+    match f {
+        Failure::NotLoggedIn => "Entre no Grok Build para usar o chat: rode `grok login` num terminal (no WSL, `grok login --device-auth`).".into(),
+        Failure::UsageLimit => "A cota semanal do Grok acabou. O chip do Grok mostra quando ela volta.".into(),
+        Failure::Other(text) if text.is_empty() => "O Grok parou de responder.".into(),
+        f => failure_text(f),
     }
 }
 
@@ -206,5 +220,18 @@ mod tests {
         assert_eq!(classify("  algo estranho "), Failure::Other("algo estranho".into()));
         assert!(failure_text(&Failure::NotLoggedIn).contains("claude"));
         assert_eq!(failure_text(&Failure::Other(String::new())), "O Claude parou de responder.");
+    }
+
+    #[test]
+    fn grok_failures() {
+        use crate::agent::Agent;
+        assert_eq!(classify("session not found"), Failure::SessionMissing, "FS_NOT_FOUND no session/load");
+        assert_eq!(classify("Unauthenticated: run grok login"), Failure::NotLoggedIn);
+        assert_eq!(classify("Weekly quota exceeded"), Failure::UsageLimit);
+        assert!(failure_text_for(Agent::Grok, &Failure::NotLoggedIn).contains("`grok login`"));
+        assert!(failure_text_for(Agent::Grok, &Failure::UsageLimit).contains("cota semanal do Grok"));
+        assert_eq!(failure_text_for(Agent::Grok, &Failure::Other(String::new())), "O Grok parou de responder.");
+        assert_eq!(failure_text_for(Agent::Grok, &Failure::Interrupted), "Resposta interrompida.");
+        assert_eq!(failure_text_for(Agent::Claude, &Failure::NotLoggedIn), failure_text(&Failure::NotLoggedIn));
     }
 }
