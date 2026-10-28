@@ -97,29 +97,36 @@ impl UsageState {
         self.grok.as_ref().and_then(|s| zefiro_integration_usage::grok::grok_chip_percent(&s.accounts, crate::usage_loop::now_unix()))
     }
 
-    /// Os slides do chip `ia`: uma conta por slide (Claude, Codex e Grok, cada um com as suas
-    /// origens), arrumados pelo `[ia]`. Uma IA sem resposta ainda não tem slide.
+    /// Os slides do chip `ia`: um por conta e origem (a mesma conta no Windows e no WSL vira dois
+    /// slides com o mesmo número, para escolher qual aparece), arrumados pelo `[ia]`. Uma IA sem
+    /// resposta ainda não tem slide.
     pub fn ai_slides(&self, ai: &zefiro_core::config::AiConfig, now_unix: i64) -> zefiro_bar::ai::Arranged {
         use zefiro_bar::ai::{Slide, arrange, origin_tag, slide_key};
         use zefiro_integration_chat::agent::Agent;
         use zefiro_integration_usage::origins::{Account, many_distros, origins_label};
-        fn slide<T>(agent: Agent, a: &Account<T>, many: bool, percent: Option<f32>) -> Slide {
-            Slide { key: slide_key(agent, &a.origins), agent, origin: origins_label(&a.origins, many), tag: origin_tag(&a.origins), percent }
+        fn slides<T>(agent: Agent, a: &Account<T>, many: bool, percent: Option<f32>) -> Vec<Slide> {
+            a.origins
+                .iter()
+                .map(|o| {
+                    let one = std::slice::from_ref(o);
+                    Slide { key: slide_key(agent, one), agent, origin: origins_label(one, many), tag: origin_tag(one), percent }
+                })
+                .collect()
         }
-        let mut slides = Vec::new();
+        let mut all = Vec::new();
         if let Some(s) = &self.claude {
             let many = many_distros(&s.accounts);
-            slides.extend(s.accounts.iter().map(|a| slide(Agent::Claude, a, many, zefiro_integration_usage::claude::chip_percent_accounts(std::slice::from_ref(a), now_unix))));
+            all.extend(s.accounts.iter().flat_map(|a| slides(Agent::Claude, a, many, zefiro_integration_usage::claude::chip_percent_accounts(std::slice::from_ref(a), now_unix))));
         }
         if let Some(s) = &self.codex {
             let many = many_distros(&s.accounts);
-            slides.extend(s.accounts.iter().map(|a| slide(Agent::Codex, a, many, zefiro_integration_usage::codex::codex_chip_percent(std::slice::from_ref(a), now_unix))));
+            all.extend(s.accounts.iter().flat_map(|a| slides(Agent::Codex, a, many, zefiro_integration_usage::codex::codex_chip_percent(std::slice::from_ref(a), now_unix))));
         }
         if let Some(s) = &self.grok {
             let many = many_distros(&s.accounts);
-            slides.extend(s.accounts.iter().map(|a| slide(Agent::Grok, a, many, zefiro_integration_usage::grok::grok_chip_percent(std::slice::from_ref(a), now_unix))));
+            all.extend(s.accounts.iter().flat_map(|a| slides(Agent::Grok, a, many, zefiro_integration_usage::grok::grok_chip_percent(std::slice::from_ref(a), now_unix))));
         }
-        arrange(slides, ai)
+        arrange(all, ai)
     }
 
     /// % do chip do Codex: a maior janela primária entre as contas.
@@ -167,6 +174,11 @@ mod tests {
         let hidden = zefiro_core::config::AiConfig { hidden: vec!["codex:windows".into()], ..Default::default() };
         let a = state.ai_slides(&hidden, t);
         assert_eq!((a.visible.len(), a.hidden[0].key.as_str()), (2, "codex:windows"));
+        // A mesma conta no Windows e no WSL: um slide por origem, para escolher qual aparece.
+        let merged = UsageState { codex: Some(CodexSnapshot { accounts: vec![codex(vec![OriginKind::Windows, wsl.clone()], 1.0)], wsl_stopped: false }), ..Default::default() };
+        let a = merged.ai_slides(&zefiro_core::config::AiConfig::default(), t);
+        let shown: Vec<(String, String, &str)> = a.visible.iter().map(|s| (s.key.clone(), s.name(), s.tag)).collect();
+        assert_eq!(shown, [("codex:windows".to_string(), "Codex · Windows".to_string(), "Win"), ("codex:Ubuntu-24.04".to_string(), "Codex · WSL".to_string(), "WSL")]);
     }
 
     #[test]

@@ -23,11 +23,12 @@ cada conta é do Windows ou do WSL e deixe escolher quais contas entram no slide
 
 - **Chip `ia` ("Uso das IAs")**, ao lado dos chips `claude`, `codex` e `grok`, que continuam no
   catálogo. Com ele na barra, os três serviços de uso rodam (`BarConfig::uses`).
-- **Um slide por conta** (`UsageState::ai_slides`): cada conta do Claude, do Codex e do Grok, com as
-  origens dela. A chave é o agente e as origens (`claude:windows`, `grok:Ubuntu-24.04`,
-  `codex:windows+Ubuntu-24.04`). O slide mostra o ícone da IA, a % (a mesma conta do chip
-  individual) e "Win" ou "WSL" ao lado; a mesma conta nos dois lados fica sem marca. Uma IA que
-  ainda não respondeu não tem slide; sem nenhum, o robô com "—".
+- **Um slide por conta e origem** (`UsageState::ai_slides`): cada conta do Claude, do Codex e do
+  Grok em cada origem dela. A mesma conta no Windows e no WSL (o Codex do usuário) vira dois slides
+  com o mesmo número, para escolher qual aparece; juntos num slide só, sem marca, parecia que o WSL
+  não era detectado. A chave é o agente e a origem (`claude:windows`, `grok:Ubuntu-24.04`). O slide
+  mostra o ícone da IA, a % da conta e "Win" ou "WSL" ao lado. Uma IA que ainda não respondeu não
+  tem slide; sem nenhum, o robô com "—".
 - **Largura fixa:** todos os slides têm a largura do maior ("100%" e a maior marca), e o chip não
   anda quando o slide troca.
 - **Deslize no compositor** (`crates/app/src/ai_carousel.rs`): um visual por slide, desenhado uma vez

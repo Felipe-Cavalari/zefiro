@@ -1,5 +1,5 @@
 //! Chip `ia` (ADR-0028): o uso do Claude, do Codex e do Grok num chip só, que alterna entre as
-//! contas, um slide por IA e origem ("Claude · Windows", "Grok · WSL"). Aqui ficam os slides, a
+//! contas, um slide por conta e origem ("Claude · Windows", "Grok · WSL"). Aqui ficam os slides, a
 //! ordem que o usuário escolhe (`[ia] order` e `hidden`), o desenho de cada slide e a lista de
 //! edição do painel. A animação do deslize fica no compositor (`crates/app/src/ai_carousel.rs`).
 
@@ -25,15 +25,15 @@ const GLYPH_CODEX: &str = "\u{E943}";
 /// Robô: o lugar do ícone do Grok e o chip sem nenhuma conta.
 pub const GLYPH_AI: &str = "\u{E99A}";
 
-/// Uma conta de uma IA numa origem.
+/// Uma conta de uma IA numa origem (a mesma conta no Windows e no WSL são dois slides).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Slide {
     /// `claude:windows`, `grok:Ubuntu-24.04`, `codex:windows+Ubuntu-24.04`: vai para o `[ia]`.
     pub key: String,
     pub agent: Agent,
-    /// "Windows", "WSL", "Windows · WSL" (o rótulo dos painéis de uso).
+    /// "Windows", "WSL" ou "WSL · Ubuntu-24.04" (o rótulo dos painéis de uso).
     pub origin: String,
-    /// "Win" ou "WSL" ao lado da %; vazio quando a conta é a mesma nas duas.
+    /// "Win" ou "WSL" ao lado da %.
     pub tag: &'static str,
     pub percent: Option<f32>,
 }

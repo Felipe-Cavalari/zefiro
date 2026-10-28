@@ -9,6 +9,13 @@ fn main() {
     for o in &found.origins {
         let yes = |p: std::path::PathBuf| if p.exists() { "sim" } else { "não" };
         println!("{:?}: claude={} codex={}", o.kind, yes(o.home.join(".claude").join(".credentials.json")), yes(o.home.join(".codex").join("sessions")));
+        // O que o leitor do Codex acha nesta origem: a conta vira um código curto (nunca o id).
+        for r in zefiro_integration_usage::codex::read_codex_accounts(&o.home.join(".codex").join("sessions")) {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            r.account.hash(&mut h);
+            println!("    codex: conta #{:04x}, evento {:?}, primária {:?}%", h.finish() & 0xffff, r.usage.event_at, r.usage.primary.map(|w| w.used_percent));
+        }
     }
     println!("rodando: {:?} · WSL parado: {}", found.running, found.wsl_stopped);
     let t = Instant::now();
