@@ -3,14 +3,11 @@
   Compila o Zefiro em release e gera o instalador dist\Zefiro-<versão>-setup.exe (Inno Setup 6).
 
 .DESCRIPTION
-  A versão vem de [workspace.package] no Cargo.toml. O zefiro-island.exe (ilha C++, só para
-  engine = "externa") entra se existir em target\release; -BuildIsland recompila antes (MSVC).
-  Com o Zefiro aberto a partir de target\release, o exe em uso é renomeado para a compilação passar.
+  A versão vem de [workspace.package] no Cargo.toml. Com o Zefiro aberto a partir de target\release, o exe em uso é renomeado para a compilação passar.
 
 .EXAMPLE
   pwsh -File scripts/package.ps1
 #>
-param([switch]$BuildIsland)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
@@ -29,12 +26,6 @@ if (Test-Path $exe) {
 }
 cargo build --release -p zefiro-app
 if ($LASTEXITCODE -ne 0) { throw 'cargo build falhou' }
-
-if ($BuildIsland) {
-    & ./island/build.ps1
-    if ($LASTEXITCODE -ne 0) { throw 'build da ilha falhou' }
-    Copy-Item island/build/zefiro-island.exe target/release/ -Force
-}
 
 & $iscc "/DAppVersion=$version" "/DBuildDir=$root\target\release" installer\zefiro.iss
 if ($LASTEXITCODE -ne 0) { throw 'ISCC falhou' }

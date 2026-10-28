@@ -1,0 +1,38 @@
+[
+  {
+    "id": "01-z-pluma",
+    "name": "Z pluma",
+    "tag": "A asa nasce do próprio Z.",
+    "detail": "Uma silhueta contínua, com duas penas no topo.",
+    "color": "#087F85",
+    "light": "#B8F0E4",
+    "shape": "<path d=\"M9 22C20 12 37 10 57 11L45 21L56 18L47 27H40L23 44H53L46 53H9V45L33 23H9Z\"/>"
+  },
+  {
+    "id": "02-z-asa",
+    "name": "Z com asa",
+    "tag": "O monograma encontra a asa do oeste.",
+    "detail": "O Z fica explícito; as penas dão movimento.",
+    "color": "#087F85",
+    "light": "#B8F0E4",
+    "shape": "<path d=\"M5 9C19 9 30 14 35 23C21 23 11 18 5 9Z M5 23C15 23 24 26 29 32C17 33 9 29 5 23Z M26 20H57V28L36 45H56L52 54H23V46L44 29H26Z\"/>"
+  },
+  {
+    "id": "03-z-vento",
+    "name": "Z em voo",
+    "tag": "Penas alongadas desenham a letra.",
+    "detail": "Mais fluido, com pontas que sugerem velocidade.",
+    "color": "#087F85",
+    "light": "#B8F0E4",
+    "shape": "<path d=\"M6 22C20 12 39 10 58 12C55 21 46 27 37 33L23 43C35 41 47 42 57 45C44 54 25 56 7 52C10 43 18 37 28 30L40 22C28 25 16 25 6 22Z M9 13C20 6 33 5 46 7C34 14 22 16 9 13Z\"/>"
+  },
+  {
+    "id": "04-z-asas",
+    "name": "Z de duas asas",
+    "tag": "Um emblema alado de Zéfiro.",
+    "detail": "Mais simétrico e próximo de um brasão.",
+    "color": "#087F85",
+    "light": "#B8F0E4",
+    "shape": "<path d=\"M3 13C12 13 18 16 23 22L22 29C12 27 6 21 3 13Z M3 27C11 28 17 30 21 34L18 40C10 38 5 33 3 27Z M61 13C52 13 46 16 41 22L42 29C52 27 58 21 61 13Z M61 27C53 28 47 30 43 34L46 40C54 38 59 33 61 27Z M22 20H42V28L29 44H42L39 52H20V44L33 28H22Z\"/>"
+  }
+]

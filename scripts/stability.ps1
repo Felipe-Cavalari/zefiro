@@ -4,7 +4,7 @@
 .DESCRIPTION
   Conta como incidente, desde -Since:
     - panic: um crash-<segundos>-<ms>-<pid>.txt na pasta de logs (gancho de panic do Rust);
-    - crash: evento 1000 (Application Error) do zefiro.exe ou do zefiro-island.exe;
+    - crash: evento 1000 (Application Error) do zefiro.exe;
     - travamento: evento 1002 (Application Hang), o "parou de responder" que o Windows fecha.
   Os inícios da barra vêm da linha "primeiro quadro da barra" dos logs. Com um incidente, a contagem
   recomeça: rode de novo com -Since no dia seguinte e atualize o PLANNING.
@@ -18,7 +18,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $goalDays = 14
-$apps = @('zefiro.exe', 'zefiro-island.exe')
+$apps = @('zefiro.exe')
 $sinceUtc = $Since.ToUniversalTime()
 $nowUtc = $Now.ToUniversalTime()
 $inv = [Globalization.CultureInfo]::InvariantCulture

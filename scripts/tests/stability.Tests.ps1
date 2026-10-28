@@ -27,7 +27,7 @@ try {
     if (-not $r.ok -or $r.done) { throw "esperava ok sem terminar: ok=$($r.ok) done=$($r.done)" }
     Write-Host 'stability.Tests (limpo): OK'
 
-    # Um panic (crash-<segundos>-<ms>-<pid>.txt), um travamento da barra e um crash da ilha.
+    # Um panic (crash-<segundos>-<ms>-<pid>.txt), um travamento da barra e um crash da ilha antiga.
     $panicAt = [DateTimeOffset]::new([datetime]'2026-10-24 08:00', [timespan]::Zero).ToUnixTimeSeconds()
     'zefiro 1.2.0' | Set-Content (Join-Path $dir "crash-$panicAt-123-4242.txt")
     @(
@@ -37,8 +37,9 @@ try {
     ) | ConvertTo-Json | Set-Content $events
     $c = & $stability -Since $since -Now ([datetime]'2026-10-25 12:00') -LogDir $dir -EventsJson $events 6>$null | ConvertFrom-Json
     $kinds = ($c.incidents | ForEach-Object { $_.kind }) -join ','
-    if ($kinds -ne 'travamento,panic,crash') { throw "esperava travamento,panic,crash em ordem, veio '$kinds'" }
-    if ($c.incidents[2].app -ne 'zefiro-island.exe') { throw "o crash era da ilha, veio $($c.incidents[2].app)" }
+    # A ilha C++ saiu (ADR-0026): um crash de um zefiro-island.exe antigo não conta.
+    if ($kinds -ne 'travamento,panic') { throw "esperava travamento,panic em ordem, veio '$kinds'" }
+    if ($c.incidents | Where-Object { $_.app -eq 'zefiro-island.exe' }) { throw 'o crash da ilha antiga não conta mais' }
     if ($c.ok -or $c.done) { throw "com incidentes, ok e done precisam ser false: ok=$($c.ok) done=$($c.done)" }
     Write-Host 'stability.Tests (incidentes): OK'
 

@@ -47,11 +47,13 @@ Name: "autostart"; Description: "Iniciar o Zefiro junto com o Windows"
 
 [Files]
 Source: "{#BuildDir}\zefiro.exe"; DestDir: "{app}"; Flags: ignoreversion
-; A ilha C++ só é usada com [island] engine = "externa".
-Source: "{#BuildDir}\zefiro-island.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\LICENSE-MIT"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE-APACHE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
+
+[InstallDelete]
+; A ilha C++ saiu (ADR-0026): quem atualiza não fica com o exe antigo.
+Type: files; Name: "{app}\zefiro-island.exe"
 
 [Icons]
 Name: "{autoprograms}\Zefiro"; Filename: "{app}\zefiro.exe"
@@ -84,7 +86,7 @@ begin
     Sleep(100);
     Waited := Waited + 1;
   end;
-  { A ilha externa leva até 3 s para fechar depois da barra. }
+  { O processo ainda leva um instante para sair depois que a janela some. }
   Sleep(500);
 end;
 
