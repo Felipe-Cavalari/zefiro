@@ -941,7 +941,6 @@ dependencies = [
  "zefiro-integration-usage",
  "zefiro-integration-vscode",
  "zefiro-island",
- "zefiro-island-host",
  "zefiro-platform",
  "zefiro-platform-windows",
  "zefiro-resources",
@@ -1048,17 +1047,6 @@ dependencies = [
  "zefiro-platform",
  "zefiro-resources",
  "zefiro-ui",
-]
-
-[[package]]
-name = "zefiro-island-host"
-version = "1.2.2"
-dependencies = [
- "tempfile",
- "tracing",
- "zefiro-core",
- "zefiro-platform",
- "zefiro-resources",
 ]
 
 [[package]]

@@ -19,7 +19,6 @@ zefiro-resources.workspace = true
 zefiro-ui.workspace = true
 zefiro-integration-clock.workspace = true
 zefiro-bar.workspace = true
-zefiro-island-host.workspace = true
 zefiro-island.workspace = true
 zefiro-integration-devices.workspace = true
 zefiro-integration-usage.workspace = true

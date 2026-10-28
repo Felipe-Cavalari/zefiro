@@ -15,7 +15,6 @@ members = [
   "crates/integrations/systray",
   "crates/integrations/spotify",
   "crates/modules/bar",
-  "crates/modules/island-host",
   "crates/modules/island",
   "crates/platform-windows",
   "crates/app",
@@ -48,7 +47,6 @@ zefiro-integration-chat = { path = "crates/integrations/chat" }
 zefiro-integration-systray = { path = "crates/integrations/systray" }
 zefiro-integration-spotify = { path = "crates/integrations/spotify" }
 zefiro-bar = { path = "crates/modules/bar" }
-zefiro-island-host = { path = "crates/modules/island-host" }
 zefiro-island = { path = "crates/modules/island" }
 zefiro-platform-windows = { path = "crates/platform-windows" }
 serde = { version = "1", features = ["derive"] }
