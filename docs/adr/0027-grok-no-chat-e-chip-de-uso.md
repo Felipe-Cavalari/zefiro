@@ -96,8 +96,11 @@ O Zefiro nunca lê o `~/.grok/auth.json`, nunca guarda chave e nunca faz pedido 
 - **Termos (médio):** rodar o Grok Build pelo ACP é uso documentado, mas nenhum texto da xAI
   autoriza explicitamente um app de terceiros a usá-lo como chat com a assinatura. Zona cinzenta,
   como o `claude -p`.
-- **Extensão não documentada:** o `_x.ai/billing` está fora da documentação. Se mudar, o chip diz
-  "Formato de resposta desconhecido", nunca um número errado.
+- **Extensão não documentada:** o `_x.ai/billing` está fora da documentação. Se o método sumir, o
+  chip diz "Formato de resposta desconhecido", nunca um número errado. O serviço de cobrança da
+  xAI falha às vezes ("Internal error: Billing service error: … meter unavailable", uma consulta em
+  três no dia da medição; outra levou 80 s): erro que não é de login conta como passageiro, e o
+  chip fica com o último valor.
 - **Configuração do usuário:** hooks e plugins do `~/.grok` continuam carregando no processo do chat
   (não há equivalente do `--setting-sources ""`). Só o perfil limita as ferramentas.
 - **Não verificado:** a origem Windows (o `grok` não está instalado), o texto do erro de cota
