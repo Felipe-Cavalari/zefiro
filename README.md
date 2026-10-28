@@ -34,6 +34,16 @@ Os chips de uso juntam as contas do Windows e das distros do WSL que estão roda
 - Por isso o Claude Code precisa estar instalado em cada origem (Windows ou distro) com login. Sem ele, o painel diz "Claude Code não encontrado".
 - Uma distro parada aparece como "WSL desligado": o Zefiro nunca lê `\\wsl.localhost\<distro>\...` de uma distro parada, porque isso a ligaria sozinho.
 
+## Aviso sobre a assinatura do Claude
+
+> [!WARNING]
+> O Zefiro não é um produto da Anthropic. Os termos da Anthropic dizem que o login das assinaturas Free, Pro e Max só pode ser usado no Claude Code e no Claude.ai. O Zefiro nunca lê nem usa o seu token, mas dois recursos dependem do Claude Code que você instalou:
+>
+> - **Chip de uso do Claude:** roda o comando `/usage` do Claude Code. Ele não chama o modelo e não gasta nada da sua cota.
+> - **Chat com o Claude:** roda o `claude -p` sem ferramentas, como um chat dentro da barra, e usa a sua cota como qualquer conversa no Claude Code.
+>
+> Rodar o `claude -p` por script é um uso documentado do Claude Code, mas os termos não dizem nada explícito sobre outro app usar o Claude Code como chat. É uma zona cinzenta, e a Anthropic mudou essas regras várias vezes em 2026. O risco fica com a sua conta: no pior caso, a Anthropic pode bloquear o acesso ou suspender a conta. Se você não quiser correr esse risco, deixe os chips `claude` e `chat` fora da barra (modo de edição). Sem eles, o Zefiro não roda o Claude Code.
+
 ## Créditos e agradecimentos
 
 O Zefiro nasceu de ideias, experiências de uso e trabalho compartilhado pela comunidade open source. Agradecemos aos autores, mantenedores e colaboradores de cada um destes projetos:
