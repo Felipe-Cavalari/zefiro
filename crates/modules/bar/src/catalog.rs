@@ -11,9 +11,10 @@ pub const ITEMS: &[ItemDescriptor] = &[
     ItemDescriptor { id: "brightness", name: "Brilho", description: "Brilho dos monitores por DDC/CI; a roda ajusta" },
     ItemDescriptor { id: "claude", name: "Claude", description: "Uso do Claude (5 h e 7 dias)" },
     ItemDescriptor { id: "codex", name: "Codex", description: "Uso do Codex (janelas de uso)" },
+    ItemDescriptor { id: "grok", name: "Grok", description: "Uso do Grok (cota semanal)" },
     ItemDescriptor { id: "vscode", name: "VS Code", description: "Projetos recentes do VS Code" },
     ItemDescriptor { id: "terminal", name: "Terminal", description: "Perfis do Windows Terminal; o lápis escolhe e ordena" },
-    ItemDescriptor { id: "chat", name: "Chat com IA", description: "Pergunte ao Claude ou ao Codex direto da barra" },
+    ItemDescriptor { id: "chat", name: "Chat com IA", description: "Pergunte ao Claude, ao Codex ou ao Grok direto da barra" },
     ItemDescriptor { id: "spotify", name: "Spotify", description: "Busque e toque no Spotify sem abrir o app (Premium)" },
     ItemDescriptor { id: "notifications", name: "Notificações", description: "Contador; clique abre a central" },
     ItemDescriptor { id: "dnd", name: "Não perturbe", description: "Liga e desliga o Não perturbe; o botão do meio abre as configurações" },
@@ -35,7 +36,7 @@ mod tests {
 
     #[test]
     fn new_items_are_in_the_catalog() {
-        for id in ["claude", "codex", "vscode", "terminal", "chat", "notifications", "dnd", "power", "player", "weather", "hardware", "island", "tray", "spotify"] {
+        for id in ["claude", "codex", "grok", "vscode", "terminal", "chat", "notifications", "dnd", "power", "player", "weather", "hardware", "island", "tray", "spotify"] {
             assert!(descriptor(id).is_some(), "{id} fora do catálogo");
         }
         let names: std::collections::HashSet<_> = ITEMS.iter().map(|i| i.name).collect();
@@ -45,8 +46,9 @@ mod tests {
     }
 
     #[test]
-    fn chat_is_named_for_both_agents() {
-        // O chat fala com o Claude ou com o Codex (`[chat] agent`).
-        assert_eq!(descriptor("chat").map(|d| (d.name, d.description)), Some(("Chat com IA", "Pergunte ao Claude ou ao Codex direto da barra")));
+    fn chat_is_named_for_the_three_agents() {
+        // O chat fala com o Claude, o Codex ou o Grok (`[chat] agent`).
+        assert_eq!(descriptor("chat").map(|d| (d.name, d.description)), Some(("Chat com IA", "Pergunte ao Claude, ao Codex ou ao Grok direto da barra")));
+        assert_eq!(descriptor("grok").map(|d| (d.name, d.description)), Some(("Grok", "Uso do Grok (cota semanal)")));
     }
 }

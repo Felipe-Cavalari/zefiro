@@ -15,6 +15,7 @@ pub mod diagnostics;
 pub mod dnd;
 pub mod fillet;
 pub mod gfx;
+pub mod grok_usage;
 pub mod hardware;
 pub mod http;
 pub mod imaging;

@@ -49,17 +49,19 @@ pub struct SystemState {
     pub chat_badge: bool,
 }
 
-/// O que os chips de uso mostram: as contas do Claude e do Codex no Windows e no WSL.
+/// O que os chips de uso mostram: as contas do Claude, do Codex e do Grok no Windows e no WSL.
 #[derive(Debug, Clone, Default)]
 pub struct UsageState {
     /// As contas do Claude e quando terminou a última consulta.
     pub claude: Option<zefiro_integration_usage::claude::ClaudeSnapshot>,
     pub codex: Option<zefiro_integration_usage::codex::CodexSnapshot>,
+    pub grok: Option<zefiro_integration_usage::grok::GrokSnapshot>,
     /// O número de cada chip na última vez que o dado chegou: a barra só é refeita se ele mudou.
     /// Comparar com o snapshot antigo recalculado agora não serve: depois do `resets_at`, ele já dá
     /// 0 % também, e o chip ficaria com o número velho.
     claude_shown: Option<f32>,
     codex_shown: Option<f32>,
+    grok_shown: Option<f32>,
 }
 
 impl UsageState {
@@ -81,6 +83,18 @@ impl UsageState {
         self.codex = snapshot;
         let shown = self.codex.as_ref().and_then(|s| zefiro_integration_usage::codex::codex_chip_percent(&s.accounts, now_unix));
         std::mem::replace(&mut self.codex_shown, shown) != shown
+    }
+
+    /// Guarda as contas do Grok; `true` se o número do chip mudou.
+    pub fn set_grok(&mut self, snapshot: Option<zefiro_integration_usage::grok::GrokSnapshot>, now_unix: i64) -> bool {
+        self.grok = snapshot;
+        let shown = self.grok.as_ref().and_then(|s| zefiro_integration_usage::grok::grok_chip_percent(&s.accounts, now_unix));
+        std::mem::replace(&mut self.grok_shown, shown) != shown
+    }
+
+    /// % do chip do Grok: a maior cota semanal entre as contas.
+    pub fn grok_chip(&self) -> Option<f32> {
+        self.grok.as_ref().and_then(|s| zefiro_integration_usage::grok::grok_chip_percent(&s.accounts, crate::usage_loop::now_unix()))
     }
 
     /// % do chip do Codex: a maior janela primária entre as contas.

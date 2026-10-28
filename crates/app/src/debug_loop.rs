@@ -15,13 +15,13 @@ use zefiro_platform::geometry::Rect;
 use zefiro_platform_windows::diagnostics::{self, DwmTiming};
 use zefiro_platform_windows::window::{self, WindowKind};
 
-use crate::event_loop::{Loop, TIMER_HUD, USER_UPDATE, USER_BRIGHTNESS, USER_BLUETOOTH, USER_CLAUDE, USER_CODEX, USER_DND, USER_HARDWARE, USER_LYRICS, USER_MEDIA, USER_MIC, USER_NOTIFICATION, USER_POWER, USER_PRIVACY, USER_VISUALIZER, USER_VOLUME, USER_VSCODE, USER_WEATHER};
+use crate::event_loop::{Loop, TIMER_HUD, USER_UPDATE, USER_BRIGHTNESS, USER_BLUETOOTH, USER_CLAUDE, USER_CODEX, USER_DND, USER_GROK, USER_HARDWARE, USER_LYRICS, USER_MEDIA, USER_MIC, USER_NOTIFICATION, USER_POWER, USER_PRIVACY, USER_VISUALIZER, USER_VOLUME, USER_VSCODE, USER_WEATHER};
 
 /// Quantos avisos o HUD mostra.
 const HUD_WARNINGS: usize = 4;
 
 /// Integrações na ordem do HUD, com o aviso que cada uma manda à UI.
-const INTEGRATIONS: [(u32, &str); 17] = [
+const INTEGRATIONS: [(u32, &str); 18] = [
     (USER_MEDIA, "Mídia"),
     (USER_VISUALIZER, "Visualizador"),
     (USER_VOLUME, "Som"),
@@ -36,6 +36,7 @@ const INTEGRATIONS: [(u32, &str); 17] = [
     (USER_PRIVACY, "Privacidade"),
     (USER_CLAUDE, "Claude"),
     (USER_CODEX, "Codex"),
+    (USER_GROK, "Grok"),
     (USER_VSCODE, "VS Code"),
     (USER_POWER, "Energia"),
     (USER_UPDATE, "Atualização"),

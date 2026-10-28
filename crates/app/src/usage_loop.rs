@@ -1,4 +1,4 @@
-//! Uso do Claude e do Codex no laço de eventos: serviços, chips e painéis.
+//! Uso do Claude, do Codex e do Grok no laço de eventos: serviços, chips e painéis.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -9,25 +9,31 @@ use zefiro_bar::usage::{RefreshButton, UsageBlock, UsageRow, refresh_button_rect
 use zefiro_integration_clock::windows::utc_offset_seconds;
 use zefiro_integration_usage::claude::{ClaudeSnapshot, Limit, UsageError, can_refresh};
 use zefiro_integration_usage::codex::{CodexService, CodexSnapshot, Window, effective_percent, window_name};
+use zefiro_integration_usage::grok::{GrokSnapshot, format_usd};
 use zefiro_integration_usage::origins::{OriginKind, many_distros, origins_label};
 use zefiro_integration_usage::format::{format_absolute, format_clock, format_relative, format_short, parse_iso_utc};
 use zefiro_platform_windows::claude::ClaudeService;
+use zefiro_platform_windows::grok_usage::GrokUsageService;
 use zefiro_platform_windows::{window, wsl};
 use zefiro_platform::geometry::Point;
 use zefiro_ui::paint::DisplayList;
 
-use crate::event_loop::{Loop, USER_CLAUDE, USER_CODEX};
+use crate::event_loop::{Loop, USER_CLAUDE, USER_CODEX, USER_GROK};
 
 pub const CODEX_GLYPH: &str = "\u{E943}";
 pub const CLAUDE_GLYPH: &str = "\u{E945}";
+/// Robô (Segoe Fluent Icons).
+pub const GROK_GLYPH: &str = "\u{E99A}";
 
 #[derive(Default)]
 pub struct UsageRuntime {
     codex: Option<CodexService>,
     claude: Option<ClaudeService>,
+    grok: Option<GrokUsageService>,
     /// O botão de atualizar foi tocado e a resposta ainda não chegou.
     claude_refreshing: bool,
     codex_refreshing: bool,
+    grok_refreshing: bool,
     /// O mouse está sobre o botão de atualizar do painel aberto.
     refresh_hover: bool,
 }
@@ -185,15 +191,81 @@ fn codex_blocks(s: &CodexSnapshot, now: i64, offset: i32) -> Vec<UsageBlock> {
         .collect()
 }
 
+/// `origin`: "Windows" ou "WSL", onde rodar o `grok login`.
+fn grok_message(e: UsageError, origin: &str) -> String {
+    match e {
+        UsageError::Missing | UsageError::Expired => format!("Faça login no Grok Build:\nrode `grok login` no {origin}."),
+        UsageError::NotInstalled => format!("Grok Build não encontrado no {origin}"),
+        UsageError::Network | UsageError::Http(_) => "O Grok Build não respondeu.\nTento de novo em 5 min.".into(),
+        UsageError::UnknownFormat => "Formato de resposta desconhecido".into(),
+    }
+}
+
+/// Um bloco por conta do Grok: a cota do período (semanal no SuperGrok) e, no subtítulo, os
+/// créditos extras quando há saldo.
+fn grok_blocks(s: &GrokSnapshot, now: i64, offset: i32) -> Vec<UsageBlock> {
+    if s.accounts.is_empty() {
+        let message = if s.wsl_stopped { WSL_STOPPED } else { "Grok Build não encontrado.\nInstale e rode `grok login`." };
+        return vec![block("Grok".into(), String::new(), Vec::new(), Some(message.into()))];
+    }
+    let many = many_distros(&s.accounts);
+    s.accounts
+        .iter()
+        .map(|a| {
+            let title = a.data.plan.as_deref().map_or("Grok".to_string(), |p| format!("Grok · {p}"));
+            let origins = origins_label(&a.origins, many);
+            let mut subtitle = a.data.email.as_deref().map_or(origins.clone(), |e| format!("{e} · {origins}"));
+            let renew_at = if a.origins.contains(&OriginKind::Windows) { "Windows" } else { "WSL" };
+            // Conta lembrada de uma distro parada ou falha passageira: o último valor bom.
+            let usage = match &a.data.result {
+                Some(Ok(u)) => Ok(Some(u)),
+                Some(Err(e)) if (a.stopped || *e == UsageError::Network) && a.data.last_ok.is_some() => Ok(a.data.last_ok.as_ref()),
+                Some(Err(e)) => Err(grok_message(*e, renew_at)),
+                None => Ok(None),
+            };
+            if let Ok(Some(u)) = &usage
+                && let Some(cents) = u.prepaid_cents.filter(|c| *c > 0)
+            {
+                subtitle.push_str(&format!(" · créditos extras {}", format_usd(cents)));
+            }
+            if a.stopped {
+                subtitle.push_str(STOPPED_SUFFIX);
+            }
+            match usage {
+                Err(message) => block(title, subtitle, Vec::new(), Some(message)),
+                Ok(None) => block(title, subtitle, Vec::new(), Some("Carregando…".into())),
+                Ok(Some(u)) => {
+                    let minutes = u.period_minutes.unwrap_or(10080);
+                    let label = if minutes == 10080 { "Semana" } else { "Período" };
+                    let rows = u.percent.map(|percent| UsageRow { label: label.into(), percent: Some(percent), detail: u.period_end.map(|t| reset_detail(t, minutes, now, offset)).unwrap_or_default() }).into_iter().collect();
+                    block(title, subtitle, rows, None)
+                }
+            }
+        })
+        .collect()
+}
+
 fn capitalized(s: &str) -> String {
     let mut c = s.chars();
     c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
 }
 
 impl Loop {
-    /// Liga ou desliga o Claude e o Codex conforme os chips estão na barra: sem o chip, o token do
-    /// Claude não é lido nem enviado, e a pasta do Codex não é varrida.
+    /// Liga ou desliga o Claude, o Codex e o Grok conforme os chips estão na barra: sem o chip, o
+    /// `/usage` do Claude Code e o `grok` não rodam, e a pasta do Codex não é varrida.
     pub fn usage_services(&mut self) {
+        match (self.ctx.config.bar.uses("grok"), self.usage.grok.is_some()) {
+            (true, false) => {
+                tracing::info!("uso do Grok: serviço ligado");
+                self.usage.grok = GrokUsageService::start(Arc::new(|| window::post_user(USER_GROK))).map_err(|e| tracing::warn!("uso do Grok indisponível: {e}")).ok();
+            }
+            (false, true) => {
+                tracing::info!("uso do Grok: serviço desligado (chip fora da barra)");
+                self.usage.grok = None;
+                self.ctx.usage.set_grok(None, now_unix());
+            }
+            _ => {}
+        }
         let (claude, codex) = (self.ctx.config.bar.uses("claude"), self.ctx.config.bar.uses("codex"));
         match (claude, self.usage.claude.is_some()) {
             (true, false) => {
@@ -258,8 +330,31 @@ impl Loop {
         Ok(())
     }
 
+    /// Chega a cada consulta do Grok: como o Claude.
+    pub fn usage_grok_changed(&mut self) -> Result<()> {
+        self.usage.grok_refreshing = false;
+        let latest = self.usage.grok.as_ref().and_then(GrokUsageService::latest);
+        if self.ctx.usage.set_grok(latest, now_unix()) {
+            self.apply_bars(true)?;
+        }
+        if self.usage_panel_open(PanelKind::Grok) {
+            self.redraw_open_panel()?;
+        }
+        Ok(())
+    }
+
+    /// Algum painel de uso aberto (o botão de atualizar e o hover valem nele).
+    fn usage_any_open(&self) -> bool {
+        [PanelKind::Claude, PanelKind::Codex, PanelKind::Grok].into_iter().any(|k| self.usage_panel_open(k))
+    }
+
     /// Ao abrir o painel: confere o dado agora.
     pub fn usage_prepare(&mut self, kind: PanelKind) {
+        if kind == PanelKind::Grok
+            && let Some(s) = &self.usage.grok
+        {
+            s.refresh();
+        }
         self.usage.refresh_hover = false;
         if kind == PanelKind::Codex
             && let Some(s) = &self.usage.codex
@@ -273,10 +368,20 @@ impl Loop {
         }
     }
 
-    /// Botão de atualizar dos painéis do Claude e do Codex. `true` se o clique foi nele.
+    /// Botão de atualizar dos painéis do Claude, do Codex e do Grok. `true` se o clique foi nele.
     pub fn usage_click(&mut self, p: Point, scale: f32) -> Result<bool> {
         if !refresh_button_rect(scale).contains(p) {
             return Ok(false);
+        }
+        if self.usage_panel_open(PanelKind::Grok) {
+            if !self.usage.grok_refreshing
+                && let Some(service) = &self.usage.grok
+            {
+                service.refresh_now();
+                self.usage.grok_refreshing = true;
+                self.redraw_open_panel()?;
+            }
+            return Ok(true);
         }
         if self.usage_panel_open(PanelKind::Claude) {
             if self.claude_refresh_enabled()
@@ -302,9 +407,9 @@ impl Loop {
         Ok(false)
     }
 
-    /// Mouse sobre o painel do Claude ou do Codex: o botão de atualizar acende sob ele (só redesenha quando muda).
+    /// Mouse sobre o painel de uso: o botão de atualizar acende sob ele (só redesenha quando muda).
     pub fn usage_move(&mut self, p: Point, scale: f32) -> Result<()> {
-        if !(self.usage_panel_open(PanelKind::Claude) || self.usage_panel_open(PanelKind::Codex)) {
+        if !self.usage_any_open() {
             return Ok(());
         }
         self.usage_hover(refresh_button_rect(scale).contains(p))
@@ -320,7 +425,7 @@ impl Loop {
             return Ok(());
         }
         self.usage.refresh_hover = over;
-        if self.usage_panel_open(PanelKind::Claude) || self.usage_panel_open(PanelKind::Codex) {
+        if self.usage_any_open() {
             self.redraw_open_panel()?;
         }
         Ok(())
@@ -341,6 +446,16 @@ impl Loop {
                 Some(s) => usage_panel(&claude_blocks(s, now, offset), &claude_footer(s, now, offset, self.usage.claude_refreshing), refresh, scale, tokens, text),
             };
         }
+        if kind == PanelKind::Grok {
+            let refresh = Some(RefreshButton { enabled: !self.usage.grok_refreshing, hovered });
+            return match &self.ctx.usage.grok {
+                None => usage_panel(&[block("Grok".into(), String::new(), Vec::new(), Some("Carregando…".into()))], "", refresh, scale, tokens, text),
+                Some(s) => {
+                    let footer = if self.usage.grok_refreshing { "Atualizando…".to_string() } else { s.at.map(updated_ago).unwrap_or_default() };
+                    usage_panel(&grok_blocks(s, now, offset), &footer, refresh, scale, tokens, text)
+                }
+            };
+        }
         let blocks = codex_blocks(self.ctx.usage.codex.as_ref().unwrap_or(&CodexSnapshot::default()), now, offset);
         usage_panel(&blocks, "", Some(RefreshButton { enabled: !self.usage.codex_refreshing, hovered }), scale, tokens, text)
     }
@@ -352,6 +467,7 @@ mod tests {
     use std::time::SystemTime;
     use zefiro_integration_usage::claude::{ClaudeEntry, ClaudeSnapshot, ClaudeUsage};
     use zefiro_integration_usage::codex::{CodexEntry, CodexSnapshot, CodexUsage};
+    use zefiro_integration_usage::grok::{GrokEntry, GrokUsage};
     use zefiro_integration_usage::origins::Account;
 
     const NOW: i64 = 1_792_000_000;
@@ -469,6 +585,43 @@ Abra o Claude Code no WSL para renovar."));
     fn codex_single_account_shows_its_origins() {
         let one = CodexSnapshot { accounts: vec![codex(vec![OriginKind::Windows, wsl()], false)], wsl_stopped: false };
         assert!(codex_blocks(&one, NOW, 0)[0].subtitle.ends_with(" · Windows · WSL"), "{}", codex_blocks(&one, NOW, 0)[0].subtitle);
+    }
+
+    fn grok(origins: Vec<OriginKind>, result: std::result::Result<GrokUsage, UsageError>, stopped: bool) -> Account<GrokEntry> {
+        let last_ok = result.as_ref().ok().cloned();
+        let data = GrokEntry { email: Some("a@b.c".into()), plan: Some("SuperGrok".into()), result: Some(result), last_ok };
+        Account { key: format!("{origins:?}"), origins, stopped, data }
+    }
+
+    fn week(percent: f32, cents: i64) -> GrokUsage {
+        GrokUsage { percent: Some(percent), period_end: Some(NOW + 2 * 86_400), period_minutes: Some(10080), plan: Some("SuperGrok".into()), prepaid_cents: Some(cents) }
+    }
+
+    #[test]
+    fn grok_block_shows_the_week_and_extra_credits() {
+        let s = GrokSnapshot { accounts: vec![grok(vec![wsl()], Ok(week(25.0, 400)), false)], wsl_stopped: false, at: None };
+        let b = &grok_blocks(&s, NOW, 0)[0];
+        assert_eq!(b.title, "Grok · SuperGrok");
+        assert_eq!(b.subtitle, "a@b.c · WSL · créditos extras US$ 4,00");
+        assert_eq!(b.rows.len(), 1);
+        assert_eq!((b.rows[0].label.as_str(), b.rows[0].percent), ("Semana", Some(25.0)));
+        assert!(b.rows[0].detail.starts_with("reinicia "), "{}", b.rows[0].detail);
+        let none = GrokSnapshot { accounts: vec![grok(vec![OriginKind::Windows], Ok(week(25.0, 0)), false)], wsl_stopped: false, at: None };
+        assert_eq!(grok_blocks(&none, NOW, 0)[0].subtitle, "a@b.c · Windows", "sem saldo, sem créditos");
+    }
+
+    #[test]
+    fn grok_messages() {
+        let lost = GrokSnapshot { accounts: vec![grok(vec![wsl()], Err(UsageError::Missing), false)], wsl_stopped: false, at: None };
+        assert_eq!(grok_blocks(&lost, NOW, 0)[0].message.as_deref(), Some("Faça login no Grok Build:\nrode `grok login` no WSL."));
+        let empty = grok_blocks(&GrokSnapshot::default(), NOW, 0);
+        assert_eq!(empty[0].message.as_deref(), Some("Grok Build não encontrado.\nInstale e rode `grok login`."));
+        let stopped = grok_blocks(&GrokSnapshot { wsl_stopped: true, ..Default::default() }, NOW, 0);
+        assert_eq!(stopped[0].message.as_deref(), Some(WSL_STOPPED));
+        let mut flaky = grok(vec![wsl()], Ok(week(30.0, 0)), false);
+        flaky.data.result = Some(Err(UsageError::Network));
+        let b = &grok_blocks(&GrokSnapshot { accounts: vec![flaky], ..Default::default() }, NOW, 0)[0];
+        assert_eq!((b.message.as_deref(), b.rows[0].percent), (None, Some(30.0)), "falha passageira mostra o último valor");
     }
 
     #[test]

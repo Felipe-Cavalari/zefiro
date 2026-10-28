@@ -70,6 +70,8 @@ pub const USER_CHAT_IMAGE: u32 = 26;
 pub const USER_TRAY: u32 = 27;
 /// O serviço do Spotify respondeu (login, player, listas, busca, capa).
 pub const USER_SPOTIFY: u32 = 28;
+/// O uso do Grok foi consultado (a cada 5 min, ao abrir o painel ou no botão de atualizar).
+pub const USER_GROK: u32 = 29;
 pub const TIMER_CLOCK: usize = 1;
 pub const TIMER_DISPLAY: usize = 2;
 /// Modo de medição (`ZEFIRO_CYCLES=N`): abre e fecha o calendário N vezes e sai.
@@ -202,7 +204,7 @@ impl Loop {
             }
             PanelKind::Island | PanelKind::Player | PanelKind::Weather | PanelKind::Hardware => self.island_panel_list(scale),
             PanelKind::Audio | PanelKind::Mic | PanelKind::Brightness => self.devices_panel_list(kind, scale),
-            PanelKind::Claude | PanelKind::Codex => self.usage_panel_list(kind, scale),
+            PanelKind::Claude | PanelKind::Codex | PanelKind::Grok => self.usage_panel_list(kind, scale),
             PanelKind::VsCode => self.vscode_panel_list(scale),
             PanelKind::Terminal => self.terminal_panel_list(scale),
             PanelKind::Chat => self.chat_panel_list(scale),
@@ -743,6 +745,7 @@ impl Loop {
             WinEvent::User { code: USER_BRIGHTNESS } => self.devices_brightness_changed()?,
             WinEvent::User { code: USER_CODEX } => self.usage_codex_changed()?,
             WinEvent::User { code: USER_CLAUDE } => self.usage_claude_changed()?,
+            WinEvent::User { code: USER_GROK } => self.usage_grok_changed()?,
             WinEvent::User { code: USER_VSCODE } => self.vscode_loaded()?,
             WinEvent::User { code: USER_TERMINAL } => self.terminal_loaded()?,
             WinEvent::User { code: USER_TRAY } => self.systray_changed()?,
