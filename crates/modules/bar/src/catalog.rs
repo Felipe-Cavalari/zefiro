@@ -13,7 +13,7 @@ pub const ITEMS: &[ItemDescriptor] = &[
     ItemDescriptor { id: "codex", name: "Codex", description: "Uso do Codex (janelas de uso)" },
     ItemDescriptor { id: "vscode", name: "VS Code", description: "Projetos recentes do VS Code" },
     ItemDescriptor { id: "terminal", name: "Terminal", description: "Perfis do Windows Terminal; o lápis escolhe e ordena" },
-    ItemDescriptor { id: "chat", name: "Chat com o Claude", description: "Pergunte ao Claude direto da barra (usa o Claude Code)" },
+    ItemDescriptor { id: "chat", name: "Chat com IA", description: "Pergunte ao Claude ou ao Codex direto da barra" },
     ItemDescriptor { id: "spotify", name: "Spotify", description: "Busque e toque no Spotify sem abrir o app (Premium)" },
     ItemDescriptor { id: "notifications", name: "Notificações", description: "Contador; clique abre a central" },
     ItemDescriptor { id: "dnd", name: "Não perturbe", description: "Liga e desliga o Não perturbe; o botão do meio abre as configurações" },
@@ -42,5 +42,11 @@ mod tests {
         assert_eq!(names.len(), ITEMS.len(), "nomes repetidos");
         assert!(ITEMS.iter().all(|i| !i.name.is_empty() && !i.description.is_empty()));
         assert_eq!(descriptor("spotify").map(|d| (d.name, d.description)), Some(("Spotify", "Busque e toque no Spotify sem abrir o app (Premium)")));
+    }
+
+    #[test]
+    fn chat_is_named_for_both_agents() {
+        // O chat fala com o Claude ou com o Codex (`[chat] agent`).
+        assert_eq!(descriptor("chat").map(|d| (d.name, d.description)), Some(("Chat com IA", "Pergunte ao Claude ou ao Codex direto da barra")));
     }
 }
