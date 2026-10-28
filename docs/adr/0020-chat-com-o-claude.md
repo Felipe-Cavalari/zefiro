@@ -107,3 +107,10 @@ campo é desenhado pelo painel. A origem é `[chat] origin` (`auto` = Windows; s
   cada uma foi lida e relê a que está menor que o pedido. Clique abre no visualizador; o botão no
   canto do quadro (com o mouse em cima) reabre a conversa de origem; "Abrir pasta" abre
   `chat\imagens`. Apagar uma imagem sozinha ficou de fora.
+
+## Adendo de 2026-10-28: Grok
+
+O chat ganhou um terceiro agente, o Grok, pelo `grok agent stdio` do Grok Build (ACP), com um
+perfil de agente que tira as ferramentas. A decisão e as medidas estão na
+[ADR-0027](0027-grok-no-chat-e-chip-de-uso.md). `[chat] agent` aceita `grok`, e `[chat.grok]` tem
+`origin`, `prefer` e `model`, como os outros. O `ChatConfig::of` passou a receber o nome do agente.
