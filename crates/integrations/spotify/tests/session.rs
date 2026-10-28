@@ -117,11 +117,13 @@ fn bodies_go_as_json_and_status_204_is_ok() {
 #[test]
 fn exchange_code_reads_tokens() {
     let t = Fake::new(vec![token("A1", Some("R1"))]);
-    let tokens = exchange_code(&t, "abc", "c", "v").unwrap();
+    let tokens = exchange_code(&t, "abc", "c", "v", 51234).unwrap();
     assert_eq!(tokens.refresh.as_deref(), Some("R1"));
-    assert!(t.sent.borrow()[0].3.as_deref().unwrap().contains("grant_type=authorization_code"));
+    let body = t.sent.borrow()[0].3.clone().unwrap();
+    assert!(body.contains("grant_type=authorization_code"));
+    assert!(body.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A51234%2Fcallback"), "a mesma porta do pedido de login: {body}");
     let t = Fake::new(vec![Ok((400, r#"{"error":"invalid_grant"}"#.into(), None))]);
-    assert_eq!(exchange_code(&t, "abc", "c", "v"), Err(ApiError::Unauthorized));
+    assert_eq!(exchange_code(&t, "abc", "c", "v", 51234), Err(ApiError::Unauthorized));
 }
 
 #[test]

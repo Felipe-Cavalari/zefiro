@@ -1,5 +1,7 @@
 # Chip Spotify — plano
 
+> **Mudança depois da execução (2026-10-27):** a porta fixa 47823 deu lugar a uma porta livre escolhida pelo Windows, com o Redirect URI `http://127.0.0.1/callback` sem porta no app do Spotify (ver ADR-0024). As menções a 47823 abaixo são do plano original.
+
 > **Para agentes:** SUB-SKILL OBRIGATÓRIA: use superpowers:subagent-driven-development (recomendado) ou
 > superpowers:executing-plans para executar este plano tarefa por tarefa. Os passos usam caixas
 > (`- [ ]`) para acompanhar.

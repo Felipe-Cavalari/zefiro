@@ -110,7 +110,8 @@ struct Worker {
     client_id: String,
     session: Option<Session>,
     me: Option<String>,
-    pkce: Option<Pkce>,
+    /// O PKCE e a porta do login em andamento.
+    pkce: Option<(Pkce, u16)>,
     replies: Arc<Mutex<Vec<Reply>>>,
     covers: Covers,
     notify: Arc<dyn Fn() + Send + Sync>,
@@ -223,23 +224,23 @@ impl Worker {
             notify();
         });
         match listening {
-            Ok(()) => {
-                crate::system::open_uri(&authorize_url(&self.client_id, &p));
-                self.pkce = Some(p);
+            Ok(port) => {
+                crate::system::open_uri(&authorize_url(&self.client_id, &p, port));
+                self.pkce = Some((p, port));
                 tracing::info!("spotify: login aberto no navegador");
                 self.reply(Reply::Auth(AuthState::Waiting));
             }
             Err(e) => {
-                tracing::warn!("spotify: não consegui esperar o login na porta 47823: {e}");
+                tracing::warn!("spotify: não consegui abrir uma porta local para o login: {e}");
                 self.reply(Reply::Auth(AuthState::PortBusy));
             }
         }
     }
 
     fn callback(&mut self, result: ListenResult) {
-        let verifier = self.pkce.take().map(|p| p.verifier);
-        let state = match (result, verifier) {
-            (ListenResult::Code(code), Some(verifier)) => match exchange_code(&HttpTransport, &self.client_id, &code, &verifier) {
+        let pending = self.pkce.take().map(|(p, port)| (p.verifier, port));
+        let state = match (result, pending) {
+            (ListenResult::Code(code), Some((verifier, port))) => match exchange_code(&HttpTransport, &self.client_id, &code, &verifier, port) {
                 Ok(tokens) => match tokens.refresh {
                     Some(refresh) => {
                         let stored = Stored { client_id: self.client_id.clone(), refresh: refresh.clone() };

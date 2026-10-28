@@ -239,7 +239,7 @@ fn setup(c: &mut Ctx, p: &SpotifyPanel) -> f32 {
         }
         _ => {
             if p.auth == Auth::PortBusy {
-                line(c, &mut y, "A porta 47823 está em uso");
+                line(c, &mut y, "Não consegui abrir uma porta local para o login");
             }
             line(c, &mut y, "Entre na sua conta do Spotify (Premium) para");
             line(c, &mut y, "buscar e tocar direto daqui.");

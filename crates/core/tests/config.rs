@@ -205,7 +205,7 @@ fn set_spotify_keeps_comments_and_other_sections() {
     std::fs::write(&path, DEFAULT_CONFIG).unwrap();
     set_spotify(&path, &SpotifyConfig { client_id: "abc".into() }).unwrap();
     let text = std::fs::read_to_string(&path).unwrap();
-    assert!(text.contains("Redirect URI http://127.0.0.1:47823/callback"), "comentário na primeira vez: {text}");
+    assert!(text.contains("Redirect URI http://127.0.0.1/callback"), "comentário na primeira vez: {text}");
     set_spotify(&path, &SpotifyConfig { client_id: "def".into() }).unwrap();
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(text.contains("# completa | compacta"), "{text}");

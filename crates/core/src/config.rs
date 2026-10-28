@@ -410,7 +410,7 @@ pub fn set_spotify(path: &Path, spotify: &SpotifyConfig) -> std::io::Result<()> 
         }
         None => {
             let mut value = toml_edit::Value::from(spotify.client_id.as_str());
-            value.decor_mut().set_suffix("   # do app criado em developer.spotify.com (Redirect URI http://127.0.0.1:47823/callback)");
+            value.decor_mut().set_suffix("   # do app criado em developer.spotify.com (Redirect URI http://127.0.0.1/callback)");
             table.insert("client_id", toml_edit::Item::Value(value));
         }
     }

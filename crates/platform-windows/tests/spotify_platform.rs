@@ -3,7 +3,7 @@ use std::net::TcpListener;
 use std::sync::mpsc;
 use std::time::Duration;
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize};
-use zefiro_platform_windows::spotify_auth::{ListenResult, listen_on};
+use zefiro_platform_windows::spotify_auth::{ListenResult, listen, listen_on};
 use zefiro_platform_windows::{http, secret};
 
 fn winrt() {
@@ -118,6 +118,17 @@ fn listener_reports_port_busy() {
     let port = taken.local_addr().unwrap().port();
     let err = listen_on(port, "s".into(), Duration::from_secs(1), |_| {}).unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::AddrInUse);
+}
+
+#[test]
+fn listener_picks_a_free_port_by_itself() {
+    // O WSL em modo espelhado reserva blocos de 4096 portas que mudam: porta fixa pode cair neles.
+    let (tx, rx) = mpsc::channel();
+    let port = listen("s".into(), Duration::from_secs(5), move |r| tx.send(r).unwrap()).unwrap();
+    assert_ne!(port, 0);
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.write_all(b"GET /callback?code=livre&state=s HTTP/1.1\r\n\r\n").unwrap();
+    assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), ListenResult::Code("livre".into()));
 }
 
 #[test]

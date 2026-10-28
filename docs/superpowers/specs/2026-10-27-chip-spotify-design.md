@@ -218,7 +218,7 @@ Fluxo de Authorization Code com PKCE: não há segredo no binário nem no disco,
    - um passo a passo curto, com o logo no título:
      - criar um app com a Web API em developer.spotify.com (o endereço é um botão que abre o painel
        do desenvolvedor no navegador);
-     - cadastrar o Redirect URI `http://127.0.0.1:47823/callback` (o painel mostra esse texto com
+     - cadastrar o Redirect URI `http://127.0.0.1/callback`, sem porta (o painel mostra esse texto com
        um botão "Copiar");
    - um campo "Client ID" onde a pessoa cola com Ctrl+V, e o botão "Salvar".
 
@@ -226,11 +226,14 @@ Fluxo de Authorization Code com PKCE: não há segredo no binário nem no disco,
 2. **Com `client_id` e sem token:** botão "Entrar com o Spotify".
    - O botão abre o navegador padrão (`system::open_uri`) na página de autorização, com
      `code_challenge` (S256) e `state` aleatório.
-   - Antes disso, uma thread abre um `TcpListener` em `127.0.0.1:47823`, que aceita **uma** conexão
+   - Antes disso, uma thread abre um `TcpListener` numa porta livre de `127.0.0.1` (o Windows
+     escolhe), que aceita **uma** conexão
      com o `state` certo, responde uma página "Pronto, pode voltar ao Zefiro" e fecha.
    - Se não chegar nada em 5 min, o listener fecha e o painel volta ao botão.
-   - **Porta fixa:** o Spotify compara o Redirect URI exato. A porta 47823 é chamada minha.
-   - Se a porta estiver ocupada, aparece o aviso "A porta 47823 está em uso".
+   - **Porta livre:** para IP literal de loopback o Spotify aceita qualquer porta no pedido, então o
+     app tem `http://127.0.0.1/callback` e o pedido leva `http://127.0.0.1:<porta>/callback`.
+     *(Mudou em 2026-10-27: a porta fixa 47823 caiu no bloco que o WSL em modo espelhado reserva.)*
+   - Se nem uma porta livre abrir, aparece o aviso "Não consegui abrir uma porta local para o login".
 3. O código vira um token de acesso e um token de renovação (`POST /api/token`).
    - O token de renovação é gravado **cifrado pelo Windows (DPAPI, `CryptProtectData`, escopo do
      usuário)** em `%LOCALAPPDATA%\zefiro\spotify\token.bin`.
@@ -291,7 +294,7 @@ usuário, mas mesmo assim nada além disso apaga nada em `%APPDATA%\zefiro`.
 
 ```toml
 [spotify]
-client_id = ""   # do app criado em developer.spotify.com (Redirect URI http://127.0.0.1:47823/callback)
+client_id = ""   # do app criado em developer.spotify.com (Redirect URI http://127.0.0.1/callback)
 ```
 
 - O painel grava essa seção com `toml_edit`, como a `[terminal]`, passando pelo `config_worker`.

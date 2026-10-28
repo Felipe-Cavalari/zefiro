@@ -5,9 +5,10 @@ use serde_json::Value;
 use zefiro_integration_chat::image::base64;
 use zefiro_integration_update::sha256;
 
-/// Porta fixa: o Spotify compara o Redirect URI exato, porta incluída.
-pub const PORT: u16 = 47823;
-pub const REDIRECT_URI: &str = "http://127.0.0.1:47823/callback";
+/// O que o usuário cadastra no app do Spotify: o loopback sem porta. Para IP literal de loopback o
+/// Spotify aceita qualquer porta no pedido (RFC 8252), e a porta é a livre do momento: uma fixa caía
+/// no bloco de 4096 portas que o WSL em modo espelhado reserva (44620–48715 no PC do usuário).
+pub const REDIRECT_URI: &str = "http://127.0.0.1/callback";
 pub const AUTHORIZE: &str = "https://accounts.spotify.com/authorize";
 pub const TOKEN: &str = "https://accounts.spotify.com/api/token";
 pub const SCOPES: &str = "user-read-playback-state user-modify-playback-state user-read-currently-playing user-read-recently-played user-library-read user-library-modify playlist-read-private playlist-read-collaborative playlist-modify-private playlist-modify-public user-follow-read";
@@ -86,12 +87,17 @@ pub fn pkce(random: &[u8; 96]) -> Pkce {
     Pkce { challenge: challenge(&verifier), state: base64url(&random[64..]), verifier }
 }
 
-pub fn authorize_url(client_id: &str, p: &Pkce) -> String {
+/// O Redirect URI do pedido, com a porta em que o listener está esperando.
+pub fn redirect_for(port: u16) -> String {
+    format!("http://127.0.0.1:{port}/callback")
+}
+
+pub fn authorize_url(client_id: &str, p: &Pkce, port: u16) -> String {
     format!(
         "{AUTHORIZE}?response_type=code&client_id={}&scope={}&redirect_uri={}&code_challenge_method=S256&code_challenge={}&state={}",
         url_encode(client_id),
         url_encode(SCOPES),
-        url_encode(REDIRECT_URI),
+        url_encode(&redirect_for(port)),
         p.challenge,
         p.state
     )
@@ -112,8 +118,9 @@ pub fn parse_callback(request_head: &str, state: &str) -> Callback {
     }
 }
 
-pub fn code_body(client_id: &str, code: &str, verifier: &str) -> String {
-    format!("grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}", url_encode(code), url_encode(REDIRECT_URI), url_encode(client_id), url_encode(verifier))
+/// A troca do código leva o mesmo Redirect URI (com a porta) do pedido de login.
+pub fn code_body(client_id: &str, code: &str, verifier: &str, port: u16) -> String {
+    format!("grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}", url_encode(code), url_encode(&redirect_for(port)), url_encode(client_id), url_encode(verifier))
 }
 
 pub fn refresh_body(client_id: &str, refresh: &str) -> String {

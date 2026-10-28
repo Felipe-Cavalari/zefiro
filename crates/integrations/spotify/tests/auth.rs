@@ -26,13 +26,14 @@ fn pkce_verifier_is_base64url_within_limits() {
 #[test]
 fn authorize_url_has_every_parameter() {
     let p = pkce(&random());
-    let url = authorize_url("abc", &p);
+    let url = authorize_url("abc", &p, 51234);
     assert!(url.starts_with("https://accounts.spotify.com/authorize?"), "{url}");
-    for part in ["response_type=code", "client_id=abc", "code_challenge_method=S256", &format!("code_challenge={}", p.challenge), &format!("state={}", p.state), "redirect_uri=http%3A%2F%2F127.0.0.1%3A47823%2Fcallback", "scope=user-read-playback-state%20user-modify-playback-state"] {
+    for part in ["response_type=code", "client_id=abc", "code_challenge_method=S256", &format!("code_challenge={}", p.challenge), &format!("state={}", p.state), "redirect_uri=http%3A%2F%2F127.0.0.1%3A51234%2Fcallback", "scope=user-read-playback-state%20user-modify-playback-state"] {
         assert!(url.contains(part), "falta {part} em {url}");
     }
-    assert_eq!(REDIRECT_URI, "http://127.0.0.1:47823/callback");
-    assert_eq!(PORT, 47823);
+    // No app do Spotify fica o loopback sem porta; a porta livre do momento vai no pedido.
+    assert_eq!(REDIRECT_URI, "http://127.0.0.1/callback");
+    assert_eq!(redirect_for(51234), "http://127.0.0.1:51234/callback");
 }
 
 #[test]
@@ -47,8 +48,8 @@ fn callback_reads_code_state_and_denial() {
 
 #[test]
 fn bodies_are_form_encoded() {
-    let body = code_body("abc", "c d", "v");
-    for part in ["grant_type=authorization_code", "code=c%20d", "code_verifier=v", "client_id=abc", "redirect_uri=http%3A%2F%2F127.0.0.1%3A47823%2Fcallback"] {
+    let body = code_body("abc", "c d", "v", 51234);
+    for part in ["grant_type=authorization_code", "code=c%20d", "code_verifier=v", "client_id=abc", "redirect_uri=http%3A%2F%2F127.0.0.1%3A51234%2Fcallback"] {
         assert!(body.contains(part), "falta {part} em {body}");
     }
     let body = refresh_body("abc", "r1");

@@ -124,13 +124,13 @@ fn menu_overlays_and_hits_its_items() {
 fn setup_screens() {
     let p = SpotifyPanel::new(Auth::NeedsClientId);
     let d = draw(&p);
-    for s in ["http://127.0.0.1:47823/callback", "Copiar", "Salvar"] {
+    for s in ["http://127.0.0.1/callback", "Copiar", "Salvar"] {
         assert!(has(&d.list, s), "falta {s}: {:?}", texts(&d.list));
     }
     assert!(d.hits.iter().any(|(_, h)| *h == Hit::SaveClientId) && d.hits.iter().any(|(_, h)| *h == Hit::CopyRedirect));
     let d = draw(&SpotifyPanel::new(Auth::NeedsLogin));
     assert!(has(&d.list, "Entrar com o Spotify") && d.hits.iter().any(|(_, h)| *h == Hit::Login));
-    assert!(has(&draw(&SpotifyPanel::new(Auth::PortBusy)).list, "A porta 47823 está em uso"));
+    assert!(has(&draw(&SpotifyPanel::new(Auth::PortBusy)).list, "Não consegui abrir uma porta local para o login"));
 }
 
 #[test]

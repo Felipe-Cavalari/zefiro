@@ -65,8 +65,11 @@ Fica um chip `spotify` com painel no estilo Raycast. A arquitetura:
   callback.
 
 E as regras de funcionamento:
-- **Login:** Authorization Code com PKCE e Redirect URI fixo `http://127.0.0.1:47823/callback`. O
-  Spotify compara a URI exata, então a porta não muda.
+- **Login:** Authorization Code com PKCE. No app do Spotify fica `http://127.0.0.1/callback`, sem
+  porta: para IP literal de loopback o Spotify aceita qualquer porta no pedido. O listener pede ao
+  Windows uma porta livre, e ela vai no pedido de login e na troca do código. *(Primeiro foi uma porta
+  fixa, 47823; no PC do usuário ela caiu no bloco de 4096 portas (44620–48715) que o WSL em modo
+  espelhado reserva, e esse bloco muda, então nenhuma porta fixa é segura.)*
 - **Tokens:**
   - o de renovação fica cifrado pelo DPAPI em `%LOCALAPPDATA%\zefiro\spotify\token.bin`, junto do
     `client_id` dono dele;

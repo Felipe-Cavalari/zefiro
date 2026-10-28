@@ -43,9 +43,9 @@ fn token_request(t: &dyn Transport, body: &str) -> Result<Tokens, ApiError> {
     }
 }
 
-/// Troca o código do callback pelos tokens.
-pub fn exchange_code(t: &dyn Transport, client_id: &str, code: &str, verifier: &str) -> Result<Tokens, ApiError> {
-    token_request(t, &code_body(client_id, code, verifier))
+/// Troca o código do callback pelos tokens; `port` é a do pedido de login.
+pub fn exchange_code(t: &dyn Transport, client_id: &str, code: &str, verifier: &str, port: u16) -> Result<Tokens, ApiError> {
+    token_request(t, &code_body(client_id, code, verifier, port))
 }
 
 impl Session {

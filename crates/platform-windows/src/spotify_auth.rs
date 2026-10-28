@@ -1,10 +1,10 @@
-//! O lado Windows do login no Spotify: o listener em `127.0.0.1:47823` que recebe o código do
-//! navegador e o transporte HTTP da sessão (ADR-0024).
+//! O lado Windows do login no Spotify: o listener numa porta livre de `127.0.0.1` que recebe o
+//! código do navegador e o transporte HTTP da sessão (ADR-0024).
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::{Duration, Instant};
-use zefiro_integration_spotify::auth::{Callback, DONE_PAGE, PORT, parse_callback};
+use zefiro_integration_spotify::auth::{Callback, DONE_PAGE, parse_callback};
 use zefiro_integration_spotify::session::{NetworkError, Reply, Transport};
 
 const DENIED_PAGE: &str = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n<!doctype html><html lang=\"pt-BR\"><meta charset=\"utf-8\"><title>Zefiro</title><body style=\"font-family:Segoe UI,sans-serif;background:#08080A;color:#fff;display:flex;align-items:center;justify-content:center;height:90vh\"><p>Login cancelado. Pode fechar esta aba.</p></body></html>";
@@ -29,15 +29,17 @@ fn request_head(stream: &mut TcpStream) -> String {
     String::from_utf8_lossy(&buf).lines().next().unwrap_or_default().to_string()
 }
 
-/// Espera o callback em `127.0.0.1:47823` numa thread; `done` recebe o resultado uma vez.
-pub fn listen(state: String, timeout: Duration, done: impl FnOnce(ListenResult) + Send + 'static) -> std::io::Result<()> {
-    listen_on(PORT, state, timeout, done)
+/// Espera o callback numa porta livre de `127.0.0.1` (o Windows escolhe), numa thread; devolve a
+/// porta, e `done` recebe o resultado uma vez.
+pub fn listen(state: String, timeout: Duration, done: impl FnOnce(ListenResult) + Send + 'static) -> std::io::Result<u16> {
+    listen_on(0, state, timeout, done)
 }
 
 /// Como `listen`, numa porta escolhida (testes). A porta ocupada volta como erro aqui mesmo.
-pub fn listen_on(port: u16, state: String, timeout: Duration, done: impl FnOnce(ListenResult) + Send + 'static) -> std::io::Result<()> {
+pub fn listen_on(port: u16, state: String, timeout: Duration, done: impl FnOnce(ListenResult) + Send + 'static) -> std::io::Result<u16> {
     let listener = TcpListener::bind(("127.0.0.1", port))?;
     listener.set_nonblocking(true)?;
+    let port = listener.local_addr()?.port();
     std::thread::Builder::new().name("zefiro-spotify-login".into()).spawn(move || {
         let deadline = Instant::now() + timeout;
         while Instant::now() < deadline {
@@ -70,7 +72,7 @@ pub fn listen_on(port: u16, state: String, timeout: Duration, done: impl FnOnce(
         }
         done(ListenResult::TimedOut);
     })?;
-    Ok(())
+    Ok(port)
 }
 
 /// A sessão do Spotify sobre o `HttpClient` do Windows. Só em threads de trabalho com WinRT.
