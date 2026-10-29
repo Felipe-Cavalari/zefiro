@@ -82,7 +82,7 @@ elease` só checa com `ZEFIRO_UPDATE_CHECK=1`.
   - `[bar] autohide = true | false` e `[bar] display = todos | principal`: "Ocultar automaticamente" e "Só no monitor principal", gravados pelo Editar barra (ADR-0022)
   - `[bar.sections] start/center/end`: ids do catálogo (`zefiro`, `clock`, `audio`, `mic`, `brightness`, `claude`, `codex`, `grok`, `ia`, `vscode`, `terminal`, `chat`, `notifications`, `dnd`, `island`, `player`, `weather`, `hardware`, `tray`, `spotify`, `power`)
   - `[chat] agent = claude | codex | grok`; `[chat.claude]`, `[chat.codex]` e `[chat.grok]` com `origin = auto | windows | wsl | <distro>`, `prefer = windows | wsl` (o que o automático tenta primeiro) e `model` (vazio = o padrão), gravados pelo painel
-  - `[ia] order/hidden`: chaves dos slides do chip `ia` (`claude:windows`, `grok:Ubuntu-24.04`), gravadas pelo painel do chip (lápis); `[ia] interval` (segundos, 2 a 60)
+  - `[ia] order/hidden`: chaves dos slides do chip `ia` (`claude:windows:1a2b3c4d`, `grok:Ubuntu-24.04:…`: IA, origem e um código da conta), gravadas pelo painel do chip (lápis); `[ia] interval` (segundos, 2 a 60)
   - `[spotify] client_id`: o Client ID do app que o usuário criou no Spotify, gravado pelo painel do chip
   - `[terminal] order/hidden`: `guid`s dos perfis do Windows Terminal, gravados pelo painel do chip (lápis → Concluir)
 - `ZEFIRO_CONFIG_DIR=<pasta>` troca a pasta da configuração: use um perfil isolado para testes, sem mexer no do usuário.

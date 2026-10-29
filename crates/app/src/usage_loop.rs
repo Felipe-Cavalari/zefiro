@@ -254,11 +254,11 @@ fn grok_blocks(s: &GrokSnapshot, now: i64, offset: i32) -> Vec<UsageBlock> {
 /// slide entra só com a origem dele (a mesma conta no Windows e no WSL são dois blocos, como no
 /// chip).
 fn ai_blocks(usage: &crate::app::UsageState, ai: &zefiro_core::config::AiConfig, now: i64, offset: i32) -> Vec<UsageBlock> {
-    use zefiro_bar::ai::slide_key;
+    use zefiro_bar::ai::account_slide_key;
     use zefiro_integration_chat::agent::Agent;
     use zefiro_integration_usage::origins::Account;
     fn only<T: Clone>(accounts: &[Account<T>], agent: Agent, key: &str) -> Option<Vec<Account<T>>> {
-        accounts.iter().find_map(|a| a.origins.iter().find(|o| slide_key(agent, std::slice::from_ref(*o)) == key).map(|o| vec![Account { origins: vec![o.clone()], ..a.clone() }]))
+        accounts.iter().find_map(|a| a.origins.iter().find(|o| account_slide_key(agent, o, &a.key) == key).map(|o| vec![Account { origins: vec![o.clone()], ..a.clone() }]))
     }
     usage
         .ai_slides(ai, now)
@@ -784,9 +784,22 @@ Abra o Claude Code no WSL para renovar."));
         assert_eq!(shown, [("Codex · Plus", true), ("Codex · Plus", false), ("Grok · SuperGrok", false)]);
         assert!(blocks[1].subtitle.ends_with(" · WSL"), "{}", blocks[1].subtitle);
         // O olho tira o slide do painel também; a ordem é a do chip.
-        let ai = zefiro_core::config::AiConfig { order: vec!["grok:Ubuntu-24.04".into()], hidden: vec!["codex:windows".into()], interval: 5 };
+        let keys: Vec<String> = usage.ai_slides(&zefiro_core::config::AiConfig::default(), NOW).visible.into_iter().map(|s| s.key).collect();
+        let ai = zefiro_core::config::AiConfig { order: vec![keys[2].clone()], hidden: vec![keys[0].clone()], interval: 5 };
         let titles: Vec<String> = ai_blocks(&usage, &ai, NOW, 0).into_iter().map(|b| b.title).collect();
         assert_eq!(titles, ["Grok · SuperGrok", "Codex · Plus"]);
+    }
+
+    #[test]
+    fn ai_panel_shows_each_account_of_the_same_origin() {
+        // Duas contas do Codex no WSL: dois blocos, cada um com o dado dela (antes, o primeiro duas vezes).
+        let mut other = codex(vec![wsl()], false);
+        other.key = "outra".into();
+        other.data.usage.plan = Some("go".into());
+        let mut usage = crate::app::UsageState::default();
+        usage.codex = Some(CodexSnapshot { accounts: vec![codex(vec![wsl()], false), other], wsl_stopped: false });
+        let titles: Vec<String> = ai_blocks(&usage, &zefiro_core::config::AiConfig::default(), NOW, 0).into_iter().map(|b| b.title).collect();
+        assert_eq!(titles, ["Codex · Plus", "Codex · Go"]);
     }
 
     #[test]

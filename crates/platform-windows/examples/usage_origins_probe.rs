@@ -16,6 +16,13 @@ fn main() {
             r.account.hash(&mut h);
             println!("    codex: conta #{:04x}, evento {:?}, primária {:?}%", h.finish() & 0xffff, r.usage.event_at, r.usage.primary.map(|w| w.used_percent));
         }
+        // Como a 1.3.0 lia (sem olhar onde a sessão rodou).
+        for r in zefiro_integration_usage::codex::read_codex_accounts(&o.home.join(".codex").join("sessions"), None) {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            r.account.hash(&mut h);
+            println!("    codex (todas): conta #{:04x}, evento {:?}", h.finish() & 0xffff, r.usage.event_at);
+        }
     }
     println!("rodando: {:?} · WSL parado: {}", found.running, found.wsl_stopped);
     let t = Instant::now();

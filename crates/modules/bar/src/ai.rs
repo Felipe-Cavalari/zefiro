@@ -51,6 +51,14 @@ pub fn slide_key(agent: Agent, origins: &[OriginKind]) -> String {
     format!("{}:{}", agent.as_str(), parts.join("+"))
 }
 
+/// Chave do slide de uma conta numa origem: `codex:Ubuntu-24.04:1a2b3c4d`. O fim é um código curto
+/// da conta (FNV-1a de 32 bits da chave dela, nunca o id): duas contas da mesma IA na mesma origem
+/// são dois slides, e a chave de uma não muda quando a outra aparece.
+pub fn account_slide_key(agent: Agent, origin: &OriginKind, account: &str) -> String {
+    let hash = account.bytes().fold(0x811c_9dc5_u32, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193));
+    format!("{}:{hash:08x}", slide_key(agent, std::slice::from_ref(origin)))
+}
+
 /// "Win" (só Windows), "WSL" (só distros) ou vazio (a mesma conta nos dois).
 pub fn origin_tag(origins: &[OriginKind]) -> &'static str {
     let windows = origins.contains(&OriginKind::Windows);
@@ -277,6 +285,12 @@ mod tests {
         assert_eq!(slide_key(Agent::Claude, &[OriginKind::Windows]), "claude:windows");
         assert_eq!(slide_key(Agent::Codex, &[OriginKind::Windows, wsl()]), "codex:windows+Ubuntu-24.04");
         assert_eq!(slide_key(Agent::Grok, &[wsl()]), "grok:Ubuntu-24.04");
+        // Uma conta por slide: duas contas do Codex no mesmo WSL não podem ter a mesma chave.
+        let (a, b) = (account_slide_key(Agent::Codex, &wsl(), "conta-a"), account_slide_key(Agent::Codex, &wsl(), "conta-b"));
+        assert!(a.starts_with("codex:Ubuntu-24.04:") && a.len() == "codex:Ubuntu-24.04:".len() + 8, "{a}");
+        assert_ne!(a, b);
+        assert_eq!(a, account_slide_key(Agent::Codex, &wsl(), "conta-a"), "a mesma em toda partida");
+        assert!(!a.contains("conta-a"), "nunca o id da conta");
         assert_eq!((origin_tag(&[OriginKind::Windows]), origin_tag(&[wsl()]), origin_tag(&[OriginKind::Windows, wsl()])), ("Win", "WSL", ""));
         let mut s = slide(Agent::Grok, &[wsl()], None);
         s.origin = "WSL".into();

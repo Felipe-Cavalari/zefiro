@@ -26,7 +26,10 @@ cada conta é do Windows ou do WSL e deixe escolher quais contas entram no slide
 - **Um slide por conta e origem** (`UsageState::ai_slides`): cada conta do Claude, do Codex e do
   Grok em cada origem dela. A mesma conta no Windows e no WSL (o Codex do usuário) vira dois slides
   com o mesmo número, para escolher qual aparece; juntos num slide só, sem marca, parecia que o WSL
-  não era detectado. A chave é o agente e a origem (`claude:windows`, `grok:Ubuntu-24.04`). O slide
+  não era detectado. A chave é o agente, a origem e um código curto da conta (FNV-1a da chave dela,
+  nunca o id): `codex:Ubuntu-24.04:1a2b3c4d`. Sem o código, duas contas do Codex no mesmo WSL viravam
+  a mesma chave, e o painel mostrava a primeira duas vezes. Duas contas da mesma IA na mesma origem
+  ganham o plano ou o e-mail no nome ("Codex · WSL · Plus"). O slide
   mostra o ícone da IA, a % da conta e "Win" ou "WSL" ao lado. Uma IA que ainda não respondeu não
   tem slide; sem nenhum, o robô com "—".
 - **Largura fixa:** todos os slides têm a largura do maior ("100%" e a maior marca), e o chip não
