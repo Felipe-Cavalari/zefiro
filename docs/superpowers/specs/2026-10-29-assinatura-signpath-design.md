@@ -59,7 +59,7 @@ que já assina muitos projetos, tire o aviso bem antes do que um certificado nov
 | Reputação verificável | **Risco:** o repositório tem 10 dias, 0 estrelas e cerca de 30 downloads. A SignPath pode recusar ou pedir para tentar mais tarde. |
 | Papéis e MFA | Felipe Cavalari é autor, revisor e aprovador, com MFA no GitHub e na SignPath. |
 | "Code signing policy" na página inicial e na de download | Seção no `README.md` (página inicial do repositório). As notas de cada release ganham o link. |
-| Privacidade declarada | Seção de privacidade no README. Ver o texto abaixo. |
+| Privacidade declarada, mostrada na instalação e com como desligar | Seção de privacidade no README e uma página no instalador com o mesmo resumo. Ver o texto abaixo. |
 | Desinstalação | O Inno Setup já instala o desinstalador. |
 | Nome e versão do produto impostos | A configuração de artefato da SignPath exige `product-name="Zefiro"` e `product-version="${version}"`. |
 | Aprovação manual por release | Cada pedido de assinatura espera a aprovação do Felipe no site da SignPath. |
@@ -173,6 +173,16 @@ Seção `### Privacidade`, com a lista do que sai da máquina e como desligar:
 O texto também diz que o Zefiro não tem telemetria e que o "Exportar diagnóstico" grava um zip local e
 não envia nada.
 
+## Página de privacidade no instalador (decidido pelo usuário)
+
+O instalador mostra o resumo de privacidade numa página própria, depois da licença:
+`InfoBeforeFile=privacidade.txt` no `[Setup]` do `installer/zefiro.iss`, com o arquivo
+`installer/privacidade.txt` em português. O conteúdo é o mesmo da tabela acima, em texto corrido curto
+(uma linha por serviço com "quando" e "como desligar"), mais o link para a seção do README. O README e
+o `privacidade.txt` precisam dizer a mesma coisa. Quem mudar um muda o outro, e o ADR registra isso.
+O instalador é só em português (como hoje), e o arquivo vai em UTF-8 com BOM para o Inno mostrar os
+acentos.
+
 ## Passos do usuário (fora do código)
 
 1. Ligar o MFA no GitHub, se ainda não estiver ligado.
@@ -187,8 +197,8 @@ não envia nada.
 A ordem importa. A política precisa estar no README antes do pedido, então o código entra em duas
 partes:
 
-- **Parte A**, antes do pedido: README e privacidade, `-SkipBuild`, `VersionInfoProductTextVersion`,
-  as XMLs e o workflow com os passos condicionais. Essa parte é toda inerte enquanto
+- **Parte A**, antes do pedido: README e privacidade, a página de privacidade no instalador,
+  `-SkipBuild`, `VersionInfoProductTextVersion`, as XMLs e o workflow com os passos condicionais. Essa parte é toda inerte enquanto
   `SIGNPATH_ORGANIZATION_ID` não existir.
 - **Parte B:** ligar as variáveis, depois da aprovação.
 
