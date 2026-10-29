@@ -81,6 +81,14 @@ pub fn session_account(first_line: &str) -> Option<String> {
     v.get("payload")?.get("creator_account_id")?.as_str().filter(|s| !s.is_empty()).map(str::to_string)
 }
 
+/// Onde o Codex rodou na sessão, pelo `payload.cwd` do `session_meta`: caminho de Linux (`/home/…`,
+/// `/mnt/c/…`) é o WSL; o resto (`C:\…`, `\wsl.localhost\…`), o Windows. Sem `cwd`, não se sabe.
+pub fn session_ran_in_linux(first_line: &str) -> Option<bool> {
+    let v: Value = serde_json::from_str(first_line.trim()).ok()?;
+    let cwd = v.get("payload")?.get("cwd")?.as_str().filter(|s| !s.is_empty())?;
+    Some(cwd.starts_with('/'))
+}
+
 fn first_line(path: &Path) -> Option<String> {
     use std::io::BufRead;
     let mut line = String::new();
@@ -93,15 +101,22 @@ fn first_line(path: &Path) -> Option<String> {
 pub struct CodexRead { pub account: Option<String>, pub modified: SystemTime, pub usage: CodexUsage }
 
 /// O uso mais recente de cada conta entre os `MAX_FILES` arquivos mais novos. Sessão sem conta (Codex
-/// antigo) entra na conta da sessão mais nova que tem uma.
-pub fn read_codex_accounts(sessions_dir: &Path) -> Vec<CodexRead> {
-    let files: Vec<(SystemTime, PathBuf, Option<String>)> = recent_sessions(sessions_dir, MAX_FILES)
+/// antigo) entra na conta da sessão mais nova que tem uma. `linux`: a origem da pasta (WSL ou
+/// Windows); a sessão que rodou no outro lado não conta (a pasta do WSL pode ser a mesma do Windows,
+/// por link ou `CODEX_HOME`). `None` lê todas.
+pub fn read_codex_accounts(sessions_dir: &Path, linux: Option<bool>) -> Vec<CodexRead> {
+    let files: Vec<(SystemTime, PathBuf, Option<String>)> = recent_sessions(sessions_dir, MAX_FILES * 4)
         .into_iter()
-        .take(MAX_FILES)
-        .map(|(modified, path)| {
-            let account = first_line(&path).as_deref().and_then(session_account);
-            (modified, path, account)
+        .filter_map(|(modified, path)| {
+            let first = first_line(&path);
+            let ran_in_linux = first.as_deref().and_then(session_ran_in_linux);
+            if linux.is_some() && ran_in_linux.is_some() && ran_in_linux != linux {
+                return None;
+            }
+            let account = first.as_deref().and_then(session_account);
+            Some((modified, path, account))
         })
+        .take(MAX_FILES)
         .collect();
     let known = files.iter().find_map(|f| f.2.clone());
     let mut reads: Vec<CodexRead> = Vec::new();
@@ -129,27 +144,50 @@ fn event_time(entry: &CodexEntry) -> (Option<i64>, SystemTime) {
     (entry.usage.event_at.as_deref().and_then(parse_iso_utc), entry.modified)
 }
 
-/// Junta as origens da mesma conta, ficando com o evento mais recente entre elas.
-pub fn merge_codex(per_origin: Vec<(OriginKind, Vec<CodexRead>)>) -> Vec<Account<CodexEntry>> {
-    let mut accounts: Vec<Account<CodexEntry>> = Vec::new();
+/// O uso ainda vale: alguma janela do evento não reiniciou.
+fn current(usage: &CodexUsage, now_unix: i64) -> bool {
+    [usage.primary, usage.secondary].iter().flatten().any(|w| w.resets_at > now_unix)
+}
+
+/// Junta as origens da mesma conta, ficando com o evento mais recente entre elas. Uma origem só
+/// entra na conta se o uso dela ainda está numa janela que não reiniciou (sessões velhas no Windows
+/// não fazem o Windows aparecer); sem nenhuma assim, fica a do evento mais recente.
+pub fn merge_codex(per_origin: Vec<(OriginKind, Vec<CodexRead>)>, now_unix: i64) -> Vec<Account<CodexEntry>> {
+    /// Uma conta enquanto junta: o evento mais recente, de que origem ele veio e, por origem, se o
+    /// uso dela ainda vale.
+    struct Found { key: String, data: CodexEntry, newest: OriginKind, origins: Vec<(OriginKind, bool)> }
+    let mut found: Vec<Found> = Vec::new();
     for (kind, reads) in per_origin {
         for read in reads {
             let key = read.account.unwrap_or_else(|| format!("origem:{kind:?}"));
             let entry = CodexEntry { modified: read.modified, usage: read.usage };
-            match accounts.iter_mut().find(|a| a.key == key) {
-                Some(a) => {
-                    if !a.origins.contains(&kind) {
-                        a.origins.push(kind.clone());
-                        a.origins.sort();
+            let live = current(&entry.usage, now_unix);
+            match found.iter_mut().find(|f| f.key == key) {
+                Some(f) => {
+                    match f.origins.iter_mut().find(|(k, _)| *k == kind) {
+                        Some(o) => o.1 |= live,
+                        None => f.origins.push((kind.clone(), live)),
                     }
-                    if event_time(&entry) > event_time(&a.data) {
-                        a.data = entry;
+                    if event_time(&entry) > event_time(&f.data) {
+                        f.data = entry;
+                        f.newest = kind.clone();
                     }
                 }
-                None => accounts.push(Account { key, origins: vec![kind.clone()], stopped: false, data: entry }),
+                None => found.push(Found { key, data: entry, newest: kind.clone(), origins: vec![(kind.clone(), live)] }),
             }
         }
     }
+    let mut accounts: Vec<Account<CodexEntry>> = found
+        .into_iter()
+        .map(|f| {
+            let mut origins: Vec<OriginKind> = f.origins.into_iter().filter(|(_, live)| *live).map(|(k, _)| k).collect();
+            if origins.is_empty() {
+                origins.push(f.newest);
+            }
+            origins.sort();
+            Account { key: f.key, origins, stopped: false, data: f.data }
+        })
+        .collect();
     sort_accounts(&mut accounts);
     accounts
 }
@@ -245,14 +283,14 @@ impl CodexService {
                 let reset_passed = reset_due.is_some_and(|t| t <= now_unix());
                 if seen.as_ref() != Some(&key) {
                     seen = Some(key);
-                    let mut per_origin: Vec<(OriginKind, Vec<CodexRead>)> = origins.iter().map(|o| (o.kind.clone(), read_codex_accounts(&o.home.join(".codex").join("sessions")))).collect();
+                    let mut per_origin: Vec<(OriginKind, Vec<CodexRead>)> = origins.iter().map(|o| (o.kind.clone(), read_codex_accounts(&o.home.join(".codex").join("sessions"), Some(matches!(o.kind, OriginKind::Wsl(_)))))).collect();
                     for (kind, reads) in std::mem::take(&mut last_reads) {
                         if is_stopped(&kind, &found.running) && !per_origin.iter().any(|(k, _)| *k == kind) {
                             per_origin.push((kind, reads));
                         }
                     }
                     last_reads = per_origin.clone();
-                    let mut accounts = merge_codex(per_origin);
+                    let mut accounts = merge_codex(per_origin, now_unix());
                     for account in &mut accounts {
                         account.stopped = account.origins.iter().all(|k| is_stopped(k, &found.running));
                     }
@@ -431,7 +469,7 @@ mod tests {
         let dir = temp("two");
         put(&dir, "2026/10/20/velho.jsonl", &session(Some("c1"), 80.0, "2026-10-20T10:00:00Z"), 10);
         put(&dir, "2026/10/21/novo.jsonl", &session(Some("c2"), 42.0, "2026-10-21T10:00:00Z"), 20);
-        let mut reads = read_codex_accounts(&dir);
+        let mut reads = read_codex_accounts(&dir, None);
         reads.sort_by(|a, b| a.account.cmp(&b.account));
         assert_eq!(reads.iter().map(|r| (r.account.as_deref(), r.usage.primary.unwrap().used_percent)).collect::<Vec<_>>(), [(Some("c1"), 80.0), (Some("c2"), 42.0)]);
         std::fs::remove_dir_all(&dir).unwrap();
@@ -442,7 +480,7 @@ mod tests {
         let dir = temp("anon");
         put(&dir, "2026/10/20/conta.jsonl", &session(Some("c1"), 80.0, "2026-10-20T10:00:00Z"), 10);
         put(&dir, "2026/10/21/sem.jsonl", &session(None, 12.0, "2026-10-21T10:00:00Z"), 20);
-        let reads = read_codex_accounts(&dir);
+        let reads = read_codex_accounts(&dir, None);
         assert_eq!(reads.len(), 1);
         assert_eq!(reads[0].account.as_deref(), Some("c1"));
         assert_eq!(reads[0].usage.primary.unwrap().used_percent, 12.0);
@@ -455,12 +493,57 @@ mod tests {
         let merged = merge_codex(vec![
             (wsl.clone(), vec![read(Some("c1"), 12.0, "2026-10-21T10:00:00Z")]),
             (OriginKind::Windows, vec![read(Some("c1"), 80.0, "2026-10-16T02:56:30Z")]),
-        ]);
+        ], 0);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].origins, vec![OriginKind::Windows, wsl.clone()]);
         assert_eq!(merged[0].data.usage.primary.unwrap().used_percent, 12.0);
-        let two = merge_codex(vec![(OriginKind::Windows, vec![read(Some("c1"), 1.0, "2026-10-21T10:00:00Z")]), (wsl, vec![read(Some("c2"), 2.0, "2026-10-21T10:00:00Z")])]);
+        let two = merge_codex(vec![(OriginKind::Windows, vec![read(Some("c1"), 1.0, "2026-10-21T10:00:00Z")]), (wsl, vec![read(Some("c2"), 2.0, "2026-10-21T10:00:00Z")])], 0);
         assert_eq!(two.len(), 2);
+    }
+
+    /// Sessão com o `cwd` de onde o Codex rodou e o `resets_at` da janela.
+    fn session_at(account: &str, cwd: &str, used: f32, event_at: &str, resets_at: i64) -> String {
+        let meta = serde_json::json!({ "type": "session_meta", "payload": { "creator_account_id": account, "cwd": cwd } });
+        let event = serde_json::json!({ "timestamp": event_at, "payload": { "rate_limits": { "primary": { "used_percent": used, "window_minutes": 300, "resets_at": resets_at } } } });
+        format!("{meta}\n{event}\n")
+    }
+
+    #[test]
+    fn session_says_where_codex_ran() {
+        assert_eq!(session_ran_in_linux(r#"{"type":"session_meta","payload":{"cwd":"/home/x/proj"}}"#), Some(true));
+        assert_eq!(session_ran_in_linux(r#"{"type":"session_meta","payload":{"cwd":"C:\\Users\\x"}}"#), Some(false));
+        assert_eq!(session_ran_in_linux(r#"{"type":"session_meta","payload":{"cwd":"\\\\wsl.localhost\\Ubuntu\\home"}}"#), Some(false), "Codex do Windows abrindo pasta do WSL");
+        assert_eq!(session_ran_in_linux(r#"{"type":"session_meta","payload":{}}"#), None);
+    }
+
+    #[test]
+    fn shared_codex_folder_counts_only_where_codex_ran() {
+        // O amigo do usuário: o `~/.codex` do WSL é o mesmo do Windows (link ou `CODEX_HOME`), e as
+        // sessões, todas do WSL, apareciam também no Windows.
+        let dir = temp("shared");
+        put(&dir, "2026/10/28/wsl.jsonl", &session_at("c1", "/home/x/proj", 14.0, "2026-10-28T22:19:00Z", 4102444800), 10);
+        assert!(read_codex_accounts(&dir, Some(false)).is_empty(), "lida pela pasta do Windows: não é do Windows");
+        assert_eq!(read_codex_accounts(&dir, Some(true)).len(), 1);
+        assert_eq!(read_codex_accounts(&dir, None).len(), 1, "sem origem, como antes");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn origin_without_use_in_the_current_window_is_left_out() {
+        let wsl = OriginKind::Wsl("Ubuntu".into());
+        let now = 2_000_000_000;
+        let at = |used: f32, event_at: &str, resets_at: i64| {
+            let mut r = read(Some("c1"), used, event_at);
+            r.usage.primary = r.usage.primary.map(|w| Window { resets_at, ..w });
+            r
+        };
+        // Sessões velhas no Windows (as janelas já reiniciaram) e uso de agora no WSL.
+        let merged = merge_codex(vec![(OriginKind::Windows, vec![at(80.0, "2026-09-01T10:00:00Z", now - 100)]), (wsl.clone(), vec![at(14.0, "2026-10-28T22:19:00Z", now + 100)])], now);
+        assert_eq!(merged[0].origins, std::slice::from_ref(&wsl));
+        assert_eq!(merged[0].data.usage.primary.unwrap().used_percent, 14.0);
+        // Nenhuma origem com uso na janela: fica a do uso mais recente.
+        let stale = merge_codex(vec![(OriginKind::Windows, vec![at(80.0, "2026-09-01T10:00:00Z", now - 100)]), (wsl.clone(), vec![at(14.0, "2026-09-05T10:00:00Z", now - 50)])], now);
+        assert_eq!(stale[0].origins, [wsl]);
     }
 
     #[test]

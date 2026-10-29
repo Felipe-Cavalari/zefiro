@@ -10,7 +10,7 @@ fn main() {
         let yes = |p: std::path::PathBuf| if p.exists() { "sim" } else { "não" };
         println!("{:?}: claude={} codex={}", o.kind, yes(o.home.join(".claude").join(".credentials.json")), yes(o.home.join(".codex").join("sessions")));
         // O que o leitor do Codex acha nesta origem: a conta vira um código curto (nunca o id).
-        for r in zefiro_integration_usage::codex::read_codex_accounts(&o.home.join(".codex").join("sessions")) {
+        for r in zefiro_integration_usage::codex::read_codex_accounts(&o.home.join(".codex").join("sessions"), Some(matches!(o.kind, zefiro_integration_usage::origins::OriginKind::Wsl(_)))) {
             use std::hash::{Hash, Hasher};
             let mut h = std::collections::hash_map::DefaultHasher::new();
             r.account.hash(&mut h);
