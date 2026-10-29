@@ -51,6 +51,19 @@ pub fn refresh_button_rect(scale: f32) -> Rect {
     Rect::new(px(WIDTH - 20.0 - 28.0), px(12.0), px(28.0), px(28.0))
 }
 
+/// O botão de atualizar (fundo e ícone) no lugar de `refresh_button_rect`.
+pub fn refresh_ops(button: RefreshButton, scale: f32, tokens: &Tokens) -> Vec<DrawOp> {
+    let RefreshButton { enabled, hovered } = button;
+    let r = refresh_button_rect(scale);
+    let icons = TextStyle { size: 12.0 * scale, weight: FontWeight::Regular, family: Family::Icons };
+    let lit = enabled && hovered;
+    let color = if lit { tokens.text } else if enabled { tokens.text_secondary } else { tokens.text_tertiary };
+    vec![
+        DrawOp::RoundRect { rect: r, radius: r.h / 2.0, color: if lit { tokens.raised_strong } else { tokens.raised } },
+        DrawOp::Text { rect: r, text: GLYPH_REFRESH.into(), style: icons, color, align: Align::Center },
+    ]
+}
+
 /// Espaço entre dois blocos; a linha divisória fica no meio dele.
 const BLOCK_GAP: f32 = 12.0;
 
@@ -118,13 +131,8 @@ pub fn usage_panel(blocks: &[UsageBlock], footer: &str, refresh: Option<RefreshB
         }
         y = top + body_h(b);
     }
-    if let Some(RefreshButton { enabled, hovered }) = refresh {
-        let r = refresh_button_rect(scale);
-        let icons = TextStyle { size: 12.0 * scale, weight: FontWeight::Regular, family: Family::Icons };
-        let lit = enabled && hovered;
-        list.push(DrawOp::RoundRect { rect: r, radius: r.h / 2.0, color: if lit { tokens.raised_strong } else { tokens.raised } });
-        let color = if lit { tokens.text } else if enabled { tokens.text_secondary } else { tokens.text_tertiary };
-        list.push(DrawOp::Text { rect: r, text: GLYPH_REFRESH.into(), style: icons, color, align: Align::Center });
+    if let Some(button) = refresh {
+        list.ops.extend(refresh_ops(button, scale, tokens));
     }
     if !footer.is_empty() {
         let top = px(y);

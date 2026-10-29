@@ -159,7 +159,62 @@ pub fn slide_chips(slides: &[Slide], chip_h: f32, font_px: f32, scale: f32, toke
 
 /// O que um clique no painel do chip faz.
 #[derive(Debug, Clone, PartialEq)]
-pub enum AiHit { Edit, Done, Toggle(String), Up(String), Down(String) }
+pub enum AiHit { Edit, Done, Tab(OriginTab), Toggle(String), Up(String), Down(String) }
+
+/// Abas do painel: as contas do Windows ou as das distros do WSL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OriginTab { Windows, Wsl }
+
+impl OriginTab {
+    pub fn label(self) -> &'static str {
+        match self {
+            OriginTab::Windows => "Windows",
+            OriginTab::Wsl => "WSL",
+        }
+    }
+
+    /// A aba do slide, pela marca da origem.
+    pub fn of(slide: &Slide) -> Option<OriginTab> {
+        match slide.tag {
+            "Win" => Some(OriginTab::Windows),
+            "WSL" => Some(OriginTab::Wsl),
+            _ => None,
+        }
+    }
+}
+
+/// As abas que têm slide, Windows antes.
+pub fn tabs(slides: &[Slide]) -> Vec<OriginTab> {
+    [OriginTab::Windows, OriginTab::Wsl].into_iter().filter(|t| slides.iter().any(|s| OriginTab::of(s) == Some(*t))).collect()
+}
+
+/// Altura do cabeçalho com as abas: os blocos descem isso.
+pub const TABS_H: f32 = 40.0;
+
+/// "Windows | WSL" no canto do cabeçalho, como o seletor de agente do chat. Com uma origem só, nada.
+pub fn tabs_ops(tabs: &[OriginTab], selected: OriginTab, scale: f32, tokens: &Tokens, m: &dyn TextMeasurer) -> (Vec<DrawOp>, Vec<(Rect, AiHit)>) {
+    if tabs.len() < 2 {
+        return (Vec::new(), Vec::new());
+    }
+    let px = |v: f32| (v * scale).round();
+    let style = TextStyle { size: 12.0 * scale, weight: FontWeight::SemiBold, family: Family::Text };
+    let widths: Vec<f32> = tabs.iter().map(|t| m.measure(t.label(), &style).w.ceil() + px(26.0)).collect();
+    let track = Rect::new(px(14.0), px(11.0), widths.iter().sum::<f32>() + px(6.0), px(30.0));
+    let mut ops = vec![DrawOp::RoundRect { rect: track, radius: track.h / 2.0, color: tokens.raised }];
+    let mut hits = Vec::new();
+    let mut x = track.x + px(3.0);
+    for (tab, w) in tabs.iter().zip(&widths) {
+        let r = Rect::new(x, track.y + px(3.0), *w, track.h - px(6.0));
+        let on = *tab == selected;
+        if on {
+            ops.push(DrawOp::RoundRect { rect: r, radius: r.h / 2.0, color: tokens.raised_strong });
+        }
+        ops.push(DrawOp::Text { rect: r, text: tab.label().into(), style, color: if on { tokens.text } else { tokens.text_secondary }, align: Align::Center });
+        hits.push((r, AiHit::Tab(*tab)));
+        x += w;
+    }
+    (ops, hits)
+}
 
 /// O lápis do painel normal, à esquerda do botão de atualizar.
 pub fn pencil_rect(scale: f32) -> Rect {
@@ -339,6 +394,22 @@ mod tests {
         assert!(matches!(lists[3].ops[0], DrawOp::Svg { svg, .. } if svg == icons::GROK), "o logo do Grok");
         let (empty, _) = slide_chips(&[], 28.0, 12.0, 1.0, &tokens(), &FixedWidthMeasurer);
         assert_eq!(empty.len(), 1, "sem conta, o robô com o traço");
+    }
+
+    #[test]
+    fn panel_tabs_split_windows_and_wsl() {
+        let all = slides();
+        assert_eq!(tabs(&all), [OriginTab::Windows, OriginTab::Wsl]);
+        assert_eq!(tabs(&all[1..2]), [OriginTab::Wsl], "só WSL: uma aba");
+        assert_eq!((OriginTab::of(&all[0]), OriginTab::of(&all[3])), (Some(OriginTab::Windows), Some(OriginTab::Wsl)));
+        assert_eq!(OriginTab::Wsl.label(), "WSL");
+        let (ops, hits) = tabs_ops(&[OriginTab::Windows, OriginTab::Wsl], OriginTab::Wsl, 1.0, &tokens(), &FixedWidthMeasurer);
+        let texts: Vec<String> = ops.iter().filter_map(|o| if let DrawOp::Text { text, .. } = o { Some(text.clone()) } else { None }).collect();
+        assert_eq!(texts, ["Windows", "WSL"]);
+        assert_eq!(hits.iter().map(|(_, h)| h.clone()).collect::<Vec<_>>(), [AiHit::Tab(OriginTab::Windows), AiHit::Tab(OriginTab::Wsl)]);
+        let right = hits.iter().map(|(r, _)| r.right()).fold(0.0, f32::max);
+        assert!(right + 8.0 <= pencil_rect(1.0).x, "as abas antes do lápis");
+        assert!(tabs_ops(&[OriginTab::Wsl], OriginTab::Wsl, 1.0, &tokens(), &FixedWidthMeasurer).1.is_empty(), "uma origem só: sem abas");
     }
 
     #[test]

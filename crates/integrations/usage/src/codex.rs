@@ -100,8 +100,8 @@ fn first_line(path: &Path) -> Option<String> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CodexRead { pub account: Option<String>, pub modified: SystemTime, pub usage: CodexUsage }
 
-/// O uso mais recente de cada conta entre os `MAX_FILES` arquivos mais novos. Sessão sem conta (Codex
-/// antigo) entra na conta da sessão mais nova que tem uma. `linux`: a origem da pasta (WSL ou
+/// O uso mais recente da conta logada (a da sessão mais nova que tem uma) entre os `MAX_FILES`
+/// arquivos mais novos. Sessão sem conta (Codex antigo) entra nela. `linux`: a origem da pasta (WSL ou
 /// Windows); a sessão que rodou no outro lado não conta (a pasta do WSL pode ser a mesma do Windows,
 /// por link ou `CODEX_HOME`). `None` lê todas.
 pub fn read_codex_accounts(sessions_dir: &Path, linux: Option<bool>) -> Vec<CodexRead> {
@@ -118,18 +118,15 @@ pub fn read_codex_accounts(sessions_dir: &Path, linux: Option<bool>) -> Vec<Code
         })
         .take(MAX_FILES)
         .collect();
+    // A conta logada é a da sessão mais nova que tem uma; as sessões de outra conta nesta origem são
+    // de um login antigo e não contam (o usuário trocou de conta).
     let known = files.iter().find_map(|f| f.2.clone());
-    let mut reads: Vec<CodexRead> = Vec::new();
-    for (modified, path, account) in files {
-        let account = account.or_else(|| known.clone());
-        if reads.iter().any(|r| r.account == account) {
-            continue;
-        }
-        if let Some(usage) = tail(&path).as_deref().and_then(parse_codex_tail) {
-            reads.push(CodexRead { account, modified, usage });
-        }
-    }
-    reads
+    files
+        .into_iter()
+        .filter(|(_, _, account)| account.is_none() || *account == known)
+        .find_map(|(modified, path, _)| tail(&path).as_deref().and_then(parse_codex_tail).map(|usage| CodexRead { account: known.clone(), modified, usage }))
+        .into_iter()
+        .collect()
 }
 
 /// Uma conta do Codex: o uso mais recente e quando o arquivo dele mudou.
@@ -465,13 +462,18 @@ mod tests {
     }
 
     #[test]
-    fn two_accounts_in_one_origin() {
+    fn only_the_logged_in_account_of_an_origin_counts() {
+        // O usuário trocou o login do Codex no WSL: a conta da sessão mais nova é a logada; as
+        // sessões da conta antiga são histórico, não uma conta a mais.
         let dir = temp("two");
         put(&dir, "2026/10/20/velho.jsonl", &session(Some("c1"), 80.0, "2026-10-20T10:00:00Z"), 10);
         put(&dir, "2026/10/21/novo.jsonl", &session(Some("c2"), 42.0, "2026-10-21T10:00:00Z"), 20);
-        let mut reads = read_codex_accounts(&dir, None);
-        reads.sort_by(|a, b| a.account.cmp(&b.account));
-        assert_eq!(reads.iter().map(|r| (r.account.as_deref(), r.usage.primary.unwrap().used_percent)).collect::<Vec<_>>(), [(Some("c1"), 80.0), (Some("c2"), 42.0)]);
+        let reads = read_codex_accounts(&dir, None);
+        assert_eq!(reads.iter().map(|r| (r.account.as_deref(), r.usage.primary.unwrap().used_percent)).collect::<Vec<_>>(), [(Some("c2"), 42.0)]);
+        // A sessão mais nova da conta logada ainda sem `rate_limits`: vale a anterior dela.
+        put(&dir, "2026/10/22/aberta.jsonl", r#"{"type": "session_meta", "payload": {"creator_account_id": "c2"}}"#, 30);
+        let reads = read_codex_accounts(&dir, None);
+        assert_eq!(reads.iter().map(|r| (r.account.as_deref(), r.usage.primary.unwrap().used_percent)).collect::<Vec<_>>(), [(Some("c2"), 42.0)]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

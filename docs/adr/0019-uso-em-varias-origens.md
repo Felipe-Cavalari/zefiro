@@ -57,6 +57,10 @@ Ambiente: Windows 11 Pro 26200, dois monitores 1920×1080 a 100 %, perfil do usu
 **Contas do Codex.**
 - **Identidade:** `creator_account_id` do `session_meta`, a 1ª linha de cada sessão.
 - **Mesma conta em várias origens:** vale o evento mais recente entre elas.
+- **Uma conta por origem (2026-10-28):** a logada, que é a da sessão mais nova. As sessões de outra
+  conta na mesma origem são de um login antigo e não contam (o usuário trocou de conta no WSL e via
+  um Codex a mais). Cada sessão conta na origem onde rodou (`cwd` do `session_meta`), e uma origem
+  só entra na conta com uso numa janela que não reiniciou.
 - **Leitura:** o percurso da árvore de sessões é completo. Um percurso curto pelas pastas de data foi tentado e desfeito, porque `codex resume` grava na pasta do dia em que a sessão começou.
 - **Reinício da janela:** o serviço acorda no `resets_at` mais próximo e avisa a UI.
 

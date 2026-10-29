@@ -19,7 +19,8 @@ use zefiro_platform::geometry::Point;
 use zefiro_ui::paint::DisplayList;
 
 use crate::event_loop::{Loop, TIMER_AI_SLIDE, USER_CLAUDE, USER_CODEX, USER_GROK};
-use zefiro_bar::ai::{AI_CHIP, AiHit, hit_at, nudge, pencil_ops, pencil_rect, slides_panel, toggle};
+use zefiro_bar::ai::{AI_CHIP, AiHit, OriginTab, TABS_H, hit_at, nudge, pencil_ops, pencil_rect, slides_panel, tabs, tabs_ops, toggle};
+use zefiro_bar::usage::refresh_ops;
 
 pub const CODEX_GLYPH: &str = "\u{E943}";
 pub const CLAUDE_GLYPH: &str = "\u{E945}";
@@ -39,6 +40,8 @@ pub struct UsageRuntime {
     refresh_hover: bool,
     /// O painel do chip `ia` está na lista de slides (lápis).
     ai_editing: bool,
+    /// A aba escolhida no painel do chip `ia` (`None`: a primeira que tem conta).
+    ai_tab: Option<OriginTab>,
     /// O que os slides do chip `ia` mostravam: a barra só é refeita quando isso muda.
     ai_shown: Vec<(String, Option<i32>)>,
 }
@@ -253,7 +256,8 @@ fn grok_blocks(s: &GrokSnapshot, now: i64, offset: i32) -> Vec<UsageBlock> {
 /// Os blocos do painel do chip `ia`: um por slide visível, na ordem do chip. A conta de cada
 /// slide entra só com a origem dele (a mesma conta no Windows e no WSL são dois blocos, como no
 /// chip).
-fn ai_blocks(usage: &crate::app::UsageState, ai: &zefiro_core::config::AiConfig, now: i64, offset: i32) -> Vec<UsageBlock> {
+/// `tab`: só os slides dessa origem (`None`, todos).
+fn ai_blocks(usage: &crate::app::UsageState, ai: &zefiro_core::config::AiConfig, now: i64, offset: i32, tab: Option<OriginTab>) -> Vec<UsageBlock> {
     use zefiro_bar::ai::account_slide_key;
     use zefiro_integration_chat::agent::Agent;
     use zefiro_integration_usage::origins::Account;
@@ -264,6 +268,7 @@ fn ai_blocks(usage: &crate::app::UsageState, ai: &zefiro_core::config::AiConfig,
         .ai_slides(ai, now)
         .visible
         .iter()
+        .filter(|s| tab.is_none() || OriginTab::of(s) == tab)
         .filter_map(|s| {
             let blocks = match s.agent {
                 Agent::Claude => usage.claude.as_ref().and_then(|snap| Some(claude_blocks(&ClaudeSnapshot { accounts: only(&snap.accounts, s.agent, &s.key)?, ..snap.clone() }, now, offset)))?,
@@ -435,6 +440,14 @@ impl Loop {
                 self.redraw_open_panel()?;
                 return Ok(true);
             }
+            let (_, selected, hits) = self.ai_tabs(scale);
+            if let Some(AiHit::Tab(tab)) = hit_at(&hits, p) {
+                if tab != selected {
+                    self.usage.ai_tab = Some(tab);
+                    self.redraw_open_panel()?;
+                }
+                return Ok(true);
+            }
             return Ok(false);
         }
         let arranged = self.ctx.usage.ai_slides(&self.ctx.config.ai, now_unix());
@@ -444,11 +457,13 @@ impl Loop {
         let ai = &mut self.ctx.config.ai;
         match &hit {
             AiHit::Done | AiHit::Edit => self.usage.ai_editing = hit == AiHit::Edit,
+            // A lista de edição não tem abas.
+            AiHit::Tab(_) => return Ok(false),
             AiHit::Toggle(key) => toggle(ai, &visible, key),
             AiHit::Up(key) => nudge(ai, &visible, key, true),
             AiHit::Down(key) => nudge(ai, &visible, key, false),
         }
-        if !matches!(hit, AiHit::Done | AiHit::Edit) {
+        if !matches!(hit, AiHit::Done | AiHit::Edit | AiHit::Tab(_)) {
             tracing::info!(slides = self.ctx.config.ai.order.len(), ocultos = self.ctx.config.ai.hidden.len(), "chip ia: slides mudados");
             if let Err(e) = zefiro_core::config::set_ai(&self.ctx.config_path, &self.ctx.config.ai) {
                 tracing::warn!("chip ia: não consegui gravar os slides no config: {e}");
@@ -464,6 +479,7 @@ impl Loop {
     pub fn usage_prepare(&mut self, kind: PanelKind) {
         if kind == PanelKind::Ai {
             self.usage.ai_editing = false;
+            self.usage.ai_tab = None;
             for k in [PanelKind::Claude, PanelKind::Codex, PanelKind::Grok] {
                 self.usage_prepare(k);
             }
@@ -584,16 +600,27 @@ impl Loop {
         usage_panel(&blocks, "", Some(RefreshButton { enabled: !self.usage.codex_refreshing, hovered }), scale, tokens, text)
     }
 
-    /// Painel do chip `ia`: os blocos das três IAs (com o lápis ao lado do atualizar) ou, no lápis,
-    /// a lista dos slides.
+    /// As abas do painel do chip `ia` (as origens com conta), a escolhida e onde clicar.
+    fn ai_tabs(&self, scale: f32) -> (Vec<zefiro_ui::paint::DrawOp>, OriginTab, Vec<(zefiro_platform::geometry::Rect, AiHit)>) {
+        let visible = self.ctx.usage.ai_slides(&self.ctx.config.ai, now_unix()).visible;
+        let available = tabs(&visible);
+        let selected = self.usage.ai_tab.filter(|t| available.contains(t)).or(available.first().copied()).unwrap_or(OriginTab::Windows);
+        let (ops, hits) = tabs_ops(&available, selected, scale, &self.ctx.theme.tokens, &self.ctx.text);
+        (ops, selected, hits)
+    }
+
+    /// Painel do chip `ia`: as abas Windows | WSL (com duas origens), os blocos da aba escolhida e o
+    /// lápis ao lado do atualizar; ou, no lápis, a lista dos slides.
     fn ai_panel_list(&self, scale: f32) -> DisplayList {
         let (tokens, text) = (&self.ctx.theme.tokens, &self.ctx.text);
         let (now, offset) = (now_unix(), utc_offset_seconds());
         if self.usage.ai_editing {
             return slides_panel(&self.ctx.usage.ai_slides(&self.ctx.config.ai, now), scale, tokens).0;
         }
-        // Um bloco por slide visível; sem nenhum ainda, as três IAs (carregando ou o motivo).
-        let mut blocks = ai_blocks(&self.ctx.usage, &self.ctx.config.ai, now, offset);
+        // Um bloco por slide visível da aba; sem nenhum ainda, as três IAs (carregando ou o motivo).
+        let (tab_ops, selected, tab_hits) = self.ai_tabs(scale);
+        let tab = (!tab_hits.is_empty()).then_some(selected);
+        let mut blocks = ai_blocks(&self.ctx.usage, &self.ctx.config.ai, now, offset, tab);
         if blocks.is_empty() {
             let loading = |name: &str| vec![block(name.into(), String::new(), Vec::new(), Some("Carregando…".into()))];
             let u = &self.ctx.usage;
@@ -603,7 +630,19 @@ impl Loop {
         }
         let refreshing = self.usage.claude_refreshing || self.usage.codex_refreshing || self.usage.grok_refreshing;
         let enabled = !refreshing;
-        let mut list = usage_panel(&blocks, if refreshing { "Atualizando…" } else { "" }, Some(RefreshButton { enabled, hovered: self.usage.refresh_hover }), scale, tokens, text);
+        let footer = if refreshing { "Atualizando…" } else { "" };
+        let refresh = RefreshButton { enabled, hovered: self.usage.refresh_hover };
+        if tab.is_none() {
+            let mut list = usage_panel(&blocks, footer, Some(refresh), scale, tokens, text);
+            list.ops.extend(pencil_ops(scale, false, tokens));
+            return list;
+        }
+        // Com abas: os blocos descem para baixo delas, e os botões ficam na linha das abas.
+        let dy = (TABS_H * scale).round();
+        let mut list = usage_panel(&blocks, footer, None, scale, tokens, text).translated(0.0, dy);
+        list.size.h += dy;
+        list.ops.extend(tab_ops);
+        list.ops.extend(refresh_ops(refresh, scale, tokens));
         list.ops.extend(pencil_ops(scale, false, tokens));
         list
     }
@@ -779,15 +818,19 @@ Abra o Claude Code no WSL para renovar."));
         let mut usage = crate::app::UsageState::default();
         usage.codex = Some(codex_snapshot);
         usage.grok = Some(GrokSnapshot { accounts: vec![grok(vec![wsl()], Ok(week(25.0, 0)), false)], wsl_stopped: false, at: None });
-        let blocks = ai_blocks(&usage, &zefiro_core::config::AiConfig::default(), NOW, 0);
+        let blocks = ai_blocks(&usage, &zefiro_core::config::AiConfig::default(), NOW, 0, None);
         let shown: Vec<(&str, bool)> = blocks.iter().map(|b| (b.title.as_str(), b.subtitle.ends_with(" · Windows"))).collect();
         assert_eq!(shown, [("Codex · Plus", true), ("Codex · Plus", false), ("Grok · SuperGrok", false)]);
         assert!(blocks[1].subtitle.ends_with(" · WSL"), "{}", blocks[1].subtitle);
         // O olho tira o slide do painel também; a ordem é a do chip.
         let keys: Vec<String> = usage.ai_slides(&zefiro_core::config::AiConfig::default(), NOW).visible.into_iter().map(|s| s.key).collect();
         let ai = zefiro_core::config::AiConfig { order: vec![keys[2].clone()], hidden: vec![keys[0].clone()], interval: 5 };
-        let titles: Vec<String> = ai_blocks(&usage, &ai, NOW, 0).into_iter().map(|b| b.title).collect();
+        let titles: Vec<String> = ai_blocks(&usage, &ai, NOW, 0, None).into_iter().map(|b| b.title).collect();
         assert_eq!(titles, ["Grok · SuperGrok", "Codex · Plus"]);
+        // As abas: só os blocos da origem escolhida.
+        let wsl_only: Vec<String> = ai_blocks(&usage, &zefiro_core::config::AiConfig::default(), NOW, 0, Some(OriginTab::Wsl)).into_iter().map(|b| b.subtitle).collect();
+        assert!(wsl_only.len() == 2 && wsl_only.iter().all(|s| s.ends_with(" · WSL")), "{wsl_only:?}");
+        assert_eq!(ai_blocks(&usage, &zefiro_core::config::AiConfig::default(), NOW, 0, Some(OriginTab::Windows)).len(), 1);
     }
 
     #[test]
@@ -798,7 +841,7 @@ Abra o Claude Code no WSL para renovar."));
         other.data.usage.plan = Some("go".into());
         let mut usage = crate::app::UsageState::default();
         usage.codex = Some(CodexSnapshot { accounts: vec![codex(vec![wsl()], false), other], wsl_stopped: false });
-        let titles: Vec<String> = ai_blocks(&usage, &zefiro_core::config::AiConfig::default(), NOW, 0).into_iter().map(|b| b.title).collect();
+        let titles: Vec<String> = ai_blocks(&usage, &zefiro_core::config::AiConfig::default(), NOW, 0, None).into_iter().map(|b| b.title).collect();
         assert_eq!(titles, ["Codex · Plus", "Codex · Go"]);
     }
 
