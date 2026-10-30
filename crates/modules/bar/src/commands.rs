@@ -136,6 +136,11 @@ impl PanelState {
     pub fn wheel(&mut self, delta: i32, count: usize) {
         if self.dropdown.is_none() {
             self.scroll = if delta > 0 { self.scroll.saturating_sub(1) } else { (self.scroll + 1).min(max_scroll(count)) };
+            // A roda não gera MouseMove: a linha escolhida acompanha a janela, senão o Enter copiaria
+            // um comando fora da tela.
+            if self.lit() {
+                self.selected = self.selected.clamp(self.scroll, (self.scroll + VISIBLE - 1).min(count.saturating_sub(1)));
+            }
         }
     }
 
@@ -157,7 +162,7 @@ impl PanelState {
     fn pick(&mut self, index: usize, tools: &[ToolEntry]) -> Action {
         self.dropdown = None;
         self.tool = index.checked_sub(1).and_then(|i| tools.get(i)).map(|t| t.id.clone());
-        self.query.clear();
+        // A busca fica: quem vê "Tente em Todas" não digita tudo de novo.
         self.reset_list();
         Action::SaveTool(self.tool.clone())
     }
@@ -400,11 +405,11 @@ mod tests {
     }
 
     #[test]
-    fn picking_a_tool_saves_it_and_resets() {
+    fn picking_a_tool_saves_it_keeps_the_query_and_resets_the_list() {
         let mut s = docker();
         (s.query, s.selected, s.scroll, s.navigated, s.dropdown) = ("x".into(), 4, 2, true, Some(3));
         assert_eq!(s.click_dropdown_item(3, &tools()), Action::SaveTool(Some("git".into())));
-        assert_eq!((s.tool.as_deref(), s.query.as_str(), s.selected, s.scroll, s.navigated, s.dropdown), (Some("git"), "", 0, 0, false, None));
+        assert_eq!((s.tool.as_deref(), s.query.as_str(), s.selected, s.scroll, s.navigated, s.dropdown), (Some("git"), "x", 0, 0, false, None), "a busca fica: é o que 'Tente em Todas' pede");
         s.dropdown = Some(0);
         assert_eq!(s.on_key(0x0D, 5, &tools()), Some(Action::SaveTool(None)), "Enter no índice 0 escolhe Todas");
         assert_eq!(s.tool, None);
@@ -441,6 +446,25 @@ mod tests {
         }
         assert_eq!((s.selected, s.scroll), (0, 0));
         assert_eq!(max_scroll(25), 25 - VISIBLE);
+    }
+
+    #[test]
+    fn wheel_keeps_the_selection_in_view() {
+        let mut s = docker();
+        (s.selected, s.navigated) = (3, true);
+        for _ in 0..5 {
+            s.wheel(-1, 25);
+        }
+        assert_eq!(s.scroll, 5);
+        assert!((s.scroll..s.scroll + VISIBLE).contains(&s.selected), "a linha escolhida saiu da tela: {s:?}");
+        for _ in 0..30 {
+            s.wheel(-1, 25);
+        }
+        assert!((s.scroll..s.scroll + VISIBLE).contains(&s.selected), "no fim da lista: {s:?}");
+        for _ in 0..30 {
+            s.wheel(1, 25);
+        }
+        assert!((s.scroll..s.scroll + VISIBLE).contains(&s.selected), "de volta ao topo: {s:?}");
     }
 
     #[test]

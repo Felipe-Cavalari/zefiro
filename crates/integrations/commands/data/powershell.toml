@@ -90,12 +90,12 @@ keywords = ["achar processo"]
 
 [[command]]
 cmd = "Stop-Process -Name <nome>"
-what = "Encerra os processos com esse nome."
+what = "⚠ Encerra na hora todos os processos com esse nome, sem deixá-los salvar nada."
 keywords = ["matar processo", "encerrar processo"]
 
 [[command]]
 cmd = "Stop-Process -Id <pid> -Force"
-what = "Encerra um processo à força pelo PID."
+what = "⚠ Encerra o processo pelo PID na hora, sem pedir confirmação nem deixá-lo salvar nada."
 keywords = ["matar processo travado", "forçar"]
 
 [[command]]

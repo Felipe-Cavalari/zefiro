@@ -64,7 +64,7 @@ keywords = ["versão do pacote"]
 
 [[command]]
 cmd = "pip freeze > requirements.txt"
-what = "Grava as versões instaladas no requirements.txt (sobrescreve o arquivo)."
+what = "⚠ Grava as versões instaladas no requirements.txt, sobrescrevendo o arquivo."
 keywords = ["gerar requirements", "salvar dependências"]
 popular = true
 

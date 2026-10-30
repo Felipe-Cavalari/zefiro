@@ -279,7 +279,7 @@ what = "Lista os contêineres."
     fn destructive_commands_carry_a_warning() {
         const DANGEROUS: &[&str] = &[
             "prune", "rm -rf", "rm -fr", "reset --hard", "clean -f", "push --force", "push -f", "remove-item", " rmi", "docker rm", "volume rm", "branch -d", "kill -9", "stash drop", "mkfs", "dd if=",
-            "git checkout -- ", "git restore ",
+            "git checkout -- ", "git restore ", " > ", "stop-process",
         ];
         for t in &builtin().tools {
             for c in &t.commands {
