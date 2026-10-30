@@ -9,15 +9,22 @@ use zefiro_platform::text::{Align, Family, FontWeight, TextMeasurer, TextStyle};
 
 type Key = (String, u32, u8, u8);
 
+/// Fonte dos comandos: Cascadia Mono se estiver instalada, senão Consolas (que vem no Windows).
+fn mono_face(installed: impl Fn(&str) -> bool) -> &'static str {
+    if installed("Cascadia Mono") { "Cascadia Mono" } else { "Consolas" }
+}
+
 pub struct DWriteText {
     dwrite: IDWriteFactory,
     family: RefCell<String>,
+    /// A família monoespaçada, resolvida na primeira vez que alguém a pede (não depende do tema).
+    mono: RefCell<Option<&'static str>>,
     cache: RefCell<HashMap<Key, IDWriteTextFormat>>,
 }
 
 impl DWriteText {
     pub fn new(dwrite: IDWriteFactory, family: &str) -> DWriteText {
-        DWriteText { dwrite, family: RefCell::new(family.to_string()), cache: RefCell::new(HashMap::new()) }
+        DWriteText { dwrite, family: RefCell::new(family.to_string()), mono: RefCell::new(None), cache: RefCell::new(HashMap::new()) }
     }
 
     /// Troca a família do tema; limpa o cache.
@@ -26,10 +33,32 @@ impl DWriteText {
         self.cache.borrow_mut().clear();
     }
 
+    /// A família monoespaçada instalada (consulta a coleção do sistema uma só vez).
+    fn mono(&self) -> &'static str {
+        if let Some(face) = *self.mono.borrow() {
+            return face;
+        }
+        let face = mono_face(|name| {
+            let mut collection = None;
+            // SAFETY: ponteiros para variáveis locais, válidos durante as chamadas.
+            unsafe {
+                if self.dwrite.GetSystemFontCollection(&mut collection, false).is_err() {
+                    return false;
+                }
+                let Some(collection) = collection else { return false };
+                let (mut index, mut exists) = (0u32, windows::core::BOOL(0));
+                collection.FindFamilyName(&HSTRING::from(name), &mut index, &mut exists).is_ok() && exists.as_bool()
+            }
+        });
+        *self.mono.borrow_mut() = Some(face);
+        face
+    }
+
     fn face(&self, family: Family) -> String {
         let base = self.family.borrow().clone();
         match family {
             Family::Icons => "Segoe Fluent Icons".into(),
+            Family::Mono => self.mono().into(),
             Family::Text if base == "Segoe UI Variable" => "Segoe UI Variable Text".into(),
             Family::Display if base == "Segoe UI Variable" => "Segoe UI Variable Display".into(),
             _ => base,
@@ -80,5 +109,17 @@ impl TextMeasurer for DWriteText {
             }
             Size { w: m.widthIncludingTrailingWhitespace, h: m.height }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mono_prefers_cascadia_then_consolas() {
+        assert_eq!(mono_face(|n| n == "Cascadia Mono"), "Cascadia Mono");
+        assert_eq!(mono_face(|n| n == "Consolas"), "Consolas");
+        assert_eq!(mono_face(|_| false), "Consolas");
     }
 }

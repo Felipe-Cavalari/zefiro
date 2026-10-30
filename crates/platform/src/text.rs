@@ -6,9 +6,10 @@ use crate::geometry::Size;
 pub enum FontWeight { Regular, SemiBold, Bold }
 
 /// `Text` = corpo (Segoe UI Variable Text); `Display` = números grandes (Segoe UI Variable Display);
-/// `Icons` = glifos da Segoe Fluent Icons (nativa do Windows 11).
+/// `Icons` = glifos da Segoe Fluent Icons (nativa do Windows 11); `Mono` = comandos e código
+/// (Cascadia Mono, ou Consolas se ela não estiver instalada).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Family { Text, Display, Icons }
+pub enum Family { Text, Display, Icons, Mono }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Align { Leading, Center, Trailing }
