@@ -933,6 +933,7 @@ dependencies = [
  "zefiro-core",
  "zefiro-integration-chat",
  "zefiro-integration-clock",
+ "zefiro-integration-commands",
  "zefiro-integration-devices",
  "zefiro-integration-spotify",
  "zefiro-integration-systray",

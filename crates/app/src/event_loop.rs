@@ -138,6 +138,7 @@ pub struct Loop {
     pub(crate) devices: crate::devices_loop::DevicesRuntime,
     pub(crate) usage: crate::usage_loop::UsageRuntime,
     pub(crate) vscode: crate::vscode_loop::VsCodeRuntime,
+    pub(crate) commands: crate::commands_loop::CommandsRuntime,
     pub(crate) terminal: crate::terminal_loop::TerminalRuntime,
     pub(crate) systray: crate::systray_loop::SystrayRuntime,
     pub(crate) chat: crate::chat_loop::ChatRuntime,
@@ -166,7 +167,7 @@ impl Loop {
             panels.push(PanelView::create(&ctx, b.monitor())?);
         }
         let today = now_local().date;
-        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, settings: None, shown_month: (today.year, today.month), island: Default::default(), debug: Default::default(), update: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), terminal: Default::default(), systray: Default::default(), chat: Default::default(), power: Default::default(), system: Default::default(), autohide: Default::default(), spotify: Default::default(), cycles: None })
+        Ok(Loop { ctx, bars, panels, controller: PanelController::new(), editor: None, editor_worker: None, editor_pending: None, editor_generation: 0, editor_started: None, overflow_ids: Vec::new(), overflow_focus: 0, overflow_scroll: 0, menu: None, settings: None, shown_month: (today.year, today.month), island: Default::default(), debug: Default::default(), update: Default::default(), devices: Default::default(), usage: Default::default(), vscode: Default::default(), commands: Default::default(), terminal: Default::default(), systray: Default::default(), chat: Default::default(), power: Default::default(), system: Default::default(), autohide: Default::default(), spotify: Default::default(), cycles: None })
     }
 
     pub(crate) fn bar_index(&self, hwnd: isize) -> Option<usize> { self.bars.iter().position(|b| b.hwnd().0 as isize == hwnd) }
@@ -213,8 +214,7 @@ impl Loop {
             PanelKind::Power => self.power_panel_list(scale),
             PanelKind::Tray => self.systray_panel_list(scale),
             PanelKind::Spotify => self.spotify_panel_list(scale),
-            // Provisório até a ligação do painel (commands_loop).
-            PanelKind::Commands => DisplayList::new(Size { w: 400.0 * scale, h: 120.0 * scale }),
+            PanelKind::Commands => self.commands_panel_list(scale),
         }
     }
 
@@ -263,6 +263,7 @@ impl Loop {
                     self.devices_prepare(p.kind);
                     self.usage_prepare(p.kind);
                     self.vscode_prepare(p.kind);
+                    self.commands_prepare(p.kind);
                     self.terminal_prepare(p.kind);
                     self.systray_prepare(p.kind);
                     self.chat_prepare(p.kind)?;
@@ -532,6 +533,8 @@ impl Loop {
                         // Botão de atualizar do painel do Claude.
                     } else if self.spotify_click(Point { x: x - ox, y: y - oy }, false)? {
                         // Spotify: linha, filtro, menu de ações ou botão do cartão.
+                    } else if self.commands_click(Point { x: x - ox, y: y - oy })? {
+                        // Comandos: linha copiada, dropdown ou clique fora das linhas.
                     } else if self.vscode_click(Point { x: x - ox, y: y - oy })? {
                         // Projeto do VS Code aberto (ou clique fora das linhas).
                     } else if self.devices_up(Point { x: x - ox, y: y - oy })? {
@@ -591,6 +594,7 @@ impl Loop {
                     self.systray_move(Point { x: x - ox, y: y - oy })?;
                     self.chat_move(Point { x: x - ox, y: y - oy })?;
                     self.vscode_move(Point { x: x - ox, y: y - oy })?;
+                    self.commands_move(Point { x: x - ox, y: y - oy })?;
                     self.spotify_move(Point { x: x - ox, y: y - oy })?;
                     // Menu do Z: o item sob o mouse ganha o destaque (só redesenha quando muda).
                     let scale = self.bars[i].scale();
@@ -646,7 +650,7 @@ impl Loop {
                 if self.panel_index(hwnd).is_none() {
                     return Ok(true);
                 }
-                if self.chat_key(vk)? || self.terminal_key(vk)? || self.systray_key(vk)? || self.spotify_key(vk)? || self.vscode_key(vk)? {
+                if self.chat_key(vk)? || self.terminal_key(vk)? || self.systray_key(vk)? || self.spotify_key(vk)? || self.vscode_key(vk)? || self.commands_key(vk)? {
                     return Ok(true);
                 }
                 // Esc na tela de temas volta ao menu; no menu, fecha.
@@ -715,7 +719,7 @@ impl Loop {
                 if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind.tabbed()) {
                     return self.island_wheel(delta).map(|_| true);
                 }
-                if self.panel_index(hwnd).is_some() && (self.chat_wheel(delta)? || self.terminal_wheel(delta)? || self.systray_wheel(delta)? || self.spotify_wheel(delta)? || self.vscode_wheel(delta)?) {
+                if self.panel_index(hwnd).is_some() && (self.chat_wheel(delta)? || self.terminal_wheel(delta)? || self.systray_wheel(delta)? || self.spotify_wheel(delta)? || self.vscode_wheel(delta)? || self.commands_wheel(delta)?) {
                     return Ok(true);
                 }
                 if self.panel_index(hwnd).is_some() && self.controller.open().is_some_and(|o| o.kind == PanelKind::Overflow) {
@@ -765,6 +769,7 @@ impl Loop {
             WinEvent::Character { code, .. } => {
                 if !self.chat_char(code)? && !self.spotify_char(code)? {
                     self.vscode_char(code)?;
+                    self.commands_char(code)?;
                 }
             }
             WinEvent::User { code: USER_POWER } => self.power_user_loaded()?,
