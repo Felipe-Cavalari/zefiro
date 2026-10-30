@@ -1,0 +1,7 @@
+[tool]
+id = "powershell"
+name = "PowerShell"
+
+[[command]]
+cmd = "Get-ChildItem"
+what = "Lista os arquivos da pasta."

@@ -1,0 +1,7 @@
+[tool]
+id = "docker"
+name = "Docker"
+
+[[command]]
+cmd = "docker ps"
+what = "Lista os contêineres em execução."

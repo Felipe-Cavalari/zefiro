@@ -1,0 +1,7 @@
+[tool]
+id = "python"
+name = "Python"
+
+[[command]]
+cmd = "python -m venv .venv"
+what = "Cria um ambiente virtual."

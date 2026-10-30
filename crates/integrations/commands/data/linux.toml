@@ -1,0 +1,7 @@
+[tool]
+id = "linux"
+name = "Linux"
+
+[[command]]
+cmd = "ls -la"
+what = "Lista os arquivos, inclusive os ocultos."

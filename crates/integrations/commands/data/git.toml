@@ -1,0 +1,7 @@
+[tool]
+id = "git"
+name = "Git"
+
+[[command]]
+cmd = "git status"
+what = "Mostra o estado da árvore de trabalho."
