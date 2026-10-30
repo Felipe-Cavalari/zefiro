@@ -93,6 +93,8 @@ pub struct Config {
     pub terminal: TerminalConfig,
     pub chat: ChatConfig,
     pub spotify: SpotifyConfig,
+    /// `[commands]`: a última ferramenta escolhida no chip `commands`.
+    pub commands: CommandsConfig,
     /// `[ia]`: os slides do chip `ia`.
     #[serde(rename = "ia")]
     pub ai: AiConfig,
@@ -124,6 +126,12 @@ impl AiConfig {
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 #[serde(default)]
 pub struct SpotifyConfig { pub client_id: String }
+
+/// Chip `commands` (ADR-0029): `last` é o id da ferramenta escolhida no painel; vazio = Todas.
+/// Escrito pelo próprio painel.
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+#[serde(default)]
+pub struct CommandsConfig { pub last: String }
 
 /// Chat do chip `chat` (ADR-0020, ADR-0027): o agente (`claude`, `codex` ou `grok`) e, para cada
 /// um, a origem e o modelo. Escrito pelo próprio painel.
@@ -291,10 +299,10 @@ impl BarConfig {
 }
 
 impl Config {
-    /// Só `[terminal]`, `[chat]` ou `[spotify]` mudaram? Os painéis do Terminal, do chat e do
-    /// Spotify gravam nelas e não devem se fechar.
+    /// Só `[terminal]`, `[chat]`, `[spotify]`, `[ia]` ou `[commands]` mudaram? Os painéis do Terminal,
+    /// do chat, do Spotify, do chip `ia` e dos comandos gravam nelas e não devem se fechar.
     pub fn same_except_panels(&self, other: &Config) -> bool {
-        Config { terminal: other.terminal.clone(), chat: other.chat.clone(), spotify: other.spotify.clone(), ai: other.ai.clone(), ..self.clone() } == *other
+        Config { terminal: other.terminal.clone(), chat: other.chat.clone(), spotify: other.spotify.clone(), commands: other.commands.clone(), ai: other.ai.clone(), ..self.clone() } == *other
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
@@ -345,7 +353,7 @@ pub struct ClockConfig { pub format: String, pub seconds: bool }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { theme: "obsidian".into(), acrylic: None, bar: BarConfig::default(), island: IslandConfig::default(), clock: ClockConfig::default(), update: UpdateConfig::default(), terminal: TerminalConfig::default(), chat: ChatConfig::default(), spotify: SpotifyConfig::default(), ai: AiConfig::default() }
+        Config { theme: "obsidian".into(), acrylic: None, bar: BarConfig::default(), island: IslandConfig::default(), clock: ClockConfig::default(), update: UpdateConfig::default(), terminal: TerminalConfig::default(), chat: ChatConfig::default(), spotify: SpotifyConfig::default(), commands: CommandsConfig::default(), ai: AiConfig::default() }
     }
 }
 

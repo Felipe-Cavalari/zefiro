@@ -256,3 +256,38 @@ fn only_spotify_changed_is_same_except_panels() {
     b.spotify.client_id = "abc".into();
     assert!(a.same_except_panels(&b));
 }
+
+#[test]
+fn commands_last_defaults_to_empty() {
+    assert_eq!(CommandsConfig::default().last, "");
+    assert_eq!(parse_config(DEFAULT_CONFIG).unwrap().commands, CommandsConfig::default());
+}
+
+#[test]
+fn commands_last_is_read() {
+    let c = parse_config("[commands]\nlast = \"docker\"\n").unwrap();
+    assert_eq!(c.commands.last, "docker");
+}
+
+#[test]
+fn only_commands_changed_is_same_except_panels() {
+    let a = Config::default();
+    let mut b = a.clone();
+    b.commands.last = "git".into();
+    assert!(a.same_except_panels(&b));
+    b.theme = "outro".into();
+    assert!(!a.same_except_panels(&b));
+}
+
+#[test]
+fn set_value_writes_commands_last_keeping_comments() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, DEFAULT_CONFIG).unwrap();
+    set_value(&path, &["commands", "last"], "git").unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("# completa | compacta"), "comentário mantido: {text}");
+    let c = parse_config(&text).unwrap();
+    assert_eq!(c.commands.last, "git");
+    assert_eq!(c.bar.sections.start, vec!["zefiro".to_string()]);
+}
