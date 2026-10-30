@@ -4,4 +4,256 @@ name = "Linux"
 
 [[command]]
 cmd = "ls -la"
-what = "Lista os arquivos, inclusive os ocultos."
+what = "Lista os arquivos da pasta, inclusive os ocultos, com detalhes."
+keywords = ["listar arquivos", "ver pasta", "arquivos ocultos"]
+popular = true
+
+[[command]]
+cmd = "cd <pasta>"
+what = "Entra numa pasta (cd .. sobe um nível, cd - volta à anterior)."
+keywords = ["mudar de pasta", "entrar na pasta"]
+popular = true
+
+[[command]]
+cmd = "pwd"
+what = "Mostra a pasta atual."
+keywords = ["onde estou", "pasta atual"]
+
+[[command]]
+cmd = "mkdir -p <pasta>/<subpasta>"
+what = "Cria a pasta e as que faltarem no caminho."
+keywords = ["criar pasta", "criar diretório"]
+
+[[command]]
+cmd = "touch <arquivo>"
+what = "Cria um arquivo vazio (ou atualiza a data dele)."
+keywords = ["criar arquivo"]
+
+[[command]]
+cmd = "cp -r <origem> <destino>"
+what = "Copia arquivos ou pastas."
+keywords = ["copiar pasta", "copiar arquivo"]
+
+[[command]]
+cmd = "mv <origem> <destino>"
+what = "Move ou renomeia um arquivo ou pasta."
+keywords = ["mover", "renomear arquivo"]
+
+[[command]]
+cmd = "rm <arquivo>"
+what = "⚠ Apaga um arquivo (sem lixeira)."
+keywords = ["apagar arquivo", "excluir arquivo"]
+
+[[command]]
+cmd = "rm -rf <pasta>"
+what = "⚠ Apaga uma pasta e tudo dentro dela, sem perguntar."
+keywords = ["apagar pasta", "excluir diretório", "remover tudo"]
+
+[[command]]
+cmd = "cat <arquivo>"
+what = "Mostra o conteúdo de um arquivo."
+keywords = ["ler arquivo", "ver arquivo"]
+popular = true
+
+[[command]]
+cmd = "less <arquivo>"
+what = "Lê um arquivo grande página por página (q sai)."
+keywords = ["ler arquivo grande", "paginar"]
+
+[[command]]
+cmd = "head -n 20 <arquivo>"
+what = "Mostra as primeiras 20 linhas."
+keywords = ["primeiras linhas"]
+
+[[command]]
+cmd = "tail -n 50 <arquivo>"
+what = "Mostra as últimas 50 linhas."
+keywords = ["últimas linhas"]
+
+[[command]]
+cmd = "tail -f <arquivo>"
+what = "Acompanha um arquivo (log) em tempo real."
+keywords = ["seguir log", "ver log ao vivo"]
+popular = true
+
+[[command]]
+cmd = "grep -rn \"<texto>\" ."
+what = "Procura um texto nos arquivos da pasta e subpastas, com o número da linha."
+keywords = ["buscar texto", "procurar em arquivos", "achar palavra"]
+popular = true
+
+[[command]]
+cmd = "find . -name \"<padrão>\""
+what = "Procura arquivos pelo nome a partir da pasta atual."
+keywords = ["achar arquivo", "buscar arquivo", "localizar"]
+popular = true
+
+[[command]]
+cmd = "chmod +x <arquivo>"
+what = "Torna o arquivo executável."
+keywords = ["dar permissão de execução", "permissão"]
+popular = true
+
+[[command]]
+cmd = "chmod 644 <arquivo>"
+what = "Dá leitura e escrita ao dono e só leitura aos outros."
+keywords = ["permissão de arquivo"]
+
+[[command]]
+cmd = "sudo chown -R $USER:$USER <pasta>"
+what = "Passa a pasta inteira para o seu usuário."
+keywords = ["trocar dono", "corrigir permissão"]
+
+[[command]]
+cmd = "ps aux | grep <nome>"
+what = "Procura um processo pelo nome."
+keywords = ["achar processo", "ver processos"]
+popular = true
+
+[[command]]
+cmd = "kill <pid>"
+what = "Pede para o processo encerrar."
+keywords = ["matar processo", "encerrar processo"]
+
+[[command]]
+cmd = "kill -9 <pid>"
+what = "⚠ Encerra o processo à força, sem deixar ele salvar nada."
+keywords = ["matar processo travado", "forçar"]
+
+[[command]]
+cmd = "top"
+what = "Mostra os processos e o uso de CPU e memória (q sai)."
+keywords = ["monitorar", "uso de cpu"]
+
+[[command]]
+cmd = "htop"
+what = "Monitor de processos interativo (precisa estar instalado)."
+keywords = ["monitorar", "gerenciador de tarefas"]
+
+[[command]]
+cmd = "df -h"
+what = "Mostra o espaço livre em cada disco."
+keywords = ["espaço em disco", "disco cheio"]
+popular = true
+
+[[command]]
+cmd = "du -sh *"
+what = "Mostra o tamanho de cada item da pasta."
+keywords = ["tamanho das pastas", "o que ocupa espaço"]
+popular = true
+
+[[command]]
+cmd = "free -h"
+what = "Mostra a memória livre e em uso."
+keywords = ["memória ram", "uso de memória"]
+
+[[command]]
+cmd = "uname -a"
+what = "Mostra o sistema e a versão do kernel."
+keywords = ["versão do linux"]
+
+[[command]]
+cmd = "whoami"
+what = "Mostra o usuário atual."
+keywords = ["quem sou eu"]
+
+[[command]]
+cmd = "sudo apt update && sudo apt upgrade"
+what = "Atualiza a lista de pacotes e instala as atualizações (Debian/Ubuntu)."
+keywords = ["atualizar sistema", "atualizar pacotes"]
+popular = true
+
+[[command]]
+cmd = "sudo apt install <pacote>"
+what = "Instala um pacote (Debian/Ubuntu)."
+keywords = ["instalar programa"]
+
+[[command]]
+cmd = "sudo apt remove <pacote>"
+what = "⚠ Desinstala um pacote (Debian/Ubuntu)."
+keywords = ["desinstalar programa"]
+
+[[command]]
+cmd = "ss -tulpn"
+what = "Lista as portas em uso e quem as usa."
+keywords = ["portas abertas", "porta em uso", "quem usa a porta"]
+
+[[command]]
+cmd = "lsof -i :<porta>"
+what = "Mostra qual processo usa uma porta."
+keywords = ["porta ocupada", "quem usa a porta"]
+
+[[command]]
+cmd = "curl -I <url>"
+what = "Mostra só os cabeçalhos da resposta de uma URL."
+keywords = ["testar site", "ver status http"]
+
+[[command]]
+cmd = "curl -O <url>"
+what = "Baixa um arquivo com o nome original."
+keywords = ["baixar arquivo"]
+
+[[command]]
+cmd = "wget <url>"
+what = "Baixa um arquivo."
+keywords = ["baixar arquivo"]
+
+[[command]]
+cmd = "tar -czf <arquivo>.tar.gz <pasta>"
+what = "Compacta uma pasta em .tar.gz."
+keywords = ["compactar", "zipar pasta"]
+
+[[command]]
+cmd = "tar -xzf <arquivo>.tar.gz"
+what = "Extrai um .tar.gz."
+keywords = ["descompactar", "extrair"]
+
+[[command]]
+cmd = "ln -s <alvo> <atalho>"
+what = "Cria um link simbólico (atalho)."
+keywords = ["criar atalho", "symlink"]
+
+[[command]]
+cmd = "history | grep <texto>"
+what = "Procura um comando que você já digitou."
+keywords = ["achar comando antigo"]
+
+[[command]]
+cmd = "export <NOME>=<valor>"
+what = "Define uma variável de ambiente na sessão atual."
+keywords = ["variável de ambiente"]
+
+[[command]]
+cmd = "echo $PATH"
+what = "Mostra as pastas onde o shell procura programas."
+keywords = ["ver path"]
+
+[[command]]
+cmd = "which <comando>"
+what = "Mostra onde está o executável de um comando."
+keywords = ["onde fica o programa"]
+
+[[command]]
+cmd = "systemctl status <serviço>"
+what = "Mostra se um serviço está rodando."
+keywords = ["ver serviço"]
+
+[[command]]
+cmd = "sudo systemctl restart <serviço>"
+what = "Reinicia um serviço."
+keywords = ["reiniciar serviço"]
+
+[[command]]
+cmd = "journalctl -u <serviço> -f"
+what = "Acompanha os logs de um serviço."
+keywords = ["logs do serviço"]
+
+[[command]]
+cmd = "ssh <usuário>@<host>"
+what = "Conecta a outra máquina por SSH."
+keywords = ["acessar servidor", "conectar"]
+
+[[command]]
+cmd = "scp <arquivo> <usuário>@<host>:<destino>"
+what = "Copia um arquivo para outra máquina por SSH."
+keywords = ["enviar arquivo ao servidor"]

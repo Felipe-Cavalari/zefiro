@@ -5,3 +5,251 @@ name = "Docker"
 [[command]]
 cmd = "docker ps"
 what = "Lista os contêineres em execução."
+keywords = ["listar containers", "ver rodando", "contêineres ativos"]
+popular = true
+
+[[command]]
+cmd = "docker ps -a"
+what = "Lista todos os contêineres, inclusive os parados."
+keywords = ["listar todos containers", "parados"]
+popular = true
+
+[[command]]
+cmd = "docker images"
+what = "Lista as imagens baixadas ou construídas."
+keywords = ["listar imagens", "ver imagens"]
+popular = true
+
+[[command]]
+cmd = "docker build -t <nome>:<tag> ."
+what = "Constrói uma imagem a partir do Dockerfile da pasta atual."
+keywords = ["criar imagem", "buildar", "dockerfile"]
+popular = true
+
+[[command]]
+cmd = "docker build --no-cache -t <nome> ."
+what = "Constrói a imagem ignorando o cache de camadas."
+keywords = ["build sem cache", "refazer imagem do zero"]
+
+[[command]]
+cmd = "docker run -d --name <nome> -p <porta-host>:<porta-contêiner> <imagem>"
+what = "Sobe um contêiner em segundo plano, com nome e porta publicada."
+keywords = ["subir container", "rodar imagem", "expor porta"]
+popular = true
+
+[[command]]
+cmd = "docker run --rm -it <imagem> sh"
+what = "Roda um contêiner interativo que se apaga ao sair."
+keywords = ["testar imagem", "shell temporário"]
+
+[[command]]
+cmd = "docker start <contêiner>"
+what = "Inicia um contêiner parado."
+keywords = ["ligar container"]
+
+[[command]]
+cmd = "docker stop <contêiner>"
+what = "Para um contêiner em execução."
+keywords = ["parar container", "desligar"]
+
+[[command]]
+cmd = "docker stop $(docker ps -q)"
+what = "Para todos os contêineres em execução."
+keywords = ["parar todos containers"]
+
+[[command]]
+cmd = "docker restart <contêiner>"
+what = "Reinicia um contêiner."
+keywords = ["reiniciar container"]
+
+[[command]]
+cmd = "docker rm <contêiner>"
+what = "⚠ Remove um contêiner parado."
+keywords = ["apagar container", "excluir container"]
+
+[[command]]
+cmd = "docker rm -f <contêiner>"
+what = "⚠ Para e remove um contêiner na força."
+keywords = ["forçar remoção", "apagar container rodando"]
+
+[[command]]
+cmd = "docker rmi <imagem>"
+what = "⚠ Remove uma imagem do disco."
+keywords = ["apagar imagem", "excluir imagem"]
+
+[[command]]
+cmd = "docker logs -f <contêiner>"
+what = "Acompanha os logs do contêiner em tempo real."
+keywords = ["ver logs", "seguir logs", "log ao vivo"]
+popular = true
+
+[[command]]
+cmd = "docker logs --tail 100 <contêiner>"
+what = "Mostra as últimas 100 linhas do log."
+keywords = ["últimas linhas do log"]
+
+[[command]]
+cmd = "docker exec -it <contêiner> sh"
+what = "Abre um shell dentro de um contêiner em execução."
+keywords = ["entrar no container", "terminal dentro do container", "acessar"]
+popular = true
+
+[[command]]
+cmd = "docker exec -it <contêiner> bash"
+what = "Abre um bash dentro de um contêiner em execução (se a imagem tiver bash)."
+keywords = ["entrar no container", "terminal bash"]
+
+[[command]]
+cmd = "docker cp <contêiner>:<caminho> <destino>"
+what = "Copia um arquivo do contêiner para a máquina."
+keywords = ["copiar arquivo do container", "baixar arquivo"]
+
+[[command]]
+cmd = "docker inspect <contêiner>"
+what = "Mostra todos os detalhes de um contêiner ou imagem em JSON."
+keywords = ["detalhes", "ip do container", "ver configuração"]
+
+[[command]]
+cmd = "docker stats"
+what = "Mostra o uso de CPU e memória dos contêineres em tempo real."
+keywords = ["consumo", "uso de memória", "monitorar"]
+
+[[command]]
+cmd = "docker top <contêiner>"
+what = "Lista os processos dentro de um contêiner."
+keywords = ["processos do container"]
+
+[[command]]
+cmd = "docker pull <imagem>"
+what = "Baixa uma imagem do registro."
+keywords = ["baixar imagem"]
+
+[[command]]
+cmd = "docker push <imagem>"
+what = "Envia uma imagem para o registro."
+keywords = ["subir imagem", "publicar imagem"]
+
+[[command]]
+cmd = "docker tag <imagem> <novo-nome>:<tag>"
+what = "Dá outro nome ou tag a uma imagem."
+keywords = ["renomear imagem", "marcar versão"]
+
+[[command]]
+cmd = "docker login"
+what = "Entra no registro (Docker Hub por padrão)."
+keywords = ["autenticar", "logar"]
+
+[[command]]
+cmd = "docker system df"
+what = "Mostra quanto espaço imagens, contêineres, volumes e cache ocupam."
+keywords = ["espaço em disco", "ver tamanho", "quanto ocupa"]
+popular = true
+
+[[command]]
+cmd = "docker builder prune"
+what = "⚠ Apaga o cache de build (as camadas em cache)."
+keywords = ["apagar cache", "limpar cache", "liberar espaço", "buildkit"]
+popular = true
+
+[[command]]
+cmd = "docker system prune"
+what = "⚠ Remove contêineres parados, redes sem uso, imagens sem tag e cache de build."
+keywords = ["limpar tudo", "liberar espaço", "faxina"]
+
+[[command]]
+cmd = "docker system prune -a"
+what = "⚠ Remove também todas as imagens sem uso, além do que o prune comum remove."
+keywords = ["limpar tudo", "liberar espaço", "limpar cache", "faxina completa"]
+popular = true
+
+[[command]]
+cmd = "docker system prune -a --volumes"
+what = "⚠ Como o prune -a, mas apaga também os volumes sem uso (dados de banco, por exemplo)."
+keywords = ["limpar tudo inclusive volumes"]
+
+[[command]]
+cmd = "docker image prune"
+what = "⚠ Remove as imagens sem tag (dangling)."
+keywords = ["limpar imagens", "imagens órfãs"]
+
+[[command]]
+cmd = "docker container prune"
+what = "⚠ Remove todos os contêineres parados."
+keywords = ["limpar containers parados"]
+
+[[command]]
+cmd = "docker volume prune"
+what = "⚠ Remove os volumes que nenhum contêiner usa."
+keywords = ["limpar volumes"]
+
+[[command]]
+cmd = "docker volume ls"
+what = "Lista os volumes."
+keywords = ["listar volumes"]
+
+[[command]]
+cmd = "docker volume rm <volume>"
+what = "⚠ Remove um volume e os dados dele."
+keywords = ["apagar volume"]
+
+[[command]]
+cmd = "docker network ls"
+what = "Lista as redes."
+keywords = ["listar redes"]
+
+[[command]]
+cmd = "docker network create <nome>"
+what = "Cria uma rede para os contêineres se falarem."
+keywords = ["criar rede"]
+
+[[command]]
+cmd = "docker network rm <rede>"
+what = "⚠ Remove uma rede."
+keywords = ["apagar rede"]
+
+[[command]]
+cmd = "docker compose up -d"
+what = "Sobe todos os serviços do compose em segundo plano."
+keywords = ["subir tudo", "iniciar compose", "subir serviços"]
+popular = true
+
+[[command]]
+cmd = "docker compose up -d --build"
+what = "Reconstrói as imagens e sobe os serviços."
+keywords = ["subir e rebuildar", "atualizar imagem"]
+
+[[command]]
+cmd = "docker compose down"
+what = "Para e remove os contêineres e redes do compose."
+keywords = ["derrubar tudo", "parar compose"]
+popular = true
+
+[[command]]
+cmd = "docker compose down -v"
+what = "⚠ Derruba o compose e apaga também os volumes dele."
+keywords = ["derrubar e apagar dados", "resetar banco"]
+
+[[command]]
+cmd = "docker compose logs -f <serviço>"
+what = "Acompanha os logs de um serviço do compose."
+keywords = ["logs do compose"]
+
+[[command]]
+cmd = "docker compose ps"
+what = "Lista os serviços do compose e o estado deles."
+keywords = ["ver serviços"]
+
+[[command]]
+cmd = "docker compose exec <serviço> sh"
+what = "Abre um shell dentro de um serviço do compose."
+keywords = ["entrar no serviço"]
+
+[[command]]
+cmd = "docker compose build --no-cache"
+what = "Reconstrói as imagens do compose sem usar cache."
+keywords = ["build sem cache compose"]
+
+[[command]]
+cmd = "docker info"
+what = "Mostra informações do Docker (versão, driver, recursos)."
+keywords = ["diagnóstico", "versão do docker"]

@@ -259,6 +259,48 @@ what = "Lista os contêineres."
     }
 
     #[test]
+    fn pack_has_enough_commands() {
+        for t in &builtin().tools {
+            assert!(t.commands.len() >= 35, "{} tem só {} comandos", t.id, t.commands.len());
+            assert!(t.commands.iter().filter(|c| c.popular).count() >= 8, "{} tem poucos populares", t.id);
+        }
+    }
+
+    #[test]
+    fn spec_examples_are_findable() {
+        let lib = builtin();
+        let has = |hits: Vec<crate::Hit<'_>>, tool: &str, cmd: &str| hits.iter().any(|h| h.tool.id == tool && h.command.cmd == cmd);
+        assert!(has(lib.search(Some("docker"), "limpar cache"), "docker", "docker builder prune"));
+        assert!(has(lib.search(Some("docker"), "como apago o cache"), "docker", "docker builder prune"));
+        assert!(has(lib.search(None, "subir fastapi uvicorn"), "python", "uvicorn main:app --reload"));
+    }
+
+    #[test]
+    fn destructive_commands_carry_a_warning() {
+        const DANGEROUS: &[&str] = &[
+            "prune", "rm -rf", "rm -fr", "reset --hard", "clean -f", "push --force", "push -f", "remove-item", " rmi", "docker rm", "volume rm", "branch -d", "kill -9", "stash drop", "mkfs", "dd if=",
+            "git checkout -- ", "git restore ",
+        ];
+        for t in &builtin().tools {
+            for c in &t.commands {
+                let lower = c.cmd.to_lowercase();
+                let dangerous = DANGEROUS.iter().any(|p| lower.contains(p)) && !lower.contains("--staged");
+                assert!(!dangerous || c.what.starts_with("⚠ "), "{}: `{}` apaga dados e não avisa", t.id, c.cmd);
+            }
+        }
+    }
+
+    #[test]
+    fn no_duplicate_commands_per_tool() {
+        for t in &builtin().tools {
+            let mut seen = std::collections::HashSet::new();
+            for c in &t.commands {
+                assert!(seen.insert(c.cmd.as_str()), "{}: `{}` repetido", t.id, c.cmd);
+            }
+        }
+    }
+
+    #[test]
     fn builtin_is_valid() {
         let lib = builtin();
         let ids: Vec<_> = lib.tools.iter().map(|t| t.id.as_str()).collect();

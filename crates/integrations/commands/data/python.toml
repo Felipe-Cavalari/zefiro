@@ -3,5 +3,227 @@ id = "python"
 name = "Python"
 
 [[command]]
+cmd = "python --version"
+what = "Mostra a versão do Python."
+keywords = ["versão do python"]
+
+[[command]]
 cmd = "python -m venv .venv"
-what = "Cria um ambiente virtual."
+what = "Cria um ambiente virtual na pasta .venv."
+keywords = ["criar venv", "ambiente virtual"]
+popular = true
+
+[[command]]
+cmd = ".venv\\Scripts\\Activate.ps1"
+what = "Ativa o ambiente virtual no PowerShell (Windows)."
+keywords = ["ativar venv", "ativar ambiente virtual"]
+popular = true
+
+[[command]]
+cmd = "source .venv/bin/activate"
+what = "Ativa o ambiente virtual no Linux, macOS ou WSL."
+keywords = ["ativar venv", "ativar ambiente virtual"]
+popular = true
+
+[[command]]
+cmd = "deactivate"
+what = "Sai do ambiente virtual."
+keywords = ["desativar venv"]
+
+[[command]]
+cmd = "pip install <pacote>"
+what = "Instala um pacote."
+keywords = ["instalar biblioteca", "instalar dependência"]
+popular = true
+
+[[command]]
+cmd = "pip install -r requirements.txt"
+what = "Instala as dependências listadas no requirements.txt."
+keywords = ["instalar dependências", "instalar requirements"]
+popular = true
+
+[[command]]
+cmd = "pip install -U <pacote>"
+what = "Atualiza um pacote para a última versão."
+keywords = ["atualizar biblioteca"]
+
+[[command]]
+cmd = "pip uninstall <pacote>"
+what = "⚠ Desinstala um pacote do ambiente."
+keywords = ["remover biblioteca", "desinstalar"]
+
+[[command]]
+cmd = "pip list"
+what = "Lista os pacotes instalados."
+keywords = ["ver pacotes", "listar bibliotecas"]
+
+[[command]]
+cmd = "pip show <pacote>"
+what = "Mostra a versão e os detalhes de um pacote."
+keywords = ["versão do pacote"]
+
+[[command]]
+cmd = "pip freeze > requirements.txt"
+what = "Grava as versões instaladas no requirements.txt (sobrescreve o arquivo)."
+keywords = ["gerar requirements", "salvar dependências"]
+popular = true
+
+[[command]]
+cmd = "pip install -e ."
+what = "Instala o projeto atual em modo editável."
+keywords = ["instalar projeto em desenvolvimento"]
+
+[[command]]
+cmd = "python -m pip install --upgrade pip"
+what = "Atualiza o próprio pip."
+keywords = ["atualizar pip"]
+
+[[command]]
+cmd = "pip cache purge"
+what = "⚠ Apaga o cache de downloads do pip."
+keywords = ["limpar cache", "apagar cache do pip", "liberar espaço"]
+
+[[command]]
+cmd = "python <arquivo>.py"
+what = "Roda um script."
+keywords = ["executar script", "rodar arquivo"]
+popular = true
+
+[[command]]
+cmd = "python -m <módulo>"
+what = "Roda um módulo como script."
+keywords = ["executar módulo"]
+
+[[command]]
+cmd = "python -c \"print(1 + 1)\""
+what = "Roda um trecho de código direto na linha de comando."
+keywords = ["executar código", "one liner"]
+
+[[command]]
+cmd = "python -m http.server 8000"
+what = "Serve a pasta atual em http://localhost:8000."
+keywords = ["servidor http simples", "compartilhar pasta", "servir arquivos"]
+popular = true
+
+[[command]]
+cmd = "python -m json.tool <arquivo>.json"
+what = "Formata um JSON de forma legível."
+keywords = ["formatar json", "json bonito"]
+
+[[command]]
+cmd = "pytest"
+what = "Roda os testes do projeto."
+keywords = ["rodar testes", "executar testes"]
+popular = true
+
+[[command]]
+cmd = "pytest -x"
+what = "Roda os testes e para no primeiro que falhar."
+keywords = ["parar no primeiro erro"]
+
+[[command]]
+cmd = "pytest -k <expressão>"
+what = "Roda só os testes cujo nome combina com a expressão."
+keywords = ["rodar um teste", "filtrar testes"]
+
+[[command]]
+cmd = "pytest -v"
+what = "Roda os testes mostrando o nome de cada um."
+keywords = ["testes detalhados"]
+
+[[command]]
+cmd = "pytest --cov=<pacote>"
+what = "Roda os testes e mostra a cobertura (precisa do pytest-cov)."
+keywords = ["cobertura de testes", "coverage"]
+
+[[command]]
+cmd = "pip install fastapi \"uvicorn[standard]\""
+what = "Instala o FastAPI e o servidor uvicorn."
+keywords = ["instalar fastapi", "começar api"]
+popular = true
+
+[[command]]
+cmd = "uvicorn main:app --reload"
+what = "Sobe o FastAPI (arquivo main.py, objeto app) e reinicia ao salvar. A documentação fica em /docs."
+keywords = ["subir fastapi", "rodar api", "iniciar servidor", "subir api", "uvicorn"]
+popular = true
+
+[[command]]
+cmd = "uvicorn main:app --host 0.0.0.0 --port 8000"
+what = "Sobe o FastAPI acessível na rede, na porta 8000."
+keywords = ["expor api na rede", "mudar porta", "subir fastapi"]
+
+[[command]]
+cmd = "uvicorn main:app --reload --port 8080"
+what = "Sobe o FastAPI em desenvolvimento numa porta diferente."
+keywords = ["mudar porta do fastapi", "porta em uso"]
+
+[[command]]
+cmd = "uvicorn main:app --workers 4"
+what = "Sobe o FastAPI com 4 processos (produção, sem --reload)."
+keywords = ["subir fastapi em produção", "vários workers"]
+
+[[command]]
+cmd = "fastapi dev main.py"
+what = "Sobe o FastAPI em modo de desenvolvimento pelo CLI do FastAPI."
+keywords = ["subir fastapi", "rodar api"]
+
+[[command]]
+cmd = "fastapi run main.py"
+what = "Sobe o FastAPI em modo de produção pelo CLI do FastAPI."
+keywords = ["subir fastapi em produção"]
+
+[[command]]
+cmd = "ruff check ."
+what = "Procura problemas de estilo e erros no código (lint)."
+keywords = ["lint", "verificar código"]
+
+[[command]]
+cmd = "ruff format ."
+what = "Formata o código do projeto."
+keywords = ["formatar código"]
+
+[[command]]
+cmd = "black ."
+what = "Formata o código do projeto com o black."
+keywords = ["formatar código"]
+
+[[command]]
+cmd = "mypy ."
+what = "Confere os tipos do projeto."
+keywords = ["checar tipos", "type check"]
+
+[[command]]
+cmd = "uv venv"
+what = "Cria um ambiente virtual com o uv."
+keywords = ["criar venv rápido"]
+
+[[command]]
+cmd = "uv pip install <pacote>"
+what = "Instala um pacote com o uv (bem mais rápido que o pip)."
+keywords = ["instalar biblioteca"]
+
+[[command]]
+cmd = "uv run <arquivo>.py"
+what = "Roda um script no ambiente do projeto com o uv."
+keywords = ["executar script"]
+
+[[command]]
+cmd = "poetry install"
+what = "Instala as dependências do pyproject.toml com o poetry."
+keywords = ["instalar dependências"]
+
+[[command]]
+cmd = "poetry add <pacote>"
+what = "Adiciona uma dependência ao projeto com o poetry."
+keywords = ["instalar biblioteca"]
+
+[[command]]
+cmd = "rm -rf .venv"
+what = "⚠ Apaga o ambiente virtual (Linux, macOS ou WSL). Dá para recriar depois."
+keywords = ["apagar venv", "recriar ambiente"]
+
+[[command]]
+cmd = "Remove-Item -Recurse -Force .venv"
+what = "⚠ Apaga o ambiente virtual (PowerShell). Dá para recriar depois."
+keywords = ["apagar venv", "recriar ambiente"]

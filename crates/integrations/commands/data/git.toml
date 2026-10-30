@@ -4,4 +4,260 @@ name = "Git"
 
 [[command]]
 cmd = "git status"
-what = "Mostra o estado da árvore de trabalho."
+what = "Mostra o que mudou e o que está pronto para commit."
+keywords = ["ver mudanças", "estado do repositório"]
+popular = true
+
+[[command]]
+cmd = "git add ."
+what = "Prepara todas as mudanças para o commit."
+keywords = ["adicionar tudo", "stage"]
+popular = true
+
+[[command]]
+cmd = "git add -p"
+what = "Escolhe, pedaço por pedaço, o que entra no commit."
+keywords = ["adicionar parte das mudanças"]
+
+[[command]]
+cmd = "git commit -m \"<mensagem>\""
+what = "Cria um commit com o que está preparado."
+keywords = ["salvar mudanças", "commitar"]
+popular = true
+
+[[command]]
+cmd = "git commit --amend"
+what = "Altera o último commit (mensagem e conteúdo)."
+keywords = ["corrigir último commit", "mudar mensagem do commit"]
+
+[[command]]
+cmd = "git commit --amend --no-edit"
+what = "Inclui o que está preparado no último commit, mantendo a mensagem."
+keywords = ["esqueci de adicionar arquivo ao commit"]
+
+[[command]]
+cmd = "git push"
+what = "Envia os commits para o remoto."
+keywords = ["enviar commits", "subir código"]
+popular = true
+
+[[command]]
+cmd = "git push -u origin <branch>"
+what = "Envia uma branch nova e liga ela ao remoto."
+keywords = ["publicar branch", "primeiro push"]
+
+[[command]]
+cmd = "git pull"
+what = "Traz e junta as mudanças do remoto."
+keywords = ["atualizar código", "baixar mudanças"]
+popular = true
+
+[[command]]
+cmd = "git pull --rebase"
+what = "Traz as mudanças do remoto e reaplica os seus commits por cima."
+keywords = ["atualizar sem merge"]
+
+[[command]]
+cmd = "git fetch"
+what = "Baixa as novidades do remoto sem juntar nada."
+keywords = ["buscar atualizações"]
+
+[[command]]
+cmd = "git clone <url>"
+what = "Baixa um repositório."
+keywords = ["baixar repositório", "clonar"]
+popular = true
+
+[[command]]
+cmd = "git branch"
+what = "Lista as branches locais."
+keywords = ["listar branches"]
+
+[[command]]
+cmd = "git branch -a"
+what = "Lista as branches locais e as do remoto."
+keywords = ["listar todas as branches"]
+
+[[command]]
+cmd = "git switch <branch>"
+what = "Troca de branch."
+keywords = ["mudar de branch", "trocar de branch"]
+popular = true
+
+[[command]]
+cmd = "git switch -c <branch>"
+what = "Cria uma branch nova e já troca para ela."
+keywords = ["criar branch", "nova branch"]
+popular = true
+
+[[command]]
+cmd = "git merge <branch>"
+what = "Junta a branch indicada na branch atual."
+keywords = ["mesclar branches", "unir branches"]
+
+[[command]]
+cmd = "git rebase <branch>"
+what = "Reaplica os commits da branch atual sobre a indicada."
+keywords = ["rebasear"]
+
+[[command]]
+cmd = "git log --oneline --graph --decorate"
+what = "Mostra o histórico resumido, com o desenho das branches."
+keywords = ["ver histórico", "log bonito", "ver commits"]
+popular = true
+
+[[command]]
+cmd = "git log -p <arquivo>"
+what = "Mostra o histórico de um arquivo com as mudanças."
+keywords = ["histórico do arquivo"]
+
+[[command]]
+cmd = "git diff"
+what = "Mostra as mudanças que ainda não estão preparadas."
+keywords = ["ver diferenças", "o que mudou"]
+
+[[command]]
+cmd = "git diff --staged"
+what = "Mostra as mudanças que já estão preparadas para o commit."
+keywords = ["ver o que vai no commit"]
+
+[[command]]
+cmd = "git show <commit>"
+what = "Mostra um commit e as mudanças dele."
+keywords = ["ver commit"]
+
+[[command]]
+cmd = "git stash"
+what = "Guarda as mudanças atuais de lado e limpa a pasta."
+keywords = ["guardar mudanças", "esconder alterações"]
+
+[[command]]
+cmd = "git stash pop"
+what = "Traz de volta as mudanças guardadas e tira do stash."
+keywords = ["recuperar stash"]
+
+[[command]]
+cmd = "git stash list"
+what = "Lista o que está guardado no stash."
+keywords = ["ver stash"]
+
+[[command]]
+cmd = "git stash drop"
+what = "⚠ Apaga o stash mais recente."
+keywords = ["descartar stash"]
+
+[[command]]
+cmd = "git reset --soft HEAD~1"
+what = "Desfaz o último commit mantendo as mudanças preparadas."
+keywords = ["desfazer commit", "voltar um commit"]
+popular = true
+
+[[command]]
+cmd = "git reset HEAD -- <arquivo>"
+what = "Tira um arquivo da área de preparo, sem perder a mudança."
+keywords = ["desfazer add", "tirar do stage"]
+
+[[command]]
+cmd = "git restore --staged <arquivo>"
+what = "Tira um arquivo da área de preparo, sem perder a mudança."
+keywords = ["desfazer add", "tirar do stage"]
+
+[[command]]
+cmd = "git restore <arquivo>"
+what = "⚠ Descarta as mudanças do arquivo e volta ao último commit."
+keywords = ["desfazer alterações", "descartar mudanças"]
+
+[[command]]
+cmd = "git reset --hard HEAD"
+what = "⚠ Descarta todas as mudanças não commitadas."
+keywords = ["desfazer tudo", "descartar tudo"]
+
+[[command]]
+cmd = "git reset --hard origin/<branch>"
+what = "⚠ Faz a branch ficar igual ao remoto, perdendo o que for só local."
+keywords = ["igualar ao remoto", "descartar commits locais"]
+
+[[command]]
+cmd = "git clean -n"
+what = "Mostra quais arquivos não rastreados seriam apagados (não apaga nada)."
+keywords = ["simular limpeza"]
+
+[[command]]
+cmd = "git clean -fd"
+what = "⚠ Apaga os arquivos e pastas não rastreados."
+keywords = ["limpar pasta", "apagar arquivos novos"]
+
+[[command]]
+cmd = "git revert <commit>"
+what = "Cria um commit novo que desfaz um commit antigo."
+keywords = ["desfazer commit publicado"]
+
+[[command]]
+cmd = "git cherry-pick <commit>"
+what = "Copia um commit de outra branch para a atual."
+keywords = ["pegar um commit"]
+
+[[command]]
+cmd = "git branch -d <branch>"
+what = "⚠ Apaga uma branch local já mesclada."
+keywords = ["apagar branch", "excluir branch"]
+
+[[command]]
+cmd = "git branch -D <branch>"
+what = "⚠ Apaga uma branch local mesmo sem mesclar."
+keywords = ["forçar exclusão de branch"]
+
+[[command]]
+cmd = "git push origin --delete <branch>"
+what = "⚠ Apaga a branch no remoto."
+keywords = ["apagar branch remota"]
+
+[[command]]
+cmd = "git push --force-with-lease"
+what = "⚠ Reescreve o histórico no remoto, mas só se ninguém tiver enviado nada novo."
+keywords = ["forçar push com segurança"]
+
+[[command]]
+cmd = "git fetch --prune"
+what = "⚠ Baixa as novidades e remove as referências a branches apagadas no remoto."
+keywords = ["limpar branches antigas"]
+
+[[command]]
+cmd = "git tag <nome>"
+what = "Marca o commit atual com uma tag."
+keywords = ["criar versão", "marcar release"]
+
+[[command]]
+cmd = "git remote -v"
+what = "Mostra os remotos configurados."
+keywords = ["ver remoto", "url do repositório"]
+
+[[command]]
+cmd = "git remote add origin <url>"
+what = "Liga o repositório local a um remoto."
+keywords = ["adicionar remoto"]
+
+[[command]]
+cmd = "git blame <arquivo>"
+what = "Mostra quem mudou cada linha do arquivo."
+keywords = ["quem alterou"]
+
+[[command]]
+cmd = "git reflog"
+what = "Mostra o histórico de onde o HEAD esteve (ajuda a recuperar commits perdidos)."
+keywords = ["recuperar commit perdido", "desfazer reset"]
+
+[[command]]
+cmd = "git rm --cached <arquivo>"
+what = "Para de rastrear um arquivo sem apagá-lo da pasta."
+keywords = ["tirar do git", "ignorar arquivo já commitado"]
+
+[[command]]
+cmd = "git config --global user.name \"<nome>\""
+what = "Define o seu nome nos commits."
+keywords = ["configurar git"]
+
+[[command]]
+cmd = "git config --list"
+what = "Mostra a configuração do git."
+keywords = ["ver configuração"]

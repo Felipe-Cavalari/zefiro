@@ -4,4 +4,249 @@ name = "PowerShell"
 
 [[command]]
 cmd = "Get-ChildItem"
-what = "Lista os arquivos da pasta."
+what = "Lista os arquivos e pastas (alias: ls, dir)."
+keywords = ["listar arquivos", "ver pasta"]
+popular = true
+
+[[command]]
+cmd = "Set-Location <pasta>"
+what = "Entra numa pasta (alias: cd)."
+keywords = ["mudar de pasta", "entrar na pasta"]
+popular = true
+
+[[command]]
+cmd = "Get-Location"
+what = "Mostra a pasta atual (alias: pwd)."
+keywords = ["onde estou", "pasta atual"]
+
+[[command]]
+cmd = "New-Item -ItemType Directory -Path <pasta>"
+what = "Cria uma pasta."
+keywords = ["criar pasta", "criar diretório"]
+
+[[command]]
+cmd = "New-Item -ItemType File -Path <arquivo>"
+what = "Cria um arquivo vazio."
+keywords = ["criar arquivo"]
+
+[[command]]
+cmd = "Copy-Item <origem> <destino> -Recurse"
+what = "Copia arquivos ou pastas."
+keywords = ["copiar pasta", "copiar arquivo"]
+
+[[command]]
+cmd = "Move-Item <origem> <destino>"
+what = "Move ou renomeia um arquivo ou pasta."
+keywords = ["mover", "renomear"]
+
+[[command]]
+cmd = "Remove-Item <arquivo>"
+what = "⚠ Apaga um arquivo (sem lixeira)."
+keywords = ["apagar arquivo", "excluir arquivo"]
+
+[[command]]
+cmd = "Remove-Item -Recurse -Force <pasta>"
+what = "⚠ Apaga uma pasta e tudo dentro dela, sem perguntar."
+keywords = ["apagar pasta", "excluir diretório"]
+
+[[command]]
+cmd = "Get-Content <arquivo>"
+what = "Mostra o conteúdo de um arquivo (alias: cat)."
+keywords = ["ler arquivo", "ver arquivo"]
+popular = true
+
+[[command]]
+cmd = "Get-Content <arquivo> -Wait -Tail 20"
+what = "Acompanha um arquivo (log) em tempo real."
+keywords = ["seguir log", "tail -f"]
+popular = true
+
+[[command]]
+cmd = "Select-String -Path \"*.log\" -Pattern \"<texto>\""
+what = "Procura um texto nos arquivos (como o grep)."
+keywords = ["buscar texto", "grep", "procurar em arquivos"]
+popular = true
+
+[[command]]
+cmd = "Get-ChildItem -Recurse -Filter \"*.log\""
+what = "Procura arquivos por padrão em todas as subpastas."
+keywords = ["achar arquivo", "buscar arquivo"]
+
+[[command]]
+cmd = "Get-ChildItem | Sort-Object Length -Descending | Select-Object -First 10"
+what = "Mostra os 10 maiores arquivos da pasta."
+keywords = ["maiores arquivos", "o que ocupa espaço"]
+
+[[command]]
+cmd = "Get-Process"
+what = "Lista os processos em execução."
+keywords = ["ver processos", "gerenciador de tarefas"]
+popular = true
+
+[[command]]
+cmd = "Get-Process -Name <nome>"
+what = "Procura um processo pelo nome."
+keywords = ["achar processo"]
+
+[[command]]
+cmd = "Stop-Process -Name <nome>"
+what = "Encerra os processos com esse nome."
+keywords = ["matar processo", "encerrar processo"]
+
+[[command]]
+cmd = "Stop-Process -Id <pid> -Force"
+what = "Encerra um processo à força pelo PID."
+keywords = ["matar processo travado", "forçar"]
+
+[[command]]
+cmd = "Get-Service"
+what = "Lista os serviços do Windows e o estado deles."
+keywords = ["ver serviços"]
+
+[[command]]
+cmd = "Restart-Service <nome>"
+what = "Reinicia um serviço (precisa de admin)."
+keywords = ["reiniciar serviço"]
+
+[[command]]
+cmd = "Start-Service <nome>"
+what = "Inicia um serviço."
+keywords = ["ligar serviço"]
+
+[[command]]
+cmd = "Stop-Service <nome>"
+what = "Para um serviço."
+keywords = ["parar serviço"]
+
+[[command]]
+cmd = "Get-NetTCPConnection -LocalPort <porta>"
+what = "Mostra quem está usando uma porta."
+keywords = ["porta ocupada", "quem usa a porta", "porta em uso"]
+popular = true
+
+[[command]]
+cmd = "Get-NetTCPConnection -State Listen"
+what = "Lista as portas em escuta."
+keywords = ["portas abertas"]
+
+[[command]]
+cmd = "Test-NetConnection <host> -Port <porta>"
+what = "Testa se dá para conectar a um host e porta."
+keywords = ["testar conexão", "testar porta", "ping porta"]
+
+[[command]]
+cmd = "Invoke-WebRequest -Uri <url> -OutFile <arquivo>"
+what = "Baixa um arquivo."
+keywords = ["baixar arquivo", "download"]
+
+[[command]]
+cmd = "Invoke-RestMethod <url>"
+what = "Faz uma requisição e já converte o JSON da resposta."
+keywords = ["chamar api", "requisição http"]
+
+[[command]]
+cmd = "Get-Command <nome>"
+what = "Mostra de onde vem um comando (como o which)."
+keywords = ["onde fica o programa", "achar comando"]
+
+[[command]]
+cmd = "Get-Help <comando> -Examples"
+what = "Mostra exemplos de uso de um comando."
+keywords = ["ajuda", "exemplos"]
+
+[[command]]
+cmd = "Get-Alias"
+what = "Lista os apelidos de comandos (ls, cat, etc.)."
+keywords = ["ver aliases"]
+
+[[command]]
+cmd = "$env:PATH -split \";\""
+what = "Mostra as pastas do PATH, uma por linha."
+keywords = ["ver path"]
+
+[[command]]
+cmd = "$env:<NOME> = \"<valor>\""
+what = "Define uma variável de ambiente só nesta sessão."
+keywords = ["variável de ambiente"]
+
+[[command]]
+cmd = "[Environment]::SetEnvironmentVariable(\"<NOME>\", \"<valor>\", \"User\")"
+what = "Define uma variável de ambiente permanente do usuário."
+keywords = ["variável de ambiente permanente"]
+
+[[command]]
+cmd = "Set-ExecutionPolicy -Scope CurrentUser RemoteSigned"
+what = "Libera a execução de scripts locais para o seu usuário."
+keywords = ["erro de execução de scripts", "liberar scripts", "execution policy"]
+popular = true
+
+[[command]]
+cmd = "Get-ExecutionPolicy -List"
+what = "Mostra a política de execução de scripts de cada escopo."
+keywords = ["ver política de scripts"]
+
+[[command]]
+cmd = "Get-Date -Format \"yyyy-MM-dd HH:mm\""
+what = "Mostra a data e a hora no formato escolhido."
+keywords = ["data atual", "hora"]
+
+[[command]]
+cmd = "Compress-Archive -Path <pasta> -DestinationPath <arquivo>.zip"
+what = "Compacta uma pasta em .zip."
+keywords = ["zipar", "compactar"]
+
+[[command]]
+cmd = "Expand-Archive <arquivo>.zip -DestinationPath <pasta>"
+what = "Extrai um .zip."
+keywords = ["descompactar", "extrair"]
+
+[[command]]
+cmd = "Get-FileHash <arquivo> -Algorithm SHA256"
+what = "Calcula o hash SHA-256 de um arquivo."
+keywords = ["verificar integridade", "checksum"]
+
+[[command]]
+cmd = "Test-Path <caminho>"
+what = "Diz se um arquivo ou pasta existe."
+keywords = ["existe arquivo"]
+
+[[command]]
+cmd = "Start-Process <programa>"
+what = "Abre um programa (com -Verb RunAs, como administrador)."
+keywords = ["abrir programa", "executar como admin"]
+
+[[command]]
+cmd = "Get-Volume"
+what = "Mostra os discos e o espaço livre."
+keywords = ["espaço em disco", "disco cheio"]
+popular = true
+
+[[command]]
+cmd = "ipconfig /all"
+what = "Mostra a configuração de rede completa."
+keywords = ["ver ip", "dns"]
+
+[[command]]
+cmd = "wsl --list --verbose"
+what = "Lista as distros do WSL e se estão rodando."
+keywords = ["distros wsl", "ver wsl"]
+
+[[command]]
+cmd = "wsl --shutdown"
+what = "Desliga o WSL inteiro (todas as distros)."
+keywords = ["reiniciar wsl", "liberar memória do wsl"]
+
+[[command]]
+cmd = "winget install <id>"
+what = "Instala um programa pelo winget."
+keywords = ["instalar programa"]
+
+[[command]]
+cmd = "winget upgrade --all"
+what = "Atualiza todos os programas que têm versão nova."
+keywords = ["atualizar programas"]
+
+[[command]]
+cmd = "Clear-Host"
+what = "Limpa a tela (alias: cls, clear)."
+keywords = ["limpar terminal"]
