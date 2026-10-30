@@ -213,6 +213,8 @@ impl Loop {
             PanelKind::Power => self.power_panel_list(scale),
             PanelKind::Tray => self.systray_panel_list(scale),
             PanelKind::Spotify => self.spotify_panel_list(scale),
+            // Provisório até a ligação do painel (commands_loop).
+            PanelKind::Commands => DisplayList::new(Size { w: 400.0 * scale, h: 120.0 * scale }),
         }
     }
 

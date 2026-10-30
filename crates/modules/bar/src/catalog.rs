@@ -16,6 +16,7 @@ pub const ITEMS: &[ItemDescriptor] = &[
     ItemDescriptor { id: "vscode", name: "VS Code", description: "Projetos recentes do VS Code" },
     ItemDescriptor { id: "terminal", name: "Terminal", description: "Perfis do Windows Terminal; o lápis escolhe e ordena" },
     ItemDescriptor { id: "chat", name: "Chat com IA", description: "Pergunte ao Claude, ao Codex ou ao Grok direto da barra" },
+    ItemDescriptor { id: "commands", name: "Comandos", description: "Cola de comandos: Docker, Linux, PowerShell, Python e mais" },
     ItemDescriptor { id: "spotify", name: "Spotify", description: "Busque e toque no Spotify sem abrir o app (Premium)" },
     ItemDescriptor { id: "notifications", name: "Notificações", description: "Contador; clique abre a central" },
     ItemDescriptor { id: "dnd", name: "Não perturbe", description: "Liga e desliga o Não perturbe; o botão do meio abre as configurações" },
@@ -37,13 +38,18 @@ mod tests {
 
     #[test]
     fn new_items_are_in_the_catalog() {
-        for id in ["claude", "codex", "grok", "ia", "vscode", "terminal", "chat", "notifications", "dnd", "power", "player", "weather", "hardware", "island", "tray", "spotify"] {
+        for id in ["claude", "codex", "grok", "ia", "vscode", "terminal", "chat", "notifications", "dnd", "power", "player", "weather", "hardware", "island", "tray", "spotify", "commands"] {
             assert!(descriptor(id).is_some(), "{id} fora do catálogo");
         }
         let names: std::collections::HashSet<_> = ITEMS.iter().map(|i| i.name).collect();
         assert_eq!(names.len(), ITEMS.len(), "nomes repetidos");
         assert!(ITEMS.iter().all(|i| !i.name.is_empty() && !i.description.is_empty()));
         assert_eq!(descriptor("spotify").map(|d| (d.name, d.description)), Some(("Spotify", "Busque e toque no Spotify sem abrir o app (Premium)")));
+    }
+
+    #[test]
+    fn commands_item_text() {
+        assert_eq!(descriptor("commands").map(|d| (d.name, d.description)), Some(("Comandos", "Cola de comandos: Docker, Linux, PowerShell, Python e mais")));
     }
 
     #[test]

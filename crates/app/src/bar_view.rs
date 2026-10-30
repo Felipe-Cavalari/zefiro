@@ -129,6 +129,7 @@ fn icon_glyph(id: &str) -> &'static str {
         "spotify" => "\u{EC4F}",
         "tray" => "\u{E70D}",
         "chat" => "\u{E8F2}",
+        "commands" => "\u{E943}",
         _ => "\u{E7E8}",
     }
 }
@@ -167,7 +168,7 @@ fn chip_content(ctx: &AppCtx, id: &str, device: &str, height: BarHeight, chip_h:
         "dnd" => zefiro_bar::chips::dnd_chip(ctx.system.dnd, chip_h, font_px, t),
         "weather" => weather_chip(ctx.island.weather.as_ref().map(|w| (zefiro_island::weather::icon(w.code), w.temp_c, w.city.as_str())), chip_h, font_px, scale, t, &ctx.text),
         "spotify" => zefiro_bar::spotify_view::spotify_chip(level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text)),
-        "hardware" | "power" | "terminal" | "tray" => level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text),
+        "hardware" | "power" | "terminal" | "tray" | "commands" => level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text),
         "chat" => zefiro_bar::chat::chat_chip(level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text), ctx.system.chat_badge, chip_h, scale, t),
         _ => clock_chip("⋯", chip_h, font_px, t, &ctx.text),
     }
