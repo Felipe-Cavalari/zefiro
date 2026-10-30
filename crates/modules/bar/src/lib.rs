@@ -4,6 +4,7 @@ pub mod ai;
 pub mod calendar;
 pub mod chat;
 pub mod chips;
+pub mod commands;
 pub mod controller;
 pub mod devices;
 pub mod catalog;
