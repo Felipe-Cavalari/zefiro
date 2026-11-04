@@ -96,6 +96,10 @@ impl<I: Clone> TrayModel<I> {
 
 /// Só os campos marcados em `uFlags` mudam.
 fn update<I>(icon: &mut Icon<I>, n: &Notify, image: Option<I>) {
+    // Com GUID a chave não muda quando o app recria a janela da bandeja: o clique e o `prune`
+    // precisam da janela de agora, não da primeira.
+    icon.hwnd = n.hwnd;
+    icon.uid = n.uid;
     if n.flags & NIF_MESSAGE != 0 {
         icon.callback = n.callback;
     }
@@ -235,6 +239,18 @@ mod tests {
         assert!(m.prune(|hwnd| hwnd != 1));
         assert_eq!(tips(&m), ["B"]);
         assert!(!m.prune(|_| true));
+    }
+
+    #[test]
+    fn guid_icon_follows_the_apps_new_window() {
+        let mut m = TrayModel::default();
+        let g = Some([7; 16]);
+        m.apply(&Notify { guid: g, ..n(Op::Add, 10, 1, NIF_TIP | NIF_GUID, "Discord") }, None::<u8>);
+        // O app recriou a janela da bandeja e reenviou o ícone: mesma chave (GUID), outro hwnd.
+        m.apply(&Notify { guid: g, ..n(Op::Add, 20, 1, NIF_TIP | NIF_GUID, "Discord") }, None);
+        assert_eq!(m.visible()[0].hwnd, 20, "o clique precisa ir para a janela viva");
+        assert!(!m.prune(|hwnd| hwnd == 20), "a janela antiga morreu, a nova vive: o ícone fica");
+        assert_eq!(tips(&m), ["Discord"]);
     }
 
     #[test]

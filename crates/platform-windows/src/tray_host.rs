@@ -126,8 +126,16 @@ impl TrayHost {
 
     /// Tira os ícones de apps que morreram sem avisar. Diz se algo saiu.
     pub fn prune(&self) -> bool {
+        let mut model = self.model.lock().unwrap_or_else(|e| e.into_inner());
+        let before: Vec<_> = model.visible().into_iter().map(|i| (i.key, i.hwnd, i.exe.clone())).collect();
         // SAFETY: `IsWindow` só consulta; um handle inválido dá `false`.
-        self.model.lock().unwrap_or_else(|e| e.into_inner()).prune(|h| unsafe { IsWindow(Some(HWND(h as usize as *mut _))) }.as_bool())
+        let changed = model.prune(|h| unsafe { IsWindow(Some(HWND(h as usize as *mut _))) }.as_bool());
+        if changed {
+            for (key, hwnd, exe) in before.into_iter().filter(|(k, ..)| model.get(k).is_none()) {
+                tracing::info!(hwnd, exe = exe.rsplit(['\\', '/']).next().unwrap_or_default(), ?key, "bandeja: ícone de janela que não existe mais saiu");
+            }
+        }
+        changed
     }
 
     /// Devolve um clique ao app dono do ícone, como a barra de tarefas faz, e diz o processo dele.
@@ -383,10 +391,19 @@ fn keep_first() {
 
 /// Lê um ícone e atualiza o modelo.
 fn record(bytes: &[u8], c: &Ctx) {
-    let Some(n) = wire::parse(bytes) else { return };
+    let Some(n) = wire::parse(bytes) else {
+        tracing::warn!(bytes = bytes.len(), "bandeja: dados de ícone ilegíveis");
+        return;
+    };
     // O HICON é de outro processo e pode sumir: vira imagem agora e o handle não é guardado.
     let image = (n.flags & NIF_ICON != 0 && n.hicon != 0).then(|| crate::app_icon::hicon_to_image(HICON(n.hicon as usize as *mut _), c.icon_px)).flatten();
-    let changed = c.model.lock().unwrap_or_else(|e| e.into_inner()).apply(&n, image);
+    let (changed, total) = {
+        let mut model = c.model.lock().unwrap_or_else(|e| e.into_inner());
+        (model.apply(&n, image), model.visible().len())
+    };
+    if matches!(n.op, wire::Op::Add | wire::Op::Delete) {
+        tracing::info!(op = ?n.op, exe = n.exe.rsplit(['\\', '/']).next().unwrap_or_default(), uid = n.uid, changed, total, "bandeja: ícone");
+    }
     if changed {
         (c.on_change)();
     }
