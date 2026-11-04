@@ -1,0 +1,27 @@
+name: Ideia ou pedido de recurso
+description: Sugira um chip, um formato, um tema ou uma melhoria
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        O Zefiro é uma barra que **complementa** a barra de tarefas do Windows (a dock saiu do plano, veja o `docs/PLANNING.md`). Antes de pedir, dê uma olhada no roteiro: o launcher, os itens declarativos e o catálogo da comunidade já estão previstos.
+  - type: textarea
+    id: problema
+    attributes:
+      label: Qual problema isso resolve
+      description: Conte o que você faz hoje e onde atrapalha.
+    validations:
+      required: true
+  - type: textarea
+    id: ideia
+    attributes:
+      label: Como você imagina
+      description: Como seria na barra ou no painel. Um print ou desenho ajuda.
+    validations:
+      required: true
+  - type: textarea
+    id: alternativas
+    attributes:
+      label: Alternativas
+      description: Outro app ou widget que já faz isso (por exemplo, no YASB), ou um jeito de contornar.

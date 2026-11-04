@@ -1,0 +1,60 @@
+name: Bug
+description: Algo quebrou, travou ou se comportou de forma estranha
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Obrigado por reportar. Antes de enviar, procure se já não existe uma issue igual.
+        **Não cole tokens, e-mails de conta ou caminhos pessoais.** O diagnóstico exportado pelo Zefiro já tira isso.
+  - type: textarea
+    id: o-que-aconteceu
+    attributes:
+      label: O que aconteceu
+      description: O que você viu e o que esperava ver.
+    validations:
+      required: true
+  - type: textarea
+    id: como-reproduzir
+    attributes:
+      label: Como reproduzir
+      placeholder: |
+        1. Abra o painel de …
+        2. Clique em …
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: versao
+    attributes:
+      label: Versão do Zefiro
+      description: Aparece nas Configurações (menu do Z) e no nome do instalador (por exemplo, 1.3.2).
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Versão do Windows
+      description: "Por exemplo: Windows 11 24H2, build 26100."
+    validations:
+      required: true
+  - type: textarea
+    id: ambiente
+    attributes:
+      label: Monitores e ambiente
+      description: Quantidade de monitores, resolução, escala de DPI, taxa de atualização, WSL, outro app que mexe na barra (YASB, Seelen…).
+  - type: textarea
+    id: config
+    attributes:
+      label: Chips e formato em uso
+      description: Formato da barra (faixa, pílulas, ilhas, Fluent, Vidro), tema e os chips das seções, se importar para o problema.
+  - type: markdown
+    attributes:
+      value: |
+        ### Diagnóstico
+        No menu do Z, abra **Configurações → Exportar diagnóstico**. Ele grava um `.zip` em Downloads com logs, relatórios de crash e configuração, sem tokens e sem caminhos pessoais. **Arraste o arquivo para o campo abaixo** (confira o conteúdo antes, se quiser).
+  - type: textarea
+    id: diagnostico
+    attributes:
+      label: Diagnóstico exportado
+      description: Arraste o `.zip` aqui, ou cole as linhas relevantes do log.
