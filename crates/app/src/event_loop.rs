@@ -56,6 +56,8 @@ pub const USER_CODEX: u32 = 19;
 pub const USER_CLAUDE: u32 = 20;
 /// A lista de projetos do VS Code foi lida.
 pub const USER_VSCODE: u32 = 21;
+/// O ícone do `Cursor.exe` foi lido.
+pub const USER_EDITOR_ICON: u32 = 30;
 /// Nome e foto da conta (painel Energia) foram lidos.
 pub const USER_POWER: u32 = 22;
 /// O serviço de atualização mudou de estado (versão nova, baixando, pronto, falhou).
@@ -208,7 +210,7 @@ impl Loop {
             PanelKind::Island | PanelKind::Player | PanelKind::Weather | PanelKind::Hardware => self.island_panel_list(scale),
             PanelKind::Audio | PanelKind::Mic | PanelKind::Brightness => self.devices_panel_list(kind, scale),
             PanelKind::Claude | PanelKind::Codex | PanelKind::Grok | PanelKind::Ai => self.usage_panel_list(kind, scale),
-            PanelKind::VsCode => self.vscode_panel_list(scale),
+            PanelKind::VsCode | PanelKind::Cursor => self.vscode_panel_list(scale),
             PanelKind::Terminal => self.terminal_panel_list(scale),
             PanelKind::Chat => self.chat_panel_list(scale),
             PanelKind::Power => self.power_panel_list(scale),
@@ -755,6 +757,7 @@ impl Loop {
             WinEvent::User { code: USER_CLAUDE } => self.usage_claude_changed()?,
             WinEvent::User { code: USER_GROK } => self.usage_grok_changed()?,
             WinEvent::User { code: USER_VSCODE } => self.vscode_loaded()?,
+            WinEvent::User { code: USER_EDITOR_ICON } => self.editor_icon_loaded()?,
             WinEvent::User { code: USER_TERMINAL } => self.terminal_loaded()?,
             WinEvent::User { code: USER_TRAY } => self.systray_changed()?,
             WinEvent::MenuEnded => self.systray_menu_signal(crate::systray_loop::MenuSignal::Ended)?,

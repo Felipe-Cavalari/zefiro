@@ -6,7 +6,7 @@ use windows::Win32::Foundation::HWND;
 use windows::core::{Interface, Result};
 use windows_numerics::{Vector2, Vector3};
 use zefiro_bar::chips::{ChipContent, clock_chip, weather_chip, zefiro_chip};
-use zefiro_bar::devices::{ICON_BRIGHTNESS, Level, level_chip, volume_level, with_svg_icon};
+use zefiro_bar::devices::{ICON_BRIGHTNESS, Level, level_chip, volume_level, with_image_icon, with_svg_icon};
 use zefiro_resources::icons;
 use zefiro_core::config::BarHeight;
 use zefiro_integration_clock::format::ClockText;
@@ -123,7 +123,7 @@ fn player_chip(pill: &PillContent, pad: f32, chip_h: f32, font_px: f32, tokens: 
 /// Ícone dos chips de VS Code, Monitor do PC, Terminal, Bandeja, Spotify e Energia (só ícone).
 fn icon_glyph(id: &str) -> &'static str {
     match id {
-        "vscode" => "\u{E8B7}",
+        "vscode" | "cursor" => "\u{E8B7}",
         "hardware" => "\u{E950}",
         "terminal" => "\u{E756}",
         "spotify" => "\u{EC4F}",
@@ -163,6 +163,8 @@ fn chip_content(ctx: &AppCtx, id: &str, device: &str, height: BarHeight, chip_h:
         "codex" => with_svg_icon(zefiro_bar::usage::usage_chip(crate::usage_loop::CODEX_GLYPH, ctx.usage.codex_chip(), chip_h, font_px, scale, t, &ctx.text), icons::CODEX),
         "claude" => with_svg_icon(zefiro_bar::usage::usage_chip(crate::usage_loop::CLAUDE_GLYPH, ctx.usage.claude_chip(), chip_h, font_px, scale, t, &ctx.text), icons::CLAUDE_CODE),
         "grok" => with_svg_icon(zefiro_bar::usage::usage_chip(crate::usage_loop::GROK_GLYPH, ctx.usage.grok_chip(), chip_h, font_px, scale, t, &ctx.text), icons::GROK),
+        // O Cursor: o ícone colorido do executável instalado (o glifo até ele chegar).
+        "cursor" => with_image_icon(level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text), ctx.cursor_icon.as_ref()),
         "vscode" => with_svg_icon(level_chip(Level { glyph: icon_glyph(id), text: "", dim: false }, chip_h, font_px, scale, t, &ctx.text), icons::VSCODE),
         "notifications" => zefiro_bar::chips::bell_chip(ctx.system.notifications, chip_h, font_px, scale, t, &ctx.text),
         "dnd" => zefiro_bar::chips::dnd_chip(ctx.system.dnd, chip_h, font_px, t),

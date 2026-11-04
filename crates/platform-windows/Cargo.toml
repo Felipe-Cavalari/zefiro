@@ -19,6 +19,7 @@ zefiro-integration-update.workspace = true
 zefiro-integration-chat.workspace = true
 zefiro-integration-systray.workspace = true
 zefiro-integration-spotify.workspace = true
+zefiro-integration-vscode.workspace = true
 windows.workspace = true
 windows-core.workspace = true
 windows-numerics.workspace = true
@@ -26,4 +27,3 @@ tracing.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
-zefiro-integration-vscode.workspace = true

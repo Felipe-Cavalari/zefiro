@@ -9,7 +9,7 @@ use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::Graphics::Gdi::{BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject, HGDIOBJ, SelectObject};
 use windows::Win32::UI::Shell::ExtractIconExW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    DI_MASK, DI_NORMAL, DestroyIcon, DrawIconEx, EnumWindows, GCLP_HICON, GW_OWNER, GetClassLongPtrW, GetWindow, GetWindowThreadProcessId, HICON, ICON_BIG, IsWindowVisible,
+    DI_MASK, DI_NORMAL, DestroyIcon, DrawIconEx, PrivateExtractIconsW, EnumWindows, GCLP_HICON, GW_OWNER, GetClassLongPtrW, GetWindow, GetWindowThreadProcessId, HICON, ICON_BIG, IsWindowVisible,
     SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_GETICON,
 };
 use windows::core::{BOOL, HSTRING, Interface};
@@ -123,4 +123,43 @@ pub(crate) fn hicon_to_image(icon: HICON, size: u32) -> Option<Image> {
         }
     }
     Image::new(size, size, pixels)
+}
+
+/// O ícone de um executável em `size` px, do tamanho mais próximo que o arquivo tiver (um `.ico` de
+/// vários tamanhos: o de 256 px de um app moderno, não o de 32 ampliado). Sem esse tamanho, cai no
+/// ícone grande padrão. Para o ícone de marca de um chip; chamar fora da thread de UI.
+pub fn file_icon(path: &std::path::Path, size: u32) -> Option<Image> {
+    use std::os::windows::ffi::OsStrExt;
+    let mut wide = [0u16; 260];
+    let name: Vec<u16> = path.as_os_str().encode_wide().collect();
+    if name.len() >= wide.len() {
+        return None;
+    }
+    wide[..name.len()].copy_from_slice(&name);
+    let mut icon = [HICON::default()];
+    // SAFETY: `wide` é terminado em zero e vive durante a chamada; `icon` tem o espaço de um ícone,
+    // que é nosso e destruído em seguida.
+    unsafe {
+        let got = PrivateExtractIconsW(&wide, 0, size as i32, size as i32, Some(&mut icon), None, 0);
+        if got == 0 || got == u32::MAX || icon[0].is_invalid() {
+            return exe_icon(&path.to_string_lossy(), size);
+        }
+        let image = hicon_to_image(icon[0], size);
+        let _ = DestroyIcon(icon[0]);
+        image
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_icon_of_an_executable_fills_the_requested_size() {
+        let explorer = std::path::PathBuf::from(std::env::var_os("WINDIR").unwrap_or_else(|| r"C:\Windows".into())).join("explorer.exe");
+        let icon = file_icon(&explorer, 64).expect("o Explorer tem ícone");
+        assert_eq!((icon.width(), icon.height()), (64, 64));
+        assert!(icon.bgra().as_chunks::<4>().0.iter().any(|p| p[3] > 0), "não é só transparência");
+        assert!(file_icon(std::path::Path::new(r"C:\nao\existe.exe"), 64).is_none());
+    }
 }

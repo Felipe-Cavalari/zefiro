@@ -1,4 +1,4 @@
-//! Painel "VS Code · recentes": uma linha por projeto (nome, data, onde fica e um selo para WSL,
+//! Painel "VS Code · recentes" (ou "Cursor · recentes", o mesmo painel com outro título): uma linha por projeto (nome, data, onde fica e um selo para WSL,
 //! remoto ou workspace), com busca no topo e rolagem pela roda.
 
 use zefiro_platform::geometry::{Point, Rect, Size};
@@ -84,7 +84,7 @@ pub fn hovered_row(hits: &[(Rect, usize)], p: Point) -> Option<usize> {
 /// Estado da busca para o desenho: o texto, a linha escolhida e o medidor (para o cursor).
 pub struct Search<'a> { pub query: &'a str, pub selected: Option<usize>, pub measure: &'a dyn TextMeasurer }
 
-pub fn vscode_panel(items: &[RecentRow], scroll: usize, message: Option<&str>, search_state: &Search, scale: f32, tokens: &Tokens) -> (DisplayList, Vec<(Rect, usize)>, Rect) {
+pub fn vscode_panel(editor: &str, items: &[RecentRow], scroll: usize, message: Option<&str>, search_state: &Search, scale: f32, tokens: &Tokens) -> (DisplayList, Vec<(Rect, usize)>, Rect) {
     let (query, selected) = (search_state.query, search_state.selected);
     let px = |v: f32| (v * scale).round();
     let text = |size: f32, weight: FontWeight| TextStyle { size: size * scale, weight, family: Family::Text };
@@ -94,7 +94,7 @@ pub fn vscode_panel(items: &[RecentRow], scroll: usize, message: Option<&str>, s
     let size = Size { w: px(WIDTH), h: px(ROWS_Y + body + 10.0) };
     let mut list = DisplayList::new(size);
     let mut hits = Vec::new();
-    list.push(DrawOp::Text { rect: Rect::new(px(20.0), px(14.0), size.w - px(40.0), px(22.0)), text: "VS Code · recentes".into(), style: text(13.0, FontWeight::SemiBold), color: tokens.text_secondary, align: Align::Leading });
+    list.push(DrawOp::Text { rect: Rect::new(px(20.0), px(14.0), size.w - px(40.0), px(22.0)), text: format!("{editor} · recentes"), style: text(13.0, FontWeight::SemiBold), color: tokens.text_secondary, align: Align::Leading });
     let search = Rect::new(px(10.0), px(44.0), size.w - px(20.0), px(30.0));
     list.push(DrawOp::RoundRect { rect: search, radius: px(10.0), color: tokens.raised });
     // Lupa, o texto (ou a dica) e o cursor logo depois do texto.
@@ -189,16 +189,16 @@ mod tests {
     #[test]
     fn search_box_shows_the_hint_or_the_query() {
         let items: Vec<RecentRow> = (0..3).map(row).collect();
-        let (list, _, _) = vscode_panel(&items, 0, None, &search("", None), 1.0, &tokens());
+        let (list, _, _) = vscode_panel("VS Code", &items, 0, None, &search("", None), 1.0, &tokens());
         assert!(texts(&list).contains(&"Buscar projetos".to_string()));
-        let (list, _, _) = vscode_panel(&items, 0, None, &search("proj", None), 1.0, &tokens());
+        let (list, _, _) = vscode_panel("VS Code", &items, 0, None, &search("proj", None), 1.0, &tokens());
         assert!(texts(&list).contains(&"proj".to_string()) && !texts(&list).contains(&"Buscar projetos".to_string()));
     }
 
     #[test]
     fn search_box_sits_above_the_rows_and_the_selected_row_is_lit() {
         let items: Vec<RecentRow> = (0..3).map(row).collect();
-        let (list, hits, search) = vscode_panel(&items, 0, None, &search("", Some(1)), 1.0, &tokens());
+        let (list, hits, search) = vscode_panel("VS Code", &items, 0, None, &search("", Some(1)), 1.0, &tokens());
         assert!(search.bottom() <= hits[0].0.y, "a busca fica acima da primeira linha");
         let lit = list.ops.iter().filter(|o| matches!(o, DrawOp::RoundRect { rect, .. } if rect.x == hits[1].0.x && rect.y == hits[1].0.y && rect.w == hits[1].0.w)).count();
         assert_eq!(lit, 1, "a linha escolhida pelo teclado tem fundo");
@@ -207,7 +207,7 @@ mod tests {
     #[test]
     fn panel_shows_name_date_location_and_badge() {
         let items: Vec<RecentRow> = (0..3).map(row).collect();
-        let (list, hits, _) = vscode_panel(&items, 0, None, &search("", None), 1.0, &tokens());
+        let (list, hits, _) = vscode_panel("VS Code", &items, 0, None, &search("", None), 1.0, &tokens());
         let t = texts(&list);
         for s in ["VS Code · recentes", "projeto-0", "19/10 11:42", r"C:\Users\felip\Projects", "WSL"] {
             assert!(t.contains(&s.to_string()), "falta {s}");
@@ -219,7 +219,7 @@ mod tests {
     #[test]
     fn panel_scrolls_after_twelve_rows() {
         let items: Vec<RecentRow> = (0..20).map(row).collect();
-        let (list, hits, _) = vscode_panel(&items, 3, None, &search("", None), 1.0, &tokens());
+        let (list, hits, _) = vscode_panel("VS Code", &items, 3, None, &search("", None), 1.0, &tokens());
         assert_eq!(hits.len(), 12);
         assert_eq!(hits[0].1, 3);
         assert_eq!(list.size.h, 82.0 + 12.0 * 44.0 + 10.0);
@@ -233,17 +233,24 @@ mod tests {
     fn the_row_under_the_mouse_takes_the_highlight() {
         let items: Vec<RecentRow> = (0..20).map(row).collect();
         // Rolado em 1: as áreas de clique dizem a posição na lista mostrada.
-        let (_, hits, search_box) = vscode_panel(&items, 1, None, &search("", None), 1.0, &tokens());
+        let (_, hits, search_box) = vscode_panel("VS Code", &items, 1, None, &search("", None), 1.0, &tokens());
         let over = |r: Rect| Point { x: r.center_x(), y: r.y + r.h / 2.0 };
         assert_eq!(hovered_row(&hits, over(hits[2].0)), Some(3), "terceira linha visível = projeto 3");
         assert_eq!(hovered_row(&hits, over(search_box)), None, "a busca não é linha");
-        let (list, _, _) = vscode_panel(&items, 1, None, &search("", hovered_row(&hits, over(hits[0].0))), 1.0, &tokens());
+        let (list, _, _) = vscode_panel("VS Code", &items, 1, None, &search("", hovered_row(&hits, over(hits[0].0))), 1.0, &tokens());
         assert!(list.ops.iter().any(|o| matches!(o, DrawOp::RoundRect { rect, .. } if *rect == hits[0].0)), "a linha sob o mouse ganha o fundo");
     }
 
     #[test]
+    fn panel_title_names_the_editor() {
+        let (list, _, _) = vscode_panel("Cursor", &[], 0, Some("Carregando…"), &search("", None), 1.0, &tokens());
+        assert!(texts(&list).contains(&"Cursor · recentes".to_string()));
+        assert!(!texts(&list).iter().any(|t| t.contains("VS Code")));
+    }
+
+    #[test]
     fn panel_message_without_items() {
-        let (list, hits, _) = vscode_panel(&[], 0, Some("Carregando…"), &search("", None), 1.0, &tokens());
+        let (list, hits, _) = vscode_panel("VS Code", &[], 0, Some("Carregando…"), &search("", None), 1.0, &tokens());
         assert!(texts(&list).contains(&"Carregando…".to_string()));
         assert!(hits.is_empty());
     }

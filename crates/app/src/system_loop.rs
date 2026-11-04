@@ -66,6 +66,7 @@ impl Loop {
         self.usage_services();
         self.update_services();
         self.chat_services();
+        self.editor_icon_services();
         self.systray_services();
         self.spotify_services();
         // Mídia e clima seguem a ilha embutida e os chips do player e do clima.

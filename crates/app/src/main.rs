@@ -77,7 +77,7 @@ fn run(started: Instant) -> windows::core::Result<()> {
     let gfx = Gfx::new()?;
     let comp = Comp::new(&gfx)?;
     let text = DWriteText::new(gfx.dwrite.clone(), &theme.theme.font.family);
-    let ctx = app::AppCtx { gfx, comp, text, theme, config, config_path, themes_dir, clock: zefiro_integration_clock::windows::WindowsClock, island: Default::default(), devices: Default::default(), usage: Default::default(), system: Default::default(), epoch: started };
+    let ctx = app::AppCtx { gfx, comp, text, theme, config, config_path, themes_dir, clock: zefiro_integration_clock::windows::WindowsClock, island: Default::default(), devices: Default::default(), usage: Default::default(), system: Default::default(), cursor_icon: None, epoch: started };
 
     let mut bars = Vec::new();
     for m in robustness::bar_monitors(&ctx.config) {

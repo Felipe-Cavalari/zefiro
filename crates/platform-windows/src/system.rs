@@ -247,21 +247,38 @@ pub fn wsl_running_distros() -> Vec<String> {
     String::from_utf16_lossy(&wide).lines().map(|l| l.trim().trim_matches('\0').to_lowercase()).filter(|l| !l.is_empty()).collect()
 }
 
-/// O `Code.exe` do VS Code: ao lado do `bin\code.cmd` que estiver no PATH, senão nas pastas padrão
-/// de instalação (do usuário e do sistema).
-pub fn find_code_exe() -> Option<PathBuf> {
-    let from_path = std::env::var_os("PATH").into_iter().flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).find_map(|dir| {
-        dir.join("code.cmd").is_file().then(|| dir.parent().map(|p| p.join("Code.exe"))).flatten()
-    });
-    let defaults = [("LOCALAPPDATA", r"Programs\Microsoft VS Code\Code.exe"), ("ProgramFiles", r"Microsoft VS Code\Code.exe")]
-        .into_iter()
-        .filter_map(|(var, rel)| std::env::var_os(var).map(|base| PathBuf::from(base).join(rel)));
-    from_path.into_iter().chain(defaults).find(|p| p.is_file())
+/// O executável do editor (VS Code ou Cursor): ao lado do `bin\<launcher>.cmd` que estiver no PATH,
+/// senão nas pastas padrão de instalação (do usuário e do sistema).
+pub fn find_editor_exe(editor: zefiro_integration_vscode::Editor) -> Option<PathBuf> {
+    let path_dirs: Vec<PathBuf> = std::env::var_os("PATH").into_iter().flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).collect();
+    locate_editor_exe(editor, &path_dirs, &|var| std::env::var_os(var).map(PathBuf::from), &|p| p.is_file())
+}
+
+fn locate_editor_exe(editor: zefiro_integration_vscode::Editor, path_dirs: &[PathBuf], var: &dyn Fn(&str) -> Option<PathBuf>, is_file: &dyn Fn(&Path) -> bool) -> Option<PathBuf> {
+    let from_path = path_dirs.iter().find_map(|dir| is_file(&dir.join(editor.launcher())).then(|| dir.parent().map(|p| p.join(editor.exe()))).flatten());
+    let defaults = editor.install_candidates().iter().filter_map(|(name, rel)| var(name).map(|base| base.join(rel)));
+    from_path.into_iter().chain(defaults).find(|p| is_file(p))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_each_editor_by_path_then_by_default_folder() {
+        use zefiro_integration_vscode::Editor;
+        let var = |name: &str| (name == "LOCALAPPDATA").then(|| PathBuf::from(r"C:\Users\felip\AppData\Local"));
+        let installed = |p: &Path| p == Path::new(r"C:\Users\felip\AppData\Local\Programs\cursor\Cursor.exe");
+        // Pelo PATH: o exe fica uma pasta acima do `bin`.
+        let on_path = [PathBuf::from(r"D:\Apps\cursor\bin")];
+        let found = locate_editor_exe(Editor::Cursor, &on_path, &var, &|p| p == Path::new(r"D:\Apps\cursor\bin\cursor.cmd") || p == Path::new(r"D:\Apps\cursor\Cursor.exe"));
+        assert_eq!(found, Some(PathBuf::from(r"D:\Apps\cursor\Cursor.exe")));
+        // Sem PATH: a pasta padrão do usuário.
+        assert_eq!(locate_editor_exe(Editor::Cursor, &[], &var, &installed), Some(PathBuf::from(r"C:\Users\felip\AppData\Local\Programs\cursor\Cursor.exe")));
+        // O Cursor não confunde com o VS Code, nem o contrário.
+        assert_eq!(locate_editor_exe(Editor::Code, &[], &var, &installed), None);
+        assert_eq!(locate_editor_exe(Editor::Cursor, &[], &var, &|_| false), None);
+    }
 
     #[test]
     fn hidden_output_returns_stdout() {

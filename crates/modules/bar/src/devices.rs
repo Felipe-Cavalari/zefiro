@@ -3,6 +3,7 @@
 
 use zefiro_platform::color::Rgba;
 use zefiro_platform::geometry::{Point, Rect, Size};
+use zefiro_platform::image::Image;
 use zefiro_platform::text::{Align, Family, FontWeight, TextMeasurer, TextStyle};
 use zefiro_resources::tokens::Tokens;
 use zefiro_ui::paint::{DisplayList, DrawOp};
@@ -65,6 +66,17 @@ pub fn with_svg_icon(mut chip: ChipContent, svg: &'static str) -> ChipContent {
         let side = (rect.w * 0.88).min(rect.h).round();
         let icon = Rect::new(rect.x + (rect.w - side) / 2.0, rect.y + (rect.h - side) / 2.0, side, side);
         chip.list.ops[0] = DrawOp::Svg { rect: icon, svg, color };
+    }
+    chip
+}
+
+/// Como `with_svg_icon`, mas com a imagem colorida de um app (o ícone do executável, sem tingir). Sem
+/// imagem (ainda carregando ou app não instalado), o glifo fica.
+pub fn with_image_icon(mut chip: ChipContent, image: Option<&Image>) -> ChipContent {
+    if let (Some(image), Some(DrawOp::Text { rect, .. })) = (image, chip.list.ops.first().cloned()) {
+        let side = (rect.w * 0.88).min(rect.h).round();
+        let icon = Rect::new(rect.x + (rect.w - side) / 2.0, rect.y + (rect.h - side) / 2.0, side, side);
+        chip.list.ops[0] = DrawOp::Image { rect: icon, image: image.clone(), radius: 0.0, opacity: 1.0 };
     }
     chip
 }
@@ -218,6 +230,21 @@ mod tests {
         assert_eq!(rect.w, rect.h, "quadrado");
         assert!((rect.center_x() - slot.center_x()).abs() < 0.01 && (rect.y + rect.h / 2.0 - slot.h / 2.0).abs() < 0.01, "centrado no lugar do glifo");
         assert!(rect.w <= slot.w);
+    }
+
+    #[test]
+    fn image_icon_takes_the_glyph_place_and_keeps_the_width() {
+        let t = tokens();
+        let glyph = level_chip(Level { glyph: ICON_MIC, text: "", dim: false }, 28.0, 12.0, 1.0, &t, &FixedWidthMeasurer);
+        let image = Image::new(2, 2, vec![255; 16]).unwrap();
+        let with = with_image_icon(glyph.clone(), Some(&image));
+        assert_eq!(with.content_w, glyph.content_w, "mesma largura: o painel não anda");
+        let DrawOp::Text { rect: slot, .. } = &glyph.list.ops[0] else { panic!("glifo primeiro") };
+        let DrawOp::Image { rect, image: drawn, opacity, .. } = &with.list.ops[0] else { panic!("imagem no lugar do glifo") };
+        assert_eq!((drawn, *opacity), (&image, 1.0));
+        assert_eq!(rect.w, rect.h, "quadrado");
+        assert!((rect.center_x() - slot.center_x()).abs() < 0.01 && rect.w <= slot.w);
+        assert_eq!(with_image_icon(glyph.clone(), None).list.ops, glyph.list.ops, "sem imagem, o glifo fica");
     }
 
     #[test]

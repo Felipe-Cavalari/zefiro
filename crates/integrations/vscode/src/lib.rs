@@ -1,9 +1,44 @@
-//! Projetos recentes do VS Code, portável: lê `workspaceStorage\*\workspace.json` (um por pasta ou
-//! workspace aberto), decodifica as URIs e ordena do mais recente ao mais antigo.
+//! Projetos recentes do VS Code e do Cursor, portável: lê `workspaceStorage\*\workspace.json` (um por
+//! pasta ou workspace aberto), decodifica as URIs e ordena do mais recente ao mais antigo. O Cursor é
+//! um fork do VS Code com o mesmo formato; só mudam a pasta de dados e o executável (`Editor`).
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+
+/// Qual editor: o armazenamento, o executável e o nome mudam; a leitura e os argumentos são os mesmos.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Editor { #[default] Code, Cursor }
+
+impl Editor {
+    /// Nome na interface.
+    pub fn name(self) -> &'static str {
+        match self { Editor::Code => "VS Code", Editor::Cursor => "Cursor" }
+    }
+
+    /// `%APPDATA%\<pasta>\User\workspaceStorage`.
+    pub fn storage_dir(self, appdata: &Path) -> PathBuf {
+        let folder = match self { Editor::Code => "Code", Editor::Cursor => "Cursor" };
+        appdata.join(folder).join(r"User\workspaceStorage")
+    }
+
+    /// O `.cmd` da pasta `bin` que a instalação põe no PATH.
+    pub fn launcher(self) -> &'static str {
+        match self { Editor::Code => "code.cmd", Editor::Cursor => "cursor.cmd" }
+    }
+
+    pub fn exe(self) -> &'static str {
+        match self { Editor::Code => "Code.exe", Editor::Cursor => "Cursor.exe" }
+    }
+
+    /// Onde o instalador põe o executável: (variável de ambiente, caminho dentro dela), do usuário e do sistema.
+    pub fn install_candidates(self) -> &'static [(&'static str, &'static str)] {
+        match self {
+            Editor::Code => &[("LOCALAPPDATA", r"Programs\Microsoft VS Code\Code.exe"), ("ProgramFiles", r"Microsoft VS Code\Code.exe")],
+            Editor::Cursor => &[("LOCALAPPDATA", r"Programs\cursor\Cursor.exe"), ("ProgramFiles", r"Cursor\Cursor.exe")],
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind { Local, Wsl, Remote, Workspace }
@@ -221,6 +256,28 @@ mod tests {
         ]);
         let names: Vec<String> = read_recents(&dir, &|_: &Path| true, 2).into_iter().map(|r| r.name).collect();
         assert_eq!(names, vec!["tres", "dois"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn each_editor_has_its_own_storage_and_launcher() {
+        let appdata = Path::new(r"C:\Users\felip\AppData\Roaming");
+        assert_eq!(Editor::Code.storage_dir(appdata), PathBuf::from(r"C:\Users\felip\AppData\Roaming\Code\User\workspaceStorage"));
+        assert_eq!(Editor::Cursor.storage_dir(appdata), PathBuf::from(r"C:\Users\felip\AppData\Roaming\Cursor\User\workspaceStorage"));
+        assert_eq!((Editor::Code.name(), Editor::Cursor.name()), ("VS Code", "Cursor"));
+        assert_eq!((Editor::Code.launcher(), Editor::Code.exe()), ("code.cmd", "Code.exe"));
+        assert_eq!((Editor::Cursor.launcher(), Editor::Cursor.exe()), ("cursor.cmd", "Cursor.exe"));
+        assert!(Editor::Cursor.install_candidates().contains(&("LOCALAPPDATA", r"Programs\cursor\Cursor.exe")));
+        assert!(Editor::Code.install_candidates().contains(&("LOCALAPPDATA", r"Programs\Microsoft VS Code\Code.exe")));
+    }
+
+    #[test]
+    fn cursor_storage_reads_like_vscode() {
+        // O Cursor é um fork: o `workspace.json` e o `state.vscdb` são os mesmos, e o Cursor abre com os mesmos argumentos.
+        let dir = storage(&[("a", r#"{"folder": "file:///c%3A/Users/felip/Projects/zefiro"}"#), ("b", r#"{"folder": "vscode-remote://wsl%2Bubuntu-24.04/home/felip/Projects/kwordly"}"#)]);
+        let recents = read_recents(&dir, &|_: &Path| true, 20);
+        assert_eq!(recents.iter().map(|r| (r.name.as_str(), r.kind)).collect::<Vec<_>>(), vec![("kwordly", Kind::Wsl), ("zefiro", Kind::Local)]);
+        assert_eq!(open_args(&recents[1]), vec!["--folder-uri".to_string(), "file:///c%3A/Users/felip/Projects/zefiro".into()]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

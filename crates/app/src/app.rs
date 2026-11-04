@@ -29,6 +29,8 @@ pub struct AppCtx {
     pub usage: UsageState,
     /// Notificações e Não perturbe (chips).
     pub system: SystemState,
+    /// Ícone do `Cursor.exe` instalado, para o chip `cursor` (`None` = ainda lendo ou sem Cursor).
+    pub cursor_icon: Option<zefiro_platform::image::Image>,
     pub epoch: Instant,
 }
 
