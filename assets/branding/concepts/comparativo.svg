@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100">
+    <style>text{font-family:Segoe UI,Arial,sans-serif}.number{font-size:18px;fill:#7E8A90}.name{font-size:25px;font-weight:650;fill:#18242D}.label{font-size:12px;letter-spacing:1px;fill:#697780}.tag{font-size:19px;fill:#18242D}.detail{font-size:15px;fill:#697780}</style>
+    <rect width="1600" height="1100" fill="#EBEEEA"/>
+    <text x="48" y="58" font-size="14" letter-spacing="4" fill="#697780">ZEFIRO / EXPLORAÇÃO DE IDENTIDADE</text>
+    <text x="48" y="124" font-size="52" font-weight="650" fill="#18242D">Quatro formas de sentir o vento.</text>
+    <text x="50" y="161" font-size="20" fill="#697780">Leveza no desktop. Presença em cada pixel.</text>
+    <g transform="translate(48 196)">
+      <rect width="728" height="388" rx="24" fill="#FFFFFF"/>
+      <text x="28" y="44" class="number">01</text>
+      <text x="72" y="45" class="name">Z corrente</text>
+      <rect x="28" y="74" width="244" height="244" rx="44" fill="#087F85"/>
+      <g transform="translate(66 112) scale(2.625)"><g fill="#B8F0E4"><path d="M13 13H52C52 22 45 27 36 33L23 42H52L47 51H10C10 42 17 37 26 31L39 22H8Z"/></g></g>
+      <text x="308" y="98" class="label">MONOCROMÁTICO</text>
+      <rect x="308" y="116" width="150" height="100" rx="16" fill="#F0F2F3"/>
+      <rect x="474" y="116" width="150" height="100" rx="16" fill="#18242D"/>
+      <g transform="translate(351 134) scale(1)"><g fill="#18242D"><path d="M13 13H52C52 22 45 27 36 33L23 42H52L47 51H10C10 42 17 37 26 31L39 22H8Z"/></g></g><g transform="translate(517 134) scale(1)"><g fill="#FFFFFF"><path d="M13 13H52C52 22 45 27 36 33L23 42H52L47 51H10C10 42 17 37 26 31L39 22H8Z"/></g></g>
+      <text x="308" y="249" class="label">TAMANHO REAL · 16 / 20 / 24 / 32 PX</text>
+      <rect x="308" y="263" width="316" height="55" rx="12" fill="#18242D"/>
+      <g transform="translate(328 282) scale(0.25)"><g fill="#FFFFFF"><path d="M13 13H52C52 22 45 27 36 33L23 42H52L47 51H10C10 42 17 37 26 31L39 22H8Z"/></g></g><g transform="translate(400 280) scale(0.3125)"><g fill="#FFFFFF"><path d="M13 13H52C52 22 45 27 36 33L23 42H52L47 51H10C10 42 17 37 26 31L39 22H8Z"/></g></g><g transform="translate(472 278) scale(0.375)"><g fill="#FFFFFF"><path d="M13 13H52C52 22 45 27 36 33L23 42H52L47 51H10C10 42 17 37 26 31L39 22H8Z"/></g></g><g transform="translate(544 274) scale(0.5)"><g fill="#FFFFFF"><path d="M13 13H52C52 22 45 27 36 33L23 42H52L47 51H10C10 42 17 37 26 31L39 22H8Z"/></g></g>
+      <text x="28" y="351" class="tag">A inicial desenhada pelo vento.</text>
+      <text x="28" y="375" class="detail">Direto, ágil e reconhecível.</text>
+    </g><g transform="translate(808 196)">
+      <rect width="728" height="388" rx="24" fill="#FFFFFF"/>
+      <text x="28" y="44" class="number">02</text>
+      <text x="72" y="45" class="name">Asa do oeste</text>
+      <rect x="28" y="74" width="244" height="244" rx="44" fill="#4660C7"/>
+      <g transform="translate(66 112) scale(2.625)"><g fill="#CCD7FF"><path d="M8 41C18 18 33 10 57 12C48 18 40 23 29 26C22 28 15 34 8 41Z M10 46C23 32 37 28 52 28C44 36 35 40 24 41C18 42 14 44 10 46Z M13 52C24 45 34 44 43 44C36 52 26 55 13 52Z"/></g></g>
+      <text x="308" y="98" class="label">MONOCROMÁTICO</text>
+      <rect x="308" y="116" width="150" height="100" rx="16" fill="#F0F2F3"/>
+      <rect x="474" y="116" width="150" height="100" rx="16" fill="#18242D"/>
+      <g transform="translate(351 134) scale(1)"><g fill="#18242D"><path d="M8 41C18 18 33 10 57 12C48 18 40 23 29 26C22 28 15 34 8 41Z M10 46C23 32 37 28 52 28C44 36 35 40 24 41C18 42 14 44 10 46Z M13 52C24 45 34 44 43 44C36 52 26 55 13 52Z"/></g></g><g transform="translate(517 134) scale(1)"><g fill="#FFFFFF"><path d="M8 41C18 18 33 10 57 12C48 18 40 23 29 26C22 28 15 34 8 41Z M10 46C23 32 37 28 52 28C44 36 35 40 24 41C18 42 14 44 10 46Z M13 52C24 45 34 44 43 44C36 52 26 55 13 52Z"/></g></g>
+      <text x="308" y="249" class="label">TAMANHO REAL · 16 / 20 / 24 / 32 PX</text>
+      <rect x="308" y="263" width="316" height="55" rx="12" fill="#18242D"/>
+      <g transform="translate(328 282) scale(0.25)"><g fill="#FFFFFF"><path d="M8 41C18 18 33 10 57 12C48 18 40 23 29 26C22 28 15 34 8 41Z M10 46C23 32 37 28 52 28C44 36 35 40 24 41C18 42 14 44 10 46Z M13 52C24 45 34 44 43 44C36 52 26 55 13 52Z"/></g></g><g transform="translate(400 280) scale(0.3125)"><g fill="#FFFFFF"><path d="M8 41C18 18 33 10 57 12C48 18 40 23 29 26C22 28 15 34 8 41Z M10 46C23 32 37 28 52 28C44 36 35 40 24 41C18 42 14 44 10 46Z M13 52C24 45 34 44 43 44C36 52 26 55 13 52Z"/></g></g><g transform="translate(472 278) scale(0.375)"><g fill="#FFFFFF"><path d="M8 41C18 18 33 10 57 12C48 18 40 23 29 26C22 28 15 34 8 41Z M10 46C23 32 37 28 52 28C44 36 35 40 24 41C18 42 14 44 10 46Z M13 52C24 45 34 44 43 44C36 52 26 55 13 52Z"/></g></g><g transform="translate(544 274) scale(0.5)"><g fill="#FFFFFF"><path d="M8 41C18 18 33 10 57 12C48 18 40 23 29 26C22 28 15 34 8 41Z M10 46C23 32 37 28 52 28C44 36 35 40 24 41C18 42 14 44 10 46Z M13 52C24 45 34 44 43 44C36 52 26 55 13 52Z"/></g></g>
+      <text x="28" y="351" class="tag">Uma asa levada pela brisa.</text>
+      <text x="28" y="375" class="detail">Leveza, liberdade e movimento.</text>
+    </g><g transform="translate(48 616)">
+      <rect width="728" height="388" rx="24" fill="#FFFFFF"/>
+      <text x="28" y="44" class="number">03</text>
+      <text x="72" y="45" class="name">Sopro contínuo</text>
+      <rect x="28" y="74" width="244" height="244" rx="44" fill="#B45D2B"/>
+      <g transform="translate(66 112) scale(2.625)"><g fill="#FFD5AE"><path d="M9 25H38C45 25 49 21 49 16C49 11 45 8 41 8C37 8 34 10 33 13 M9 37H43C51 37 56 42 56 48C56 54 51 57 46 56 M9 49H27" fill="none" stroke="#FFD5AE" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></g></g>
+      <text x="308" y="98" class="label">MONOCROMÁTICO</text>
+      <rect x="308" y="116" width="150" height="100" rx="16" fill="#F0F2F3"/>
+      <rect x="474" y="116" width="150" height="100" rx="16" fill="#18242D"/>
+      <g transform="translate(351 134) scale(1)"><g fill="#18242D"><path d="M9 25H38C45 25 49 21 49 16C49 11 45 8 41 8C37 8 34 10 33 13 M9 37H43C51 37 56 42 56 48C56 54 51 57 46 56 M9 49H27" fill="none" stroke="#18242D" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></g></g><g transform="translate(517 134) scale(1)"><g fill="#FFFFFF"><path d="M9 25H38C45 25 49 21 49 16C49 11 45 8 41 8C37 8 34 10 33 13 M9 37H43C51 37 56 42 56 48C56 54 51 57 46 56 M9 49H27" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></g></g>
+      <text x="308" y="249" class="label">TAMANHO REAL · 16 / 20 / 24 / 32 PX</text>
+      <rect x="308" y="263" width="316" height="55" rx="12" fill="#18242D"/>
+      <g transform="translate(328 282) scale(0.25)"><g fill="#FFFFFF"><path d="M9 25H38C45 25 49 21 49 16C49 11 45 8 41 8C37 8 34 10 33 13 M9 37H43C51 37 56 42 56 48C56 54 51 57 46 56 M9 49H27" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></g></g><g transform="translate(400 280) scale(0.3125)"><g fill="#FFFFFF"><path d="M9 25H38C45 25 49 21 49 16C49 11 45 8 41 8C37 8 34 10 33 13 M9 37H43C51 37 56 42 56 48C56 54 51 57 46 56 M9 49H27" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></g></g><g transform="translate(472 278) scale(0.375)"><g fill="#FFFFFF"><path d="M9 25H38C45 25 49 21 49 16C49 11 45 8 41 8C37 8 34 10 33 13 M9 37H43C51 37 56 42 56 48C56 54 51 57 46 56 M9 49H27" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></g></g><g transform="translate(544 274) scale(0.5)"><g fill="#FFFFFF"><path d="M9 25H38C45 25 49 21 49 16C49 11 45 8 41 8C37 8 34 10 33 13 M9 37H43C51 37 56 42 56 48C56 54 51 57 46 56 M9 49H27" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></g></g>
+      <text x="28" y="351" class="tag">O vento como um gesto único.</text>
+      <text x="28" y="375" class="detail">Fluidez e energia em circulação.</text>
+    </g><g transform="translate(808 616)">
+      <rect width="728" height="388" rx="24" fill="#FFFFFF"/>
+      <text x="28" y="44" class="number">04</text>
+      <text x="72" y="45" class="name">Elmo alado</text>
+      <rect x="28" y="74" width="244" height="244" rx="44" fill="#7355AA"/>
+      <g transform="translate(66 112) scale(2.625)"><g fill="#E5D0FF"><path d="M9 12C22 12 31 17 35 26C22 25 13 21 9 12Z M8 25C18 25 26 28 31 34C20 35 12 32 8 25Z M38 14C48 14 55 21 55 31V39L49 43V53H37V42H29V31C29 23 32 17 38 14Z"/></g></g>
+      <text x="308" y="98" class="label">MONOCROMÁTICO</text>
+      <rect x="308" y="116" width="150" height="100" rx="16" fill="#F0F2F3"/>
+      <rect x="474" y="116" width="150" height="100" rx="16" fill="#18242D"/>
+      <g transform="translate(351 134) scale(1)"><g fill="#18242D"><path d="M9 12C22 12 31 17 35 26C22 25 13 21 9 12Z M8 25C18 25 26 28 31 34C20 35 12 32 8 25Z M38 14C48 14 55 21 55 31V39L49 43V53H37V42H29V31C29 23 32 17 38 14Z"/></g></g><g transform="translate(517 134) scale(1)"><g fill="#FFFFFF"><path d="M9 12C22 12 31 17 35 26C22 25 13 21 9 12Z M8 25C18 25 26 28 31 34C20 35 12 32 8 25Z M38 14C48 14 55 21 55 31V39L49 43V53H37V42H29V31C29 23 32 17 38 14Z"/></g></g>
+      <text x="308" y="249" class="label">TAMANHO REAL · 16 / 20 / 24 / 32 PX</text>
+      <rect x="308" y="263" width="316" height="55" rx="12" fill="#18242D"/>
+      <g transform="translate(328 282) scale(0.25)"><g fill="#FFFFFF"><path d="M9 12C22 12 31 17 35 26C22 25 13 21 9 12Z M8 25C18 25 26 28 31 34C20 35 12 32 8 25Z M38 14C48 14 55 21 55 31V39L49 43V53H37V42H29V31C29 23 32 17 38 14Z"/></g></g><g transform="translate(400 280) scale(0.3125)"><g fill="#FFFFFF"><path d="M9 12C22 12 31 17 35 26C22 25 13 21 9 12Z M8 25C18 25 26 28 31 34C20 35 12 32 8 25Z M38 14C48 14 55 21 55 31V39L49 43V53H37V42H29V31C29 23 32 17 38 14Z"/></g></g><g transform="translate(472 278) scale(0.375)"><g fill="#FFFFFF"><path d="M9 12C22 12 31 17 35 26C22 25 13 21 9 12Z M8 25C18 25 26 28 31 34C20 35 12 32 8 25Z M38 14C48 14 55 21 55 31V39L49 43V53H37V42H29V31C29 23 32 17 38 14Z"/></g></g><g transform="translate(544 274) scale(0.5)"><g fill="#FFFFFF"><path d="M9 12C22 12 31 17 35 26C22 25 13 21 9 12Z M8 25C18 25 26 28 31 34C20 35 12 32 8 25Z M38 14C48 14 55 21 55 31V39L49 43V53H37V42H29V31C29 23 32 17 38 14Z"/></g></g>
+      <text x="28" y="351" class="tag">Uma presença mitológica.</text>
+      <text x="28" y="375" class="detail">Zéfiro como guardião do desktop.</text>
+    </g>
+    <text x="48" y="1063" font-size="14" fill="#697780">SVG vetorial · Fundo transparente · Variações para temas claro e escuro · ICO com 9 resoluções</text>
+  </svg>

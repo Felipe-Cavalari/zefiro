@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="960" viewBox="0 0 1440 960">
+    <style>text{font-family:Segoe UI,Arial,sans-serif}</style>
+    <rect width="1440" height="960" fill="#F0F2EE"/>
+    <text x="64" y="63" font-size="13" letter-spacing="4" fill="#697780">ZEFIRO / REFINAMENTO</text>
+    <text x="64" y="128" font-size="44" font-weight="600" fill="#18242D">Uma letra. Um movimento.</text>
+    <rect x="64" y="180" width="760" height="650" rx="28" fill="#FFFFFF"/>
+    <g transform="translate(224 224) scale(6.875)"><g fill="#087F85"><path d="M8 20C20 11 39 8 56 12C53 20 45 27 35 34L23 43C35 41 46 42 56 46C43 54 24 56 8 52C11 43 19 36 29 29L41 21C29 25 17 25 8 20Z"/></g></g>
+    <text x="444" y="742" text-anchor="middle" font-size="48" letter-spacing="3" font-weight="500" fill="#18242D">zefiro</text>
+    <text x="444" y="785" text-anchor="middle" font-size="16" fill="#697780">O Z e a asa na mesma silhueta.</text>
+    <rect x="856" y="180" width="520" height="300" rx="28" fill="#18242D"/>
+    <g transform="translate(1020 210) scale(3)"><g fill="#FFFFFF"><path d="M8 20C20 11 39 8 56 12C53 20 45 27 35 34L23 43C35 41 46 42 56 46C43 54 24 56 8 52C11 43 19 36 29 29L41 21C29 25 17 25 8 20Z"/></g></g>
+    <text x="1116" y="446" text-anchor="middle" font-size="14" letter-spacing="2" fill="#B6C2C7">MONOCROMÁTICO</text>
+    <rect x="856" y="504" width="520" height="326" rx="28" fill="#FFFFFF"/>
+    <text x="892" y="551" font-size="14" letter-spacing="2" fill="#697780">SYSTEM TRAY · TAMANHO REAL</text>
+    <rect x="892" y="581" width="448" height="80" rx="14" fill="#18242D"/>
+    <g transform="translate(930 613) scale(0.25)"><g fill="#FFFFFF"><path d="M8 20C20 11 39 8 56 12C53 20 45 27 35 34L23 43C35 41 46 42 56 46C43 54 24 56 8 52C11 43 19 36 29 29L41 21C29 25 17 25 8 20Z"/></g></g><g transform="translate(1034 611) scale(0.3125)"><g fill="#FFFFFF"><path d="M8 20C20 11 39 8 56 12C53 20 45 27 35 34L23 43C35 41 46 42 56 46C43 54 24 56 8 52C11 43 19 36 29 29L41 21C29 25 17 25 8 20Z"/></g></g><g transform="translate(1138 609) scale(0.375)"><g fill="#FFFFFF"><path d="M8 20C20 11 39 8 56 12C53 20 45 27 35 34L23 43C35 41 46 42 56 46C43 54 24 56 8 52C11 43 19 36 29 29L41 21C29 25 17 25 8 20Z"/></g></g><g transform="translate(1242 605) scale(0.5)"><g fill="#FFFFFF"><path d="M8 20C20 11 39 8 56 12C53 20 45 27 35 34L23 43C35 41 46 42 56 46C43 54 24 56 8 52C11 43 19 36 29 29L41 21C29 25 17 25 8 20Z"/></g></g>
+    <text x="946" y="698" text-anchor="middle" font-size="13" fill="#697780">16 px</text><text x="1050" y="698" text-anchor="middle" font-size="13" fill="#697780">20 px</text><text x="1154" y="698" text-anchor="middle" font-size="13" fill="#697780">24 px</text><text x="1258" y="698" text-anchor="middle" font-size="13" fill="#697780">32 px</text>
+    <text x="892" y="756" font-size="17" fill="#18242D">Curvas amplas. Sem penas anexadas.</text>
+    <text x="892" y="787" font-size="17" fill="#697780">A asa aparece no gesto da letra.</text>
+    <text x="64" y="900" font-size="15" fill="#697780">SVG transparente · Versões clara e escura · ICO de 16 a 256 px</text>
+  </svg>

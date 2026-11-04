@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100">
+    <style>text{font-family:Segoe UI,Arial,sans-serif}.number{font-size:18px;fill:#7E8A90}.name{font-size:25px;font-weight:650;fill:#18242D}.label{font-size:12px;letter-spacing:1px;fill:#697780}.tag{font-size:19px;fill:#18242D}.detail{font-size:15px;fill:#697780}</style>
+    <rect width="1600" height="1100" fill="#EBEEEA"/>
+    <text x="48" y="58" font-size="14" letter-spacing="4" fill="#697780">ZEFIRO / EVOLUÇÃO DO SÍMBOLO</text>
+    <text x="48" y="124" font-size="52" font-weight="650" fill="#18242D">O Z ganha asas.</text>
+    <text x="50" y="161" font-size="20" fill="#697780">Quatro variações da mesma ideia: inicial + vento + asa.</text>
+    <g transform="translate(48 196)">
+      <rect width="728" height="388" rx="24" fill="#FFFFFF"/>
+      <text x="28" y="44" class="number">01</text>
+      <text x="72" y="45" class="name">Z pluma</text>
+      <rect x="28" y="74" width="244" height="244" rx="44" fill="#087F85"/>
+      <g transform="translate(66 112) scale(2.625)"><g fill="#B8F0E4"><path d="M9 22C20 12 37 10 57 11L45 21L56 18L47 27H40L23 44H53L46 53H9V45L33 23H9Z"/></g></g>
+      <text x="308" y="98" class="label">MONOCROMÁTICO</text>
+      <rect x="308" y="116" width="150" height="100" rx="16" fill="#F0F2F3"/>
+      <rect x="474" y="116" width="150" height="100" rx="16" fill="#18242D"/>
+      <g transform="translate(351 134) scale(1)"><g fill="#18242D"><path d="M9 22C20 12 37 10 57 11L45 21L56 18L47 27H40L23 44H53L46 53H9V45L33 23H9Z"/></g></g><g transform="translate(517 134) scale(1)"><g fill="#FFFFFF"><path d="M9 22C20 12 37 10 57 11L45 21L56 18L47 27H40L23 44H53L46 53H9V45L33 23H9Z"/></g></g>
+      <text x="308" y="249" class="label">TAMANHO REAL · 16 / 20 / 24 / 32 PX</text>
+      <rect x="308" y="263" width="316" height="55" rx="12" fill="#18242D"/>
+      <g transform="translate(328 282) scale(0.25)"><g fill="#FFFFFF"><path d="M9 22C20 12 37 10 57 11L45 21L56 18L47 27H40L23 44H53L46 53H9V45L33 23H9Z"/></g></g><g transform="translate(400 280) scale(0.3125)"><g fill="#FFFFFF"><path d="M9 22C20 12 37 10 57 11L45 21L56 18L47 27H40L23 44H53L46 53H9V45L33 23H9Z"/></g></g><g transform="translate(472 278) scale(0.375)"><g fill="#FFFFFF"><path d="M9 22C20 12 37 10 57 11L45 21L56 18L47 27H40L23 44H53L46 53H9V45L33 23H9Z"/></g></g><g transform="translate(544 274) scale(0.5)"><g fill="#FFFFFF"><path d="M9 22C20 12 37 10 57 11L45 21L56 18L47 27H40L23 44H53L46 53H9V45L33 23H9Z"/></g></g>
+      <text x="28" y="351" class="tag">A asa nasce do próprio Z.</text>
+      <text x="28" y="375" class="detail">Uma silhueta contínua, com duas penas no topo.</text>
+    </g><g transform="translate(808 196)">
+      <rect width="728" height="388" rx="24" fill="#FFFFFF"/>
+      <text x="28" y="44" class="number">02</text>
+      <text x="72" y="45" class="name">Z com asa</text>
+      <rect x="28" y="74" width="244" height="244" rx="44" fill="#087F85"/>
+      <g transform="translate(66 112) scale(2.625)"><g fill="#B8F0E4"><path d="M5 9C19 9 30 14 35 23C21 23 11 18 5 9Z M5 23C15 23 24 26 29 32C17 33 9 29 5 23Z M26 20H57V28L36 45H56L52 54H23V46L44 29H26Z"/></g></g>
+      <text x="308" y="98" class="label">MONOCROMÁTICO</text>
+      <rect x="308" y="116" width="150" height="100" rx="16" fill="#F0F2F3"/>
+      <rect x="474" y="116" width="150" height="100" rx="16" fill="#18242D"/>
+      <g transform="translate(351 134) scale(1)"><g fill="#18242D"><path d="M5 9C19 9 30 14 35 23C21 23 11 18 5 9Z M5 23C15 23 24 26 29 32C17 33 9 29 5 23Z M26 20H57V28L36 45H56L52 54H23V46L44 29H26Z"/></g></g><g transform="translate(517 134) scale(1)"><g fill="#FFFFFF"><path d="M5 9C19 9 30 14 35 23C21 23 11 18 5 9Z M5 23C15 23 24 26 29 32C17 33 9 29 5 23Z M26 20H57V28L36 45H56L52 54H23V46L44 29H26Z"/></g></g>
+      <text x="308" y="249" class="label">TAMANHO REAL · 16 / 20 / 24 / 32 PX</text>
+      <rect x="308" y="263" width="316" height="55" rx="12" fill="#18242D"/>
+      <g transform="translate(328 282) scale(0.25)"><g fill="#FFFFFF"><path d="M5 9C19 9 30 14 35 23C21 23 11 18 5 9Z M5 23C15 23 24 26 29 32C17 33 9 29 5 23Z M26 20H57V28L36 45H56L52 54H23V46L44 29H26Z"/></g></g><g transform="translate(400 280) scale(0.3125)"><g fill="#FFFFFF"><path d="M5 9C19 9 30 14 35 23C21 23 11 18 5 9Z M5 23C15 23 24 26 29 32C17 33 9 29 5 23Z M26 20H57V28L36 45H56L52 54H23V46L44 29H26Z"/></g></g><g transform="translate(472 278) scale(0.375)"><g fill="#FFFFFF"><path d="M5 9C19 9 30 14 35 23C21 23 11 18 5 9Z M5 23C15 23 24 26 29 32C17 33 9 29 5 23Z M26 20H57V28L36 45H56L52 54H23V46L44 29H26Z"/></g></g><g transform="translate(544 274) scale(0.5)"><g fill="#FFFFFF"><path d="M5 9C19 9 30 14 35 23C21 23 11 18 5 9Z M5 23C15 23 24 26 29 32C17 33 9 29 5 23Z M26 20H57V28L36 45H56L52 54H23V46L44 29H26Z"/></g></g>
+      <text x="28" y="351" class="tag">O monograma encontra a asa do oeste.</text>
+      <text x="28" y="375" class="detail">O Z fica explícito; as penas dão movimento.</text>
+    </g><g transform="translate(48 616)">
+      <rect width="728" height="388" rx="24" fill="#FFFFFF"/>
+      <text x="28" y="44" class="number">03</text>
+      <text x="72" y="45" class="name">Z em voo</text>
+      <rect x="28" y="74" width="244" height="244" rx="44" fill="#087F85"/>
+      <g transform="translate(66 112) scale(2.625)"><g fill="#B8F0E4"><path d="M6 22C20 12 39 10 58 12C55 21 46 27 37 33L23 43C35 41 47 42 57 45C44 54 25 56 7 52C10 43 18 37 28 30L40 22C28 25 16 25 6 22Z M9 13C20 6 33 5 46 7C34 14 22 16 9 13Z"/></g></g>
+      <text x="308" y="98" class="label">MONOCROMÁTICO</text>
+      <rect x="308" y="116" width="150" height="100" rx="16" fill="#F0F2F3"/>
+      <rect x="474" y="116" width="150" height="100" rx="16" fill="#18242D"/>
+      <g transform="translate(351 134) scale(1)"><g fill="#18242D"><path d="M6 22C20 12 39 10 58 12C55 21 46 27 37 33L23 43C35 41 47 42 57 45C44 54 25 56 7 52C10 43 18 37 28 30L40 22C28 25 16 25 6 22Z M9 13C20 6 33 5 46 7C34 14 22 16 9 13Z"/></g></g><g transform="translate(517 134) scale(1)"><g fill="#FFFFFF"><path d="M6 22C20 12 39 10 58 12C55 21 46 27 37 33L23 43C35 41 47 42 57 45C44 54 25 56 7 52C10 43 18 37 28 30L40 22C28 25 16 25 6 22Z M9 13C20 6 33 5 46 7C34 14 22 16 9 13Z"/></g></g>
+      <text x="308" y="249" class="label">TAMANHO REAL · 16 / 20 / 24 / 32 PX</text>
+      <rect x="308" y="263" width="316" height="55" rx="12" fill="#18242D"/>
+      <g transform="translate(328 282) scale(0.25)"><g fill="#FFFFFF"><path d="M6 22C20 12 39 10 58 12C55 21 46 27 37 33L23 43C35 41 47 42 57 45C44 54 25 56 7 52C10 43 18 37 28 30L40 22C28 25 16 25 6 22Z M9 13C20 6 33 5 46 7C34 14 22 16 9 13Z"/></g></g><g transform="translate(400 280) scale(0.3125)"><g fill="#FFFFFF"><path d="M6 22C20 12 39 10 58 12C55 21 46 27 37 33L23 43C35 41 47 42 57 45C44 54 25 56 7 52C10 43 18 37 28 30L40 22C28 25 16 25 6 22Z M9 13C20 6 33 5 46 7C34 14 22 16 9 13Z"/></g></g><g transform="translate(472 278) scale(0.375)"><g fill="#FFFFFF"><path d="M6 22C20 12 39 10 58 12C55 21 46 27 37 33L23 43C35 41 47 42 57 45C44 54 25 56 7 52C10 43 18 37 28 30L40 22C28 25 16 25 6 22Z M9 13C20 6 33 5 46 7C34 14 22 16 9 13Z"/></g></g><g transform="translate(544 274) scale(0.5)"><g fill="#FFFFFF"><path d="M6 22C20 12 39 10 58 12C55 21 46 27 37 33L23 43C35 41 47 42 57 45C44 54 25 56 7 52C10 43 18 37 28 30L40 22C28 25 16 25 6 22Z M9 13C20 6 33 5 46 7C34 14 22 16 9 13Z"/></g></g>
+      <text x="28" y="351" class="tag">Penas alongadas desenham a letra.</text>
+      <text x="28" y="375" class="detail">Mais fluido, com pontas que sugerem velocidade.</text>
+    </g><g transform="translate(808 616)">
+      <rect width="728" height="388" rx="24" fill="#FFFFFF"/>
+      <text x="28" y="44" class="number">04</text>
+      <text x="72" y="45" class="name">Z de duas asas</text>
+      <rect x="28" y="74" width="244" height="244" rx="44" fill="#087F85"/>
+      <g transform="translate(66 112) scale(2.625)"><g fill="#B8F0E4"><path d="M3 13C12 13 18 16 23 22L22 29C12 27 6 21 3 13Z M3 27C11 28 17 30 21 34L18 40C10 38 5 33 3 27Z M61 13C52 13 46 16 41 22L42 29C52 27 58 21 61 13Z M61 27C53 28 47 30 43 34L46 40C54 38 59 33 61 27Z M22 20H42V28L29 44H42L39 52H20V44L33 28H22Z"/></g></g>
+      <text x="308" y="98" class="label">MONOCROMÁTICO</text>
+      <rect x="308" y="116" width="150" height="100" rx="16" fill="#F0F2F3"/>
+      <rect x="474" y="116" width="150" height="100" rx="16" fill="#18242D"/>
+      <g transform="translate(351 134) scale(1)"><g fill="#18242D"><path d="M3 13C12 13 18 16 23 22L22 29C12 27 6 21 3 13Z M3 27C11 28 17 30 21 34L18 40C10 38 5 33 3 27Z M61 13C52 13 46 16 41 22L42 29C52 27 58 21 61 13Z M61 27C53 28 47 30 43 34L46 40C54 38 59 33 61 27Z M22 20H42V28L29 44H42L39 52H20V44L33 28H22Z"/></g></g><g transform="translate(517 134) scale(1)"><g fill="#FFFFFF"><path d="M3 13C12 13 18 16 23 22L22 29C12 27 6 21 3 13Z M3 27C11 28 17 30 21 34L18 40C10 38 5 33 3 27Z M61 13C52 13 46 16 41 22L42 29C52 27 58 21 61 13Z M61 27C53 28 47 30 43 34L46 40C54 38 59 33 61 27Z M22 20H42V28L29 44H42L39 52H20V44L33 28H22Z"/></g></g>
+      <text x="308" y="249" class="label">TAMANHO REAL · 16 / 20 / 24 / 32 PX</text>
+      <rect x="308" y="263" width="316" height="55" rx="12" fill="#18242D"/>
+      <g transform="translate(328 282) scale(0.25)"><g fill="#FFFFFF"><path d="M3 13C12 13 18 16 23 22L22 29C12 27 6 21 3 13Z M3 27C11 28 17 30 21 34L18 40C10 38 5 33 3 27Z M61 13C52 13 46 16 41 22L42 29C52 27 58 21 61 13Z M61 27C53 28 47 30 43 34L46 40C54 38 59 33 61 27Z M22 20H42V28L29 44H42L39 52H20V44L33 28H22Z"/></g></g><g transform="translate(400 280) scale(0.3125)"><g fill="#FFFFFF"><path d="M3 13C12 13 18 16 23 22L22 29C12 27 6 21 3 13Z M3 27C11 28 17 30 21 34L18 40C10 38 5 33 3 27Z M61 13C52 13 46 16 41 22L42 29C52 27 58 21 61 13Z M61 27C53 28 47 30 43 34L46 40C54 38 59 33 61 27Z M22 20H42V28L29 44H42L39 52H20V44L33 28H22Z"/></g></g><g transform="translate(472 278) scale(0.375)"><g fill="#FFFFFF"><path d="M3 13C12 13 18 16 23 22L22 29C12 27 6 21 3 13Z M3 27C11 28 17 30 21 34L18 40C10 38 5 33 3 27Z M61 13C52 13 46 16 41 22L42 29C52 27 58 21 61 13Z M61 27C53 28 47 30 43 34L46 40C54 38 59 33 61 27Z M22 20H42V28L29 44H42L39 52H20V44L33 28H22Z"/></g></g><g transform="translate(544 274) scale(0.5)"><g fill="#FFFFFF"><path d="M3 13C12 13 18 16 23 22L22 29C12 27 6 21 3 13Z M3 27C11 28 17 30 21 34L18 40C10 38 5 33 3 27Z M61 13C52 13 46 16 41 22L42 29C52 27 58 21 61 13Z M61 27C53 28 47 30 43 34L46 40C54 38 59 33 61 27Z M22 20H42V28L29 44H42L39 52H20V44L33 28H22Z"/></g></g>
+      <text x="28" y="351" class="tag">Um emblema alado de Zéfiro.</text>
+      <text x="28" y="375" class="detail">Mais simétrico e próximo de um brasão.</text>
+    </g>
+    <text x="48" y="1063" font-size="14" fill="#697780">SVG vetorial · Fundo transparente · Variações para temas claro e escuro · ICO com 9 resoluções</text>
+  </svg>
