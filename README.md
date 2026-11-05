@@ -95,7 +95,21 @@ Os chips de uso juntam as contas do Windows e das distros do WSL que estão roda
 >
 > Rodar o Grok Build por script ou pelo ACP é um uso documentado pela xAI, mas os termos não dizem nada explícito sobre outro app usar o Grok Build como chat com a assinatura. É uma zona cinzenta, e as regras dos planos da xAI mudaram duas vezes em 2026. O risco fica com a sua conta: no pior caso, a xAI pode limitar ou suspender o acesso. Se não quiser correr esse risco, deixe os chips `grok` e `ia` fora da barra e o chat no Claude ou no Codex.
 
-Tudo que o Zefiro lê fica no seu PC: **não há telemetria**. As conversas do chat ficam só em `%LOCALAPPDATA%\zefiro\chat` e nunca vão para o log. O token do Spotify fica cifrado pelo DPAPI do Windows.
+## Privacidade
+
+**Não há telemetria**, nem conta, nem analytics. O Zefiro só fala com a internet nestes casos, todos ligados a um recurso que você pode deixar de fora da barra:
+
+| Para quê | Servidor | O que é enviado | Como desligar |
+| --- | --- | --- | --- |
+| Procurar versão nova (1 vez por dia) | `api.github.com` | Um pedido anônimo da última release, sem identificador seu | `[update] check = false` no `config.toml` |
+| Clima da ilha e do chip `weather` | `wttr.in` | A cidade da configuração ou, se vazia, o servidor deduz a cidade pelo seu IP | Tire os chips `island` e `weather` da barra, ou `[island] enabled = false` |
+| Letras na aba da ilha | `lrclib.net` | Título, artista e duração da faixa tocando | Tire o chip `island` (e o `player`) da barra |
+| Chip `spotify` | `accounts.spotify.com`, `api.spotify.com`, `i.scdn.co` | O login (PKCE) e os pedidos do Spotify com o Client ID **do seu app**; nada é enviado a outros | Tire o chip `spotify` da barra |
+| Chip `chat` e chips de uso de IA | nenhum direto | Quem fala com Anthropic, OpenAI ou xAI é o Claude Code, o Codex ou o Grok Build **que você instalou** (veja os avisos acima) | Tire os chips `chat`, `claude`, `codex`, `grok` e `ia` da barra |
+
+As conversas do chat ficam só em `%LOCALAPPDATA%\zefiro\chat` e nunca vão para o log. O token do Spotify fica cifrado pelo DPAPI do Windows, em `%LOCALAPPDATA%\zefiro\spotify`. O Zefiro nunca lê o `.credentials.json` do Claude nem o `auth.json` do Grok. O **Exportar diagnóstico** só grava um `.zip` em Downloads; quem envia é você.
+
+A única mudança de configuração do sistema que o instalador faz é "Iniciar com o Windows" (uma entrada em `HKCU\...\Run`), que é uma opção desmarcável do instalador e também fica em Configurações. O desinstalador remove essa entrada.
 
 ## Reportar um problema
 
@@ -140,6 +154,17 @@ O Zefiro nasceu de ideias, experiências de uso e trabalho compartilhado pela co
 Nosso agradecimento também a todos que mantêm as bibliotecas Rust e as ferramentas utilizadas na construção do Zefiro. As dependências e suas versões estão registradas nos arquivos `Cargo.toml` do workspace e no [`Cargo.lock`](Cargo.lock).
 
 Os avisos de licença e a identificação do código portado estão em [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). Cada projeto mantém sua própria licença e autoria.
+
+## Política de assinatura de código
+
+> **Status:** o Zefiro pediu assinatura gratuita à SignPath Foundation e **ainda não foi aceito**. Enquanto isso, os instaladores **não são assinados** (veja o aviso do SmartScreen em [Instalar](#instalar)). Quando a assinatura estiver ativa, valerá o que está abaixo.
+
+Assinatura de código gratuita fornecida pela [SignPath.io](https://signpath.io), com certificado da [SignPath Foundation](https://signpath.org).
+
+- **O que é assinado:** o `zefiro.exe` e o instalador `Zefiro-<versão>-setup.exe`, e só binários compilados a partir deste repositório pelo workflow [`release.yml`](.github/workflows/release.yml), no GitHub Actions. Nenhum binário é assinado fora desse fluxo.
+- **Aprovação:** cada assinatura é aprovada manualmente, por uma pessoa, depois de conferir a tag e o resultado dos testes.
+- **Equipe e papéis:** o projeto é mantido por uma pessoa, [Felipe Cavalari](https://github.com/Felipe-Cavalari), que é a *autora* (quem tem permissão de commit), a *revisora* (quem revisa as mudanças de quem não tem commit) e a *aprovadora* de cada assinatura. A conta usa autenticação em dois fatores no GitHub e na SignPath.
+- **Privacidade:** veja a seção [Privacidade](#privacidade) acima.
 
 ## Licença
 

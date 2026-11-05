@@ -20,6 +20,11 @@ AppPublisher=Felipe Cavalari
 AppPublisherURL=https://github.com/Felipe-Cavalari/zefiro
 AppSupportURL=https://github.com/Felipe-Cavalari/zefiro/issues
 VersionInfoVersion={#AppVersion}
+; Metadados fixos em todo build: a assinatura da SignPath confere nome e versão do produto.
+VersionInfoProductName=Zefiro
+VersionInfoProductVersion={#AppVersion}
+VersionInfoCompany=Felipe Cavalari
+VersionInfoDescription=Instalador do Zefiro
 PrivilegesRequired=lowest
 DefaultDirName={autopf}\Zefiro
 DisableProgramGroupPage=yes
