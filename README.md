@@ -8,6 +8,23 @@ Uma barra para Windows 11 feita para quem programa: **nativa (Rust, sem WebView)
 
 > **Status: beta.** Uso diário do autor desde outubro de 2026, com 14 dias seguidos sem nenhum crash (contados de 22/10 a 4/11). Ainda é um projeto pessoal em evolução: espere arestas, e use o botão de diagnóstico (veja abaixo) para me contar o que quebrou.
 
+## Em ação
+
+<p align="center">
+  <img src="docs/media/ilha.gif" alt="A ilha de mídia do Zefiro mostrando a faixa em reprodução e expandindo num painel com controles e progresso" width="520" />
+</p>
+<p align="center"><sub>A ilha de mídia: título ao passar o mouse e painel com controles e progresso.</sub></p>
+
+<p align="center">
+  <img src="docs/media/formatos.gif" alt="O menu do Z alternando a barra entre os formatos faixa, pílulas, ilhas, Fluent e Vidro" width="720" />
+</p>
+<p align="center"><sub>Os cinco formatos da barra, trocados ao vivo pelo menu do Z.</sub></p>
+
+<p align="center">
+  <img src="docs/media/edicao.gif" alt="O modo Editar barra, arrastando chips entre as seções início, centro e fim" width="520" />
+</p>
+<p align="center"><sub>Modo de edição: arraste os chips entre início, centro e fim.</sub></p>
+
 ## O que ele faz
 
 - **Barra por monitor** que reserva espaço na tela (AppBar), em cinco formatos: faixa, pílulas, ilhas, Fluent e Vidro. Nove temas embutidos, acrílico opcional e temas seus em TOML.
